@@ -1,0 +1,71 @@
+{
+  "source_repository": "https://github.com/liser0019/kv_plan_single_op_test",
+  "source_branch": "main",
+  "source_commit": "f51dc079a21c6e9f708e722d245abbccbb73509e",
+  "files": [
+    {
+      "source_path": "csrc/ops/sparse_kv_plan/op_kernel/sparse_kv_plan_kernel.cpp",
+      "local_path": "csrc/simt/sparse_kv_plan_kernel.cpp",
+      "source_sha256": "44aaa1be11cb6b06c573ed23811306c74c02be338db6318bd4b8567006dace13",
+      "local_sha256": "44aaa1be11cb6b06c573ed23811306c74c02be338db6318bd4b8567006dace13",
+      "change": "逐字复制"
+    },
+    {
+      "source_path": "csrc/ops/sparse_kv_plan/op_kernel/sparse_kv_plan_launch.h",
+      "local_path": "csrc/simt/sparse_kv_plan_launch.h",
+      "source_sha256": "1b2bc56c4a0035b0eb545aefac667a74b9d56d097046cd6b3be744ba4f031efa",
+      "local_sha256": "1b2bc56c4a0035b0eb545aefac667a74b9d56d097046cd6b3be744ba4f031efa",
+      "change": "逐字复制"
+    },
+    {
+      "source_path": "csrc/ops/sparse_kv_plan/op_kernel/sparse_kv_plan_config.h",
+      "local_path": "csrc/simt/sparse_kv_plan_config.h",
+      "source_sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "local_sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "change": "逐字复制"
+    },
+    {
+      "source_path": "csrc/ops/sparse_kv_plan/op_plugin/sparse_kv_plan_plugin.cpp",
+      "local_path": "csrc/simt/sparse_kv_plan_plugin.cpp",
+      "source_sha256": "32d03db95b73f2ced6126e2bb214669339bee7bf8762053a084c17237332d4f7",
+      "local_sha256": "4da3cb003530637eaaa064bd94bd0dde44c28c253ec0db705420b07b88c3b236",
+      "change": "仅把 launch 头文件的相对 include 改为同目录路径"
+    },
+    {
+      "source_path": "csrc/ops/echo_lru/op_kernel/echo_lru_kernel.h",
+      "local_path": "csrc/echo/echo_lru_kernel.h",
+      "source_sha256": "1db3b854764fd8ab21f33ac097d61e1280bf0e1bc16662cf8ad45ff842ecbd2a",
+      "local_sha256": "1db3b854764fd8ab21f33ac097d61e1280bf0e1bc16662cf8ad45ff842ecbd2a",
+      "change": "逐字复制"
+    },
+    {
+      "source_path": "csrc/ops/echo_lru/op_kernel/echo_lru_launch.cpp",
+      "local_path": "csrc/echo/echo_lru_launch.cpp",
+      "source_sha256": "d756bef4275a821dc8d698a720dec334e292129f955f94ad22d0f27d41735f12",
+      "local_sha256": "d756bef4275a821dc8d698a720dec334e292129f955f94ad22d0f27d41735f12",
+      "change": "逐字复制"
+    },
+    {
+      "source_path": "csrc/ops/echo_lru/op_kernel/echo_lru_launch.h",
+      "local_path": "csrc/echo/echo_lru_launch.h",
+      "source_sha256": "4179d23c0ecf7802880b717e7d791ca81e2bc22e50ec997152f2817a7da246a6",
+      "local_sha256": "4179d23c0ecf7802880b717e7d791ca81e2bc22e50ec997152f2817a7da246a6",
+      "change": "逐字复制"
+    },
+    {
+      "source_path": "csrc/ops/echo_lru/op_kernel/echo_lru_tiling.h",
+      "local_path": "csrc/echo/echo_lru_tiling.h",
+      "source_sha256": "8d0779d162f35bd5b8a521754f4546ad4a18b0124b9ef57b72c0cbc50345957e",
+      "local_sha256": "8d0779d162f35bd5b8a521754f4546ad4a18b0124b9ef57b72c0cbc50345957e",
+      "change": "逐字复制"
+    },
+    {
+      "source_path": "csrc/ops/echo_lru/op_plugin/echo_lru_plugin.cpp",
+      "local_path": "csrc/echo/echo_lru_plugin.cpp",
+      "source_sha256": "4532e0d311610d98056bccd6b0835e3f68eab1761cc14bcc9ce8995607f198e2",
+      "local_sha256": "6d9b67f9ce88b8c476c59b403905935fdf9785c55df374106f39b740a17cf5ba",
+      "change": "仅把 launch 头文件的相对 include 改为同目录路径"
+    }
+  ],
+  "note": "kernel、launch、tiling/config 逐字复制；plugin 仅调整一个 include 路径。没有使用 feat/echo-skip-zero-sort。"
+}
