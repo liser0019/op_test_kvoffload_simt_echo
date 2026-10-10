@@ -1,10 +1,20 @@
-# SIMT 与原版 Echo：可阅读的双路性能测试
+# SIMT 与作者新版 Echo：可阅读的双路性能测试
 
-这是一个可独立构建的双算子性能测试工程，**包含 SIMT 与原版 Echo 的 C++/AscendC 源码**。`compare.py` 把输入生成、状态转换、golden、校验和计时集中在一个文件；`build.sh` 在本目录编译两个算子，Python 直接加载本目录的共享库。
+这是一个可独立构建的双算子性能测试工程，**包含 SIMT 与作者新版 Echo 的 C++/AscendC 源码**。`compare.py` 把输入生成、状态转换、golden、校验和计时集中在一个文件；`build.sh` 在本目录编译两个算子，Python 直接加载本目录的共享库。
 
 本文提供阅读顺序、输入与状态语义、正确性检查和构建运行命令。建议从第 1 节的函数表开始，再按第 9 节阅读设备计算源码。
 
-基准来源：`kv_plan_single_op_test` 的 `main`，提取提交为 `f51dc079a21c6e9f708e722d245abbccbb73509e`。kernel、launch、tiling/config 逐字复制；两个 plugin 仅把 `../op_kernel/` 的 include 改为同目录头文件。所有来源和 SHA256 记录在 `source_manifest.json`。不包含旧 AIV 或跳过排序的 Echo 实验实现。
+工程基线来自 `kv_plan_single_op_test` 的 `main`，提取提交为 `f51dc079a21c6e9f708e722d245abbccbb73509e`。SIMT、launch、tiling/config 保留基线源码；两个 plugin 仅调整 include 路径。**Echo kernel 已在此基线上应用作者 2026-10-09 的性能补丁**，并补充小尺寸 UB 暂存修复。来源、修订名和 SHA256 记录在 `source_manifest.json`。不包含旧 AIV 或跳过排序的 Echo 实验实现。
+
+### 本次 Echo 更新
+
+- 每线程先累计本行 hit，再执行一次 atomic add，减少同行计数上的原子操作。
+- key/slot 打包改为全员并行；histogram 归并和 scatter 段基址计算改为按桶并行。
+- 桶前缀仍由线程 0 计算，保留四趟稳定 radix 排序及原有淘汰语义。
+- 小尺寸 `Npad<256` 时，256 个桶的暂存区使用现有 UB 四段 ping-pong 后的空闲区域，防止覆盖源数据。生产尺寸 `Npad=8192` 仍复用 `dstKey`，静态 UB 总量仍为 128 KiB。
+- 算子接口、tiling、workspace 公式、SIMT 和 benchmark 的输入、参考算法、状态恢复与计时边界均保留。
+
+修改源码后需要重新运行 `bash build.sh --soc=ascend950`，再运行逐样本审计和正式测量。旧共享库不会自动变成新版。此次更新的 NPU 编译、正确性和性能收益仍需服务器验证。
 
 ```text
 op_test_kvoffload_simt_echo/
@@ -24,6 +34,7 @@ op_test_kvoffload_simt_echo/
 │       ├── echo_lru_tiling.h           # tiling、1024 线程、128 KiB UB 常量
 │       └── echo_lru_plugin.cpp         # torch.ops 校验、tiling 上传、异步下发
 ├── source_manifest.json          # main 来源提交与各文件的哈希
+├── checks/check_echo_kernel_host.py  # 可选：直接提取新版函数做 CPU 并行回归
 └── README.md
 ```
 
@@ -111,7 +122,7 @@ python3 -X faulthandler compare.py \
 
 `--device` 是逻辑卡号，按服务器实际可见设备选择。默认使用卡 1。
 
-程序通过 `torch.ops.load_library()` 加载本目录共享库，不导入原仓库的 `sparse_kv_plan_op` 包，不回退到环境中已安装的扩展。程序打印实际库路径，JSON 记录共享库 SHA256 和源码提取提交；后者是源码来源标记，不能替代编译产物的验证。确需选择其他构建产物时，可传 `--library /绝对路径/libsimt_vs_echo_ops.so`。
+程序通过 `torch.ops.load_library()` 加载本目录共享库，不导入原仓库的 `sparse_kv_plan_op` 包，不回退到环境中已安装的扩展。程序打印实际库路径，JSON 记录共享库 SHA256、源码提取基线提交、`echo_revision` 和当前 Echo kernel 源码 SHA256；源码标记不能证明共享库已重新编译，也不能替代编译产物的验证。确需选择其他构建产物时，可传 `--library /绝对路径/libsimt_vs_echo_ops.so`。
 
 `build.sh` 使用激活环境里的 `python3`，并明确传给 CMake。需要换解释器时设置 `PYTHON=/绝对路径/python3`；并行编译数量用 `JOBS=4`。CANN / 编译器 / runtime 路径可分别用 `ASCEND_CANN_PACKAGE_HOME`、`BISHENG_CXX`、`ASCENDC_RUNTIME_LIBRARY` 覆盖。
 
@@ -181,7 +192,7 @@ Echo 的 `miss_alloc_flat` 保留原接口约定 `row*capacity+one_based_slot`�
 - request reset 的状态与输出语义。
 - 全部持久状态字段和全部输出，包括没有使用的输出尾部、free 栈余量。
 
-CPU Echo 参考只有需要淘汰时才排序，这是参考实现省掉无效计算。**实际调用的是 main 原版 Echo，设备内部仍走原来的无条件排序路径。** CPU 参考从不参与 NPU 计时。
+CPU Echo 参考只有需要淘汰时才排序，这是参考实现省掉无效计算。**实际调用的是作者新版 Echo，设备内部仍走无条件四趟完整排序路径。** CPU 参考从不参与 NPU 计时。
 
 `check_common_semantics` 还直接从原始 LRU 推导“最旧的未命中历史 token”集合，检查两版是否淘汰正确，避免仅依赖两份参考互相比较。
 
@@ -206,7 +217,7 @@ elapsed_time * 1000           ← 毫秒转换为微秒
 临时 workspace 按 main 的布局和复用方式分配：
 
 - SIMT：`hash_capacity=next_pow2(2*topk)`，最小为 32；每行 `3*hash_capacity+2*capacity+topk` 个 int32。单行不超过 112 KiB 时走 kernel 内部 UB，外部只分配占位元素，否则分配完整 GM workspace。
-- Echo：保留相同的 GM workspace 公式及默认核数划分，设备仍使用原版每核 128 KiB 静态 UB。
+- Echo：保留相同的 GM workspace 公式及默认核数划分，设备仍使用每核 128 KiB 静态 UB。
 
 两种 kernel 沿用各自的默认线程数和分核策略。共同控制的是设备、输入、初始历史、软件环境、计时口径；算法自己的资源配置属于实现的一部分。
 
@@ -252,6 +263,16 @@ JSON 包含两路的 Event 和 Host 的 P50/P95/min/max、原始样本、执行�
 
 上述 CPU 模拟不产生可用的性能数字。服务器应先运行第 2 节的逐样本短跑审计，再运行正式测量。
 
+### 作者新版 Echo 的 CPU 回归
+
+可用 Python 标准库和支持 C++20 的 `g++` 运行：
+
+```bash
+python3 checks/check_echo_kernel_host.py
+```
+
+脚本直接提取当前头文件里的 `OpArgtopkRow` 和 `OpHitMiss`，用 128 个 CPU 线程、同步屏障和原子操作模拟执行，并启用 AddressSanitizer/UBSan。33 项检查覆盖 capacity 1～4096、随机/平局/无效时间戳、完整排序结果、调试直方图、释放输出、缓冲区边界和每线程 hit 累加。它不参与正式性能测试，也不能替代 NPU 编译、设备缓存一致性或性能验证。此次本地运行通过；四个性能场景的 CPU 参考检查也通过。
+
 ## 9. 算子源码怎么读
 
 ### SIMT
@@ -270,6 +291,6 @@ JSON 包含两路的 Event 和 Host 的 P50/P95/min/max、原始样本、执行�
 4. `EchoLruKernel::Process`：按阶段读 reset、hit/miss、protect、free、alloc、priority、映射更新和最终输出；每核处理自己的连续行段。
 5. `ArgtopkAllRows` → `OpArgtopkRow`：每行计算 `freeSize` 后仍执行完整四趟 radix 排序，最后只输出需要释放的槽。本目录没有添加 `freeSize=0` 的提前返回。
 
-原 main 的 Echo 文件保留了早期的注释与注释掉的旧实现，部分文字提到 512 线程、bitonic、GM ping-pong 或 grid sync，与当前有效代码不同。为保证来源可核对，这次没有改写这些源码；阅读时以 `ECHO_LRU_THREAD_NUM=1024`、有效的 `OpArgtopkRow`、顶层 `argtopkUb` 和 `Process` 内实际调用为准。
+Echo 文件仍保留部分早期注释和注释掉的旧实现，涉及 512 线程、bitonic、GM ping-pong 或 grid sync；这些文字与当前有效代码不同。阅读时以 `ECHO_LRU_THREAD_NUM=1024`、有效的 `OpArgtopkRow`、顶层 `argtopkUb` 和 `Process` 内实际调用为准。新版排序中的并行打包、桶归并、`bucketPrefix` 暂存及分段 scatter 注释已同步更新。
 
 构建方面，SIMT 保留 mixed/VF 编译选项，Echo 保留 `--enable-simt`，两者均为 `-O3`、`dav-3510`。系统 C++ 编译两个 plugin，链接 main 相同的 torch、torch_npu、ascendcl、tiling_api、platform 和 AscendC runtime。仅去掉了 Python 包/pybind 装载壳，改由 `torch.ops.load_library` 触发相同的算子注册。

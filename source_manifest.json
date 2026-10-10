@@ -35,8 +35,8 @@
       "source_path": "csrc/ops/echo_lru/op_kernel/echo_lru_kernel.h",
       "local_path": "csrc/echo/echo_lru_kernel.h",
       "source_sha256": "1db3b854764fd8ab21f33ac097d61e1280bf0e1bc16662cf8ad45ff842ecbd2a",
-      "local_sha256": "1db3b854764fd8ab21f33ac097d61e1280bf0e1bc16662cf8ad45ff842ecbd2a",
-      "change": "逐字复制"
+      "local_sha256": "ba3f598e3290f8ff268d8477d31a03dd2527183d249c11813d3ad417e7be6513",
+      "change": "在 main 基线之上应用作者 2026-10-09 性能补丁，补充小尺寸 UB 暂存修复及相关注释；详见 echo_update"
     },
     {
       "source_path": "csrc/ops/echo_lru/op_kernel/echo_lru_launch.cpp",
@@ -67,5 +67,19 @@
       "change": "仅把 launch 头文件的相对 include 改为同目录路径"
     }
   ],
-  "note": "kernel、launch、tiling/config 逐字复制；plugin 仅调整一个 include 路径。没有使用 feat/echo-skip-zero-sort。"
+  "note": "source_commit 是提取工程时的 main 基线，不代表新版 Echo。SIMT、launch、tiling/config 仍逐字复制；plugin 仅调整 include；Echo kernel 的后续修订见 echo_revision/echo_update/local_sha256。没有使用 feat/echo-skip-zero-sort。",
+  "echo_revision": "author-perf-2026-10-09-small-ub-fix",
+  "echo_update": {
+    "source": "用户提供的 echo_lru_kernel.asc → echo_lru_kernel_new.asc 差异附件",
+    "author_patch_date": "2026-10-09",
+    "attachment_sha256": "bb73a7399fac5b7a26e6c7a71e61bd94de304ef33a1a8ba21e2418799255cb9e",
+    "changes": [
+      "每线程先累计 hit，再对行计数执行一次 atomic add",
+      "全员并行打包 radix key/slot",
+      "按桶并行归并 histogram",
+      "按桶并行计算 scatter 段基址"
+    ],
+    "integration_fix": "Npad<256 时，桶暂存使用四段 ping-pong 后的空闲 UB，防止覆盖源数组；生产尺寸仍复用 dstKey。仅更新相关注释和一处缩进。",
+    "sorting_policy": "保留无条件四趟完整 radix 排序，没有加入 freeSize=0 跳过逻辑"
+  }
 }

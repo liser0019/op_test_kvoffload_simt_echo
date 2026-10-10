@@ -216,14 +216,19 @@ __aicore__ inline void OpHitMiss(
         if (row >= R) break;
         uint32_t rowOff = row * topkDim;
         uint32_t htdRowOff = row * maxModelLenP1;
+        // [Perf 2026-10-09] hit 计数改每线程本地累加, 行末一次 atomic (原逐 hit 对同一地址
+        //   numHitsGm[row] 原子加, 每行最多 effTopk 次争用; 现降为 ≤ 每行活跃线程数 次).
+        //   atomic 可加任意增量 (见 atomic_intrinsics 示例), 正确性不变 (加法可交换).
+        uint32_t localHits = 0;
         for (uint32_t j = threadIdx.x; j < topkDim; j += blockDim.x) {
             if (j >= effTopk) { curSlotsGm[rowOff + j] = 0; continue; }
             int32_t tok = posGm[rowOff + j];
             int32_t tokSafe = tok < 0 ? 0 : (tok > (int32_t)(maxModelLenP1 - 1) ? (int32_t)(maxModelLenP1 - 1) : tok);
             int32_t slot = htdGm[htdRowOff + tokSafe];
             curSlotsGm[rowOff + j] = slot;
-            if (slot != I32_MAX) asc_atomic_add(&numHitsGm[row], 1);
+            if (slot != I32_MAX) localHits++;
         }
+        if (localHits != 0) asc_atomic_add(&numHitsGm[row], (int32_t)localHits);
     }
 }
 
@@ -336,27 +341,27 @@ __aicore__ inline void OpArgtopkRow(
     //   probe_ub_size 实测: 单 __ubuf__ 数组可 192KB, 4 独立 __ubuf__ 数组会别名. 故 ping-pong 用
     //   单大数组分段. UB 块内共享: syncthreads 即保证线程间可见, **key/slot 读写无需 dcci** (dcci 刷
     //   GM D-cache, UB 无关). count/scatLocal 仍在 GM, 其 dcci 三明治保留.
-    // 排序: pack/clear/reduce+prefix/scatter 由 threadIdx.x==0 串行 (保 LSD 稳定性, 无竞态);
-    //   **直方图阶段 [Step2] HIST_THREADS 线程并行**, 每线程写自己独占的 count[256] GM 切片
-    //   (countBase + t*256) —— **纯写无争用, 无 atomic**. dcci 三明治后 t0 串行归并各切片 →
-    //   全局 count (复用 countBase+0*256 即 t0 自己的切片当全局累加目标) → prefix → scatter.
+    // [Perf 2026-10-09] pack/直方图归并/segBase 归并均已并行化, t0 仅剩 256 元素 exclusive prefix
+    //   (跨桶串行依赖, 无法并行). 每线程写自己独占的 count[256] GM 切片 (countBase + t*256)
+    //   —— **纯写无争用, 无 atomic**. 归并结果写 bucketPrefix[0..255] UB 暂存 (见下).
     //   ⚠ atomic 路线已弃 (见旧注释). GM 写后读须 "syncthreads + dcci_entire + syncthreads" 三明治.
-    //   pack/clear/reduce/prefix/scatter 仅 t0 干活; 前 HIST_THREADS 线程参与直方图.
+    //   直方图/归并/scatter 由前 HIST_THREADS/SCAT_THREADS 线程参与.
     uint32_t t = threadIdx.x;
     uint32_t rowOff = row * (B + 1);
     // 打包: keyPriA=(pri 升序优先, 无效 slot 沉底 I32_MAX), keySlotA=slot id (升序).
     //   打包后 keyPriA ∈ [0, I32_MAX] 全非负 (pri<0 与 slot0 → I32_MAX) → 无需符号翻转,
     //   无符号 LSD 即正确 (I32_MAX=0x7FFFFFFF 最大, 沉底). fifo 值远小于 I32_MAX, 有效 slot 靠前.
-    if (t == 0) {
-        for (uint32_t i = 0; i < Npad; ++i) {
-            if (i <= B) {
-                int32_t p = priGm[rowOff + i];
-                keyPriA[i]  = (p < 0 || i == 0) ? I32_MAX : p;   // slot 0 / pri<0 无效, 沉底
-                keySlotA[i] = (int32_t)i;
-            } else {
-                keyPriA[i]  = I32_MAX;                            // Npad 填充位沉底
-                keySlotA[i] = (int32_t)i;
-            }
+    // [Perf 2026-10-09] pack 由 t0 串行改全员 grid-stride 并行: 每元素写各自独立的
+    //   keyPriA[i]/keySlotA[i], 无跨元素依赖, 原注释 "保 LSD 稳定性" 是误解 (稳定性由
+    //   scatter 保证, 与 pack 无关). 原版 t0 单线程 8192 次 GM 读 + 8K UB 写是纯浪费.
+    for (uint32_t i = t; i < Npad; i += blockDim.x) {
+        if (i <= B) {
+            int32_t p = priGm[rowOff + i];
+            keyPriA[i]  = (p < 0 || i == 0) ? I32_MAX : p;   // slot 0 / pri<0 无效, 沉底
+            keySlotA[i] = (int32_t)i;
+        } else {
+            keyPriA[i]  = I32_MAX;                            // Npad 填充位沉底
+            keySlotA[i] = (int32_t)i;
         }
     }
     asc_syncthreads();
@@ -369,19 +374,19 @@ __aicore__ inline void OpArgtopkRow(
     // 4-pass 8-bit LSD 基数排序 (稳定). src/dst ping-pong (A<->B), 每趟:
     //   (1) HIST_THREADS 线程各清零自己独占切片 countBase[t*256..+255] (纯写无争用)
     //   (2) **并行直方图**: HIST_THREADS 线程各 grid-stride 扫 Npad, 写自己切片 countBase[t*256+byt]
-    //       (纯写无争用, 无 atomic)  (3) t0 串行归并各切片 → 全局 count (countBase[0..255]) +
-    //       exclusive prefix sum 得各桶起始偏移  (4) t0 稳定 scatter (slot 跟随 key, 同桶按出现序
-    //       写入, 保上一趟相对序; 串行保 LSD 稳定性, 并行 scatter 难保稳定, Step3 再攻)
-    //   (5) 三明治刷 D-cache + ping-pong. 4 趟后结果在 src (指向最后写入方).
-    // [Step2] 仅直方图并行 (pack/clear/reduce/prefix/scatter 仍 t0 串行): Npad=4096 时 histogram
-    //   从串行 4096 次 GM 读 → HIST_THREADS(64) 线程各 ~64 次, 加速. 无 atomic → 无丢增量风险.
-    //   per-thread 切片纯写 → dcci → t0 读 可靠 (类 OpResetFree). count 复用: t0 切片 [0..255]
-    //   归并后即全局 count, scatter 由此读偏移.
+    //       (纯写无争用, 无 atomic)  (3) 按桶并行归并到 bucketPrefix，再由 t0 做 exclusive prefix
+    //       (4) 并行计算各段桶基址，段内按出现序稳定 scatter，slot 跟随 key
+    //   (5) UB 写完成后块内同步 + ping-pong。4 趟后结果在 src (指向最后写入方)。
+    // countBase 各切片先用于 histogram，随后复用为 scatter 段内计数。
     int32_t* srcKey  = keyPriA;  int32_t* srcSlot = keySlotA;
     int32_t* dstKey  = keyPriB;  int32_t* dstSlot = keySlotB;
-    uint32_t* count  = countBase;                                          // t0 切片 = 全局 count (归并目标)
     for (uint32_t pass = 0; pass < 4; ++pass) {
         uint32_t shift = pass * 8;
+        // 桶暂存区必须容纳 256 个元素，且不能覆盖本趟 srcKey/srcSlot。
+        // Npad<256 时使用四段 ping-pong 之后的空闲 UB；顶层实际分配
+        // ARGTOPK_UB_ELEMS=32768 个 int32，小尺寸的 4*Npad+256 不超过此上界。
+        // 生产尺寸 Npad=8192 时仍复用 dstKey，静态 UB 总量不变。
+        int32_t* bucketPrefix = (Npad < 256u) ? keyPriA + 4u * Npad : dstKey;
         // (1) 各 hist 线程清零自己切片 (纯写, 无争用). 线程 ≥ HIST_THREADS 不参与直方图.
         if (t < ARGTOPK_HIST_THREADS) {
             uint32_t* myCount = countBase + t * 256u;
@@ -396,35 +401,42 @@ __aicore__ inline void OpArgtopkRow(
                 myCount[(v >> shift) & 0xFFu] += 1u;
             }
         }
-        // [Step2] histogram→reduce 三明治: 各切片纯写须全刷可见后 t0 归并才不漏.
+        // [Step2] histogram→reduce 三明治: 各切片纯写须全刷可见后归并线程才不漏.
         asc_syncthreads();
         if (t == 0) asc_dcci_entire((void*)countBase);
         asc_syncthreads();
-        if (t == 0) {
-            // (3) t0 归并各切片到 countBase[0..255] (自己的切片当全局), 再 exclusive prefix sum.
-            for (uint32_t b = 0; b < 256; ++b) {
+        // (3) [Perf 2026-10-09] 归并改桶并行: 64 线程各归并 4 桶 (b=t, t+64, t+128, t+192),
+        //   写 bucketPrefix[0..255] UB 暂存. 原版 t0 串行 64×256 GM 读是每趟的串行热点.
+        //   归并结果不写回 countBase (避免 "归并写切片0 vs scatter myPos=切片0" 竞态, 那需
+        //   额外栅栏); Npad>=256 时 dstKey 本趟尚无人写，scatter (c) 前已用完桶暂存值。
+        //   UB 块内共享, syncthreads 即可见, 无需 dcci.
+        if (t < ARGTOPK_HIST_THREADS) {
+            for (uint32_t b = t; b < 256; b += ARGTOPK_HIST_THREADS) {
                 uint32_t s = 0u;
                 for (uint32_t th = 0; th < ARGTOPK_HIST_THREADS; ++th) {
                     s += countBase[th * 256u + b];
                 }
-                count[b] = s;                                              // 归并到 t0 切片 = 全局 count
+                bucketPrefix[b] = (int32_t)s;
             }
+        }
+        asc_syncthreads();                              // 归并完成 → t0 prefix
+        if (t == 0) {
             // [诊断3] pass0 归并后 (prefix 前) 全局直方图 dump (仅匹配调试行). 期望 = 打包 srcKey
             //   低 8 位直方图; host 比对可定位 错在 histogram/reduce (count 错) 还是 scatter (count 对).
             if (pass == 0 && dbgCount != nullptr) {
-                for (uint32_t b = 0; b < 256; ++b) dbgCount[b] = count[b];
+                for (uint32_t b = 0; b < 256; ++b) dbgCount[b] = (uint32_t)bucketPrefix[b];
             }
             uint32_t sum = 0u;
             for (uint32_t b = 0; b < 256; ++b) {
-                uint32_t c = count[b];
-                count[b] = sum;                                            // exclusive prefix (全局各桶起始偏移)
+                uint32_t c = (uint32_t)bucketPrefix[b];
+                bucketPrefix[b] = (int32_t)sum;                         // exclusive prefix (全局各桶起始偏移)
                 sum += c;
             }
         }
         // (4) [Step3] 并行稳定 scatter. LSD 稳定性靠"同桶按全局出现序写入"; 并行下用分段+段内序实现:
         //   把 Npad 切 SCAT_THREADS 段, 每线程负责一段 [lo,hi). 三步:
         //   (a) 各线程正向扫自己段统计本段各桶计数 localCnt[t*256+byt] (纯写独占切片, 无争用);
-        //   (b) t0 归并: segBase[seg][byt] = 全局 prefix[byt] + Σ_{s<seg} localCnt[s][byt], 写回
+        //   (b) 按桶并行归并: segBase[seg][byt] = 全局 prefix[byt] + Σ_{s<seg} localCnt[s][byt], 写回
         //       scatLocal[seg*256+byt] (覆盖 localCnt, 统计完后只需基址);
         //   (c) 各线程再正向扫自己段, 写入位 = segBase[t*256+byt] + 段内该桶已见数 (边扫边自增).
         //   稳定性: 段内正向扫 → 段内同桶按出现序; segBase 含前面段该桶总数 → 段间按段序. 合起来 =
@@ -446,35 +458,34 @@ __aicore__ inline void OpArgtopkRow(
                 myLocal[(v >> shift) & 0xFFu] += 1u;
             }
         }
-        // (b) 三明治: (a) 多线程写 scatLocal → t0 归并读, dcci 刷全核 D-cache 可见.
+        // (b) 三明治: (a) 多线程写 scatLocal → 归并线程读, dcci 刷全核 D-cache 可见.
         asc_syncthreads();
         if (t == 0) asc_dcci_entire((void*)scatLocal);
         asc_syncthreads();
-        if (t == 0) {                                                       // (b) t0 归并 localCnt → segBase
-            // cum 搬 GM (countBase 切片1). ⚠ 不用栈 cum[256]: OpArgtopkRow 内 256 元素栈数组 →
-            //   ASC 按函数最大栈帧给所有 1024 线程预留 → 1KB×1024=1MB 栈超限 → 溢出 device fault
-            //   (实锤: 二分3 (b)+cum栈 crash, cum搬GM PASS; 与 localPos[256] 同源, dav-3510 栈预算紧).
-            uint32_t* cum = countBase + 256u;
-            for (uint32_t b = 0; b < 256; ++b) cum[b] = count[b];          // 起始 = 全局 exclusive prefix
-            for (uint32_t seg = 0; seg < ARGTOPK_SCAT_THREADS; ++seg) {
-                uint32_t* segBase = scatLocal + seg * 256u;
-                for (uint32_t b = 0; b < 256; ++b) {
+        // (b) [Perf 2026-10-09] segBase 归并改桶并行: 桶间独立 → 64 线程各管 4 桶
+        //   (b=t, t+64, ...), 每桶 running sum 一个寄存器即可 (原版 t0 串行 64×256 GM 读 +
+        //   cum[256] 搬 GM 的 hack 都不需要了). 起始 = bucketPrefix[b] (上面算好的全局 exclusive
+        //   prefix, UB), 归并结果写回各段切片 scatLocal[seg*256+b]. 每 (seg,b) 仅一线程写, 无争用.
+        if (t < ARGTOPK_SCAT_THREADS) {
+            for (uint32_t b = t; b < 256; b += ARGTOPK_SCAT_THREADS) {
+                uint32_t sum = (uint32_t)bucketPrefix[b];                  // 起始 = 全局 exclusive prefix
+                for (uint32_t seg = 0; seg < ARGTOPK_SCAT_THREADS; ++seg) {
+                    uint32_t* segBase = scatLocal + seg * 256u;
                     uint32_t lc = segBase[b];                              // 先读 localCnt[seg][b]
-                    segBase[b] = cum[b];                                   // 覆盖为 segBase[seg][b]
-                    cum[b] += lc;                                          // 累加本段计数供后续段
+                    segBase[b] = sum;                                      // 覆盖为 segBase[seg][b]
+                    sum += lc;                                             // 累加本段计数供后续段
                 }
             }
         }
-        // (c) 三明治: (b) t0 写 scatLocal segBase → 多线程 scatter 读, dcci 刷全核 D-cache 可见.
+        // (c) 三明治: (b) 归并线程写 scatLocal segBase → 多线程 scatter 读, dcci 刷全核 D-cache 可见.
         asc_syncthreads();
         if (t == 0) asc_dcci_entire((void*)scatLocal);
         asc_syncthreads();
         if (t < ARGTOPK_SCAT_THREADS) {                                    // (c) 各线程稳定写 dst
             uint32_t* myBase = scatLocal + t * 256u;                        // segBase[t][byt] (本段基址)
-            // myPos 搬 GM (countBase 切片 t). ⚠ 不用栈 localPos[256]: 同 cum 栈压力 → device fault.
-            //   时序安全: (b) 先用 cum(切片1), (c) 后用 myPos; (c) 各线程清零自己切片再写, 纯写无争用,
-            //   同线程 WAW→RAW 不需 dcci. t0 myPos=切片0 会覆盖 count[0..255], 但 (c) 并行不读 count,
-            //   下一趟 (1) 清零+(3) 归并会重写切片0, 无残留.
+            // myPos 搬 GM (countBase 切片 t). ⚠ 不用栈 localPos[256]: 同栈压力 → device fault.
+            //   时序安全: (c) 各线程清零自己切片再写, 纯写无争用, 同线程 WAW→RAW 不需 dcci.
+            //   [Perf] 归并结果已搬 bucketPrefix UB, (c) 覆盖 countBase 切片0 无任何读冲突.
             uint32_t* myPos = countBase + t * 256u;
             for (uint32_t b = 0; b < 256; ++b) myPos[b] = 0u;
             uint32_t lo = t * Npad / ARGTOPK_SCAT_THREADS;

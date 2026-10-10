@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """阅读入口：main() → make_case() → 两份 reference → NPU 状态 → 校验 → 计时。
 
-仅比较 main 的 sparse_kv_plan 与原版 echo_lru；设备源码在本目录 csrc/。
+仅比较 main 的 sparse_kv_plan 与作者新版 echo_lru；设备源码在本目录 csrc/。
 先 bash build.sh，再运行本文件.
 
 运行 NPU：python3 compare.py --device 1 --warmup 10 --repeat 50
@@ -159,7 +159,7 @@ def reference_simt(case):
 def reference_echo(case, initial):
     """Echo：hit 提升时间戳，必要时淘汰最低优先级，最后从 free 栈尾分配。
 
-    CPU 用排序表达淘汰语义；设备原版即使无需淘汰仍执行完整 radix 排序。
+    CPU 用排序表达淘汰语义；作者新版设备实现即使无需淘汰仍执行完整 radix 排序。
     CPU 参考可以省掉无效计算，因为参考只验证结果，不参与 NPU 计时。
     """
     rows, topk, capacity = (case[k] for k in ("rows", "topk", "capacity"))
@@ -418,6 +418,10 @@ def main():
             "library_path": str(library_path),
             "library_sha256": hashlib.sha256(library_path.read_bytes()).hexdigest(),
             "source_snapshot_commit": manifest.get("source_commit", "unknown"),
+            # 基线提交不能独自区分后续 Echo 补丁，因此同时记录修订名和当前源码哈希。
+            "echo_revision": manifest.get("echo_revision", "main-original"),
+            "echo_kernel_sha256": hashlib.sha256(
+                (Path(__file__).resolve().parent / "csrc/echo/echo_lru_kernel.h").read_bytes()).hexdigest(),
             "timing": "Event: public torch.ops stream interval including tiling H2D and host submission gaps; restore/validation excluded. Host: record+invoke+record+synchronize.",
             "shape": {k: getattr(args, k) for k in ("rows", "topk", "capacity", "max_token")},
             "seed": args.seed, "warmup": args.warmup, "repeat": args.repeat,
