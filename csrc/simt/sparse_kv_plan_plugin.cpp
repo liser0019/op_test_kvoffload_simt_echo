@@ -30,6 +30,15 @@
 
 #include "sparse_kv_plan_launch.h"
 
+// 变体注册单元只覆盖这四项；主机校验、tiling 上传、按值捕获和 RunOpApi 共用。
+// 不用运行时算法选择，避免在计时区间内增加分发分支。
+#ifndef SPARSE_KV_VARIANT_OP_NAME
+#define SPARSE_KV_VARIANT_OP_NAME "sparse_kv_plan"
+#define SPARSE_KV_VARIANT_LAUNCH launch_sparse_kv_plan
+#define SPARSE_KV_VARIANT_CAPACITY_ARRAYS 2U
+#define SPARSE_KV_VARIANT_API_LABEL "SparseKvPlan"
+#endif
+
 namespace sparse_kv_plan_op {
 namespace {
 
@@ -106,7 +115,7 @@ void CheckSparseKvPlanInputs(const at::Tensor& reqIds, const at::Tensor& topkInd
     }
   }
   // workspace 容量要求:UB 快路径只需占位 1 个元素;GM 路径需 max_rows * rowElements。
-  const uint64_t rowElements = SparseKvPlanRowElements(topk, capacity);
+  const uint64_t rowElements = SparseKvPlanRowElements(topk, capacity, SPARSE_KV_VARIANT_CAPACITY_ARRAYS);
   TORCH_CHECK(rowElements <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / maxRows),
               "compact_workspace element count overflows int64");
   const int64_t required =
@@ -145,7 +154,8 @@ void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
 
   // host 侧组装 tiling(与原 op_host/sparse_kv_plan_tiling.cpp 同源的纯函数实现)。
   const SparseKvPlanTilingData tiling =
-      MakeSparseKvPlanTiling(maxRows, topk, capacity, maxToken, maxRequests, maxNumBlocks, hostNumBlocks, blockSize);
+      MakeSparseKvPlanTiling(maxRows, topk, capacity, maxToken, maxRequests, maxNumBlocks, hostNumBlocks, blockSize,
+                            SPARSE_KV_VARIANT_CAPACITY_ARRAYS);
 
   // tiling 结构体经小缓冲 H2D:pageable 拷贝阻塞完成后再入队 kernel,同流保序。
   at::Tensor tilingCpu = at::empty({static_cast<int64_t>(sizeof(SparseKvPlanTilingData))},
@@ -157,7 +167,7 @@ void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
   auto stream = c10_npu::getCurrentNPUStream().stream(false);
 
   auto launch = [=]() -> int {
-    launch_sparse_kv_plan(
+    SPARSE_KV_VARIANT_LAUNCH(
         const_cast<GM_ADDR>(reqIds.data_ptr()), const_cast<GM_ADDR>(topkIndices.data_ptr()),
         const_cast<GM_ADDR>(stablePrefixLens.data_ptr()), const_cast<GM_ADDR>(visibleSeqLens.data_ptr()),
         const_cast<GM_ADDR>(tokenToReq.data_ptr()), const_cast<GM_ADDR>(blockTable.data_ptr()),
@@ -170,7 +180,7 @@ void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
     return 0;
   };
   // RunOpApi 仅提供算子名标签(直调不真正走 aclnn)。
-  at_npu::native::OpCommand::RunOpApi("SparseKvPlan", launch);
+  at_npu::native::OpCommand::RunOpApi(SPARSE_KV_VARIANT_API_LABEL, launch);
 }
 
 }  // namespace
@@ -178,7 +188,7 @@ void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
 // schema 与 vllm-ascend aclnnSparseKvPlan 原型逐参数对应;
 // (a!)..(h!) 标注 kernel 会原地写入的状态/临时张量。
 TORCH_LIBRARY_FRAGMENT(sparse_kv_plan_op, m) {
-  m.def("sparse_kv_plan(Tensor req_ids, Tensor topk_indices, Tensor stable_prefix_lens, "
+  m.def(SPARSE_KV_VARIANT_OP_NAME "(Tensor req_ids, Tensor topk_indices, Tensor stable_prefix_lens, "
         "Tensor visible_seq_lens, Tensor token_to_req, Tensor block_table, Tensor active_rows, "
         "Tensor(a!) last_req_ids, Tensor(b!) slot_to_token, Tensor(c!) lru_slots, Tensor(d!) current_slots, "
         "Tensor(e!) miss_count, Tensor(f!) miss_tokens, Tensor(g!) miss_slots, Tensor(h!) compact_workspace, "
@@ -186,11 +196,11 @@ TORCH_LIBRARY_FRAGMENT(sparse_kv_plan_op, m) {
 }
 
 TORCH_LIBRARY_IMPL(sparse_kv_plan_op, Meta, m) {
-  m.impl("sparse_kv_plan", sparse_kv_plan_meta);
+  m.impl(SPARSE_KV_VARIANT_OP_NAME, sparse_kv_plan_meta);
 }
 
 TORCH_LIBRARY_IMPL(sparse_kv_plan_op, PrivateUse1, m) {
-  m.impl("sparse_kv_plan", sparse_kv_plan_npu);
+  m.impl(SPARSE_KV_VARIANT_OP_NAME, sparse_kv_plan_npu);
 }
 
 }  // namespace sparse_kv_plan_op

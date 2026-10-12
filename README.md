@@ -1,10 +1,12 @@
-# SIMT 与作者新版 Echo：可阅读的双路性能测试
+# SIMT 变体与作者新版 Echo：可阅读的性能测试
 
-这是一个可独立构建的双算子性能测试工程，**包含 SIMT 与作者新版 Echo 的 C++/AscendC 源码**。`compare.py` 把输入生成、状态转换、golden、校验和计时集中在一个文件；`build.sh` 在本目录编译两个算子，Python 直接加载本目录的共享库。
+这是一个可独立构建的性能测试工程，**包含原 SIMT、作者新版 Echo 和 11 个 SIMT 候选的 C++/AscendC 源码**。`compare.py` 把输入生成、状态转换、golden、校验和计时集中在一个文件；`build.sh` 编译全部 13 路，Python 直接加载共享库。
+
+本分支为 `feat/simt-variant-comparison`。新增版本、布局差异、源码阅读顺序及完整上机命令见 [SIMT 变体接入与性能对比](SIMT变体接入与性能对比.md)。默认比较全部 13 路；仅运行原两路时加 `--implementations simt echo`。
 
 本文提供阅读顺序、输入与状态语义、正确性检查和构建运行命令。建议从第 1 节的函数表开始，再按第 9 节阅读设备计算源码。
 
-工程基线来自 `kv_plan_single_op_test` 的 `main`，提取提交为 `f51dc079a21c6e9f708e722d245abbccbb73509e`。SIMT、launch、tiling/config 保留基线源码；两个 plugin 仅调整 include 路径。**Echo kernel 已在此基线上应用作者 2026-10-09 的性能补丁**，并补充小尺寸 UB 暂存修复。来源、修订名和 SHA256 记录在 `source_manifest.json`。不包含旧 AIV 或跳过排序的 Echo 实验实现。
+工程基线来自 `kv_plan_single_op_test` 的 `main`，提取提交为 `f51dc079a21c6e9f708e722d245abbccbb73509e`。原 SIMT 计算保留，host 胶水增加变体参数化。**Echo kernel 已在此基线上应用作者 2026-10-09 的性能补丁**，并补充小尺寸 UB 暂存修复。原来源记录在 `source_manifest.json`；11 个候选来自用户的 `var_simt_ops`，基线为 `cd84b83`，具体提取哈希见 `variants_manifest.json`。不包含旧 AIV 或跳过排序的 Echo 实验实现。
 
 ### 本次 Echo 更新
 
@@ -19,6 +21,8 @@
 ```text
 op_test_kvoffload_simt_echo/
 ├── compare.py                    # 共同输入 → CPU 参考 → 设备调用 → 校验/计时
+├── variants_manifest.json        # 11 个候选的名称、配置及来源哈希
+├── SIMT变体接入与性能对比.md     # 多版本接入、上机命令与验证边界
 ├── build.sh                      # CMake 配置与编译，默认 ascend950
 ├── CMakeLists.txt                # 显式编译两个 kernel + 两个 plugin
 ├── csrc/
@@ -27,6 +31,7 @@ op_test_kvoffload_simt_echo/
 │   │   ├── sparse_kv_plan_launch.h     # tiling 构造、workspace 公式、启动声明
 │   │   ├── sparse_kv_plan_config.h     # 2048 线程、warp、UB 常量
 │   │   └── sparse_kv_plan_plugin.cpp   # torch.ops 校验、tiling 上传、异步下发
+│   ├── variants/                      # 11 个候选：计算头、配置、直调与注册胶水
 │   └── echo/
 │       ├── echo_lru_kernel.h           # Echo 全部设备计算、radix 排序
 │       ├── echo_lru_launch.cpp         # pure SIMT 四参数 launch
@@ -71,7 +76,8 @@ compare.py / invoke
 先下载工程：
 
 ```bash
-git clone https://github.com/liser0019/op_test_kvoffload_simt_echo.git
+git clone --branch feat/simt-variant-comparison --single-branch \
+  https://github.com/liser0019/op_test_kvoffload_simt_echo.git
 cd op_test_kvoffload_simt_echo
 ```
 
@@ -93,7 +99,7 @@ python3 compare.py --cpu-check
 python3 compare.py --cpu-check --rows 2 --topk 4 --capacity 8 --max-token 64
 ```
 
-### NPU：直接构建本目录
+### NPU：直接构建本目录（默认全部 13 路）
 
 在服务器下载本仓库，或复制整个工程目录。在匹配的 torch / torch_npu 环境中，加载实际 CANN 安装的 `set_env.sh`，直接构建本目录；无需原仓库、wheel 或 pip 安装：
 
@@ -219,7 +225,7 @@ elapsed_time * 1000           ← 毫秒转换为微秒
 - SIMT：`hash_capacity=next_pow2(2*topk)`，最小为 32；每行 `3*hash_capacity+2*capacity+topk` 个 int32。单行不超过 112 KiB 时走 kernel 内部 UB，外部只分配占位元素，否则分配完整 GM workspace。
 - Echo：保留相同的 GM workspace 公式及默认核数划分，设备仍使用每核 128 KiB 静态 UB。
 
-两种 kernel 沿用各自的默认线程数和分核策略。共同控制的是设备、输入、初始历史、软件环境、计时口径；算法自己的资源配置属于实现的一部分。
+各 kernel 沿用自己的默认线程数和分核策略。C 系列使用一份 capacity 分类数组，因此其行临时区为 `3*H+capacity+topk`，host 与 Python 同时适配。共同控制的是设备、输入、初始历史、软件环境、计时口径；算法自己的资源配置属于实现的一部分。
 
 **Event 数字是公共算子接口的流区间延迟**，包含该调用的 tiling H2D，以及可能的 Host 下发空隙。它不能直接替代 profiler 的纯 kernel duration。`host_us` 则包括两个 record、算子调用和等待完成。
 

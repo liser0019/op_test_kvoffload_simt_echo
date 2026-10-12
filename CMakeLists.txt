@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# 阅读顺序：依赖 → 两个 kernel 的编译选项 → 两个 plugin → 合并共享库。
+# 阅读顺序：依赖 → 两种编程模式的选项 → 原算子及变体 → 合并共享库。
 # 不使用算子自动发现、子目录注册宏、setup.py 或 wheel 打包。
 cmake_minimum_required(VERSION 3.16)
 project(simt_vs_echo LANGUAGES CXX)
@@ -91,7 +91,7 @@ message(STATUS "CANN: ${ASCEND_CANN_PACKAGE_HOME}")
 message(STATUS "bisheng: ${BISHENG_CXX}")
 message(STATUS "torch lib: ${TORCH_LIB_DIR}; torch_npu: ${TORCH_NPU_DIR}")
 
-# 3. bisheng 单独生成两个 object。两种编程模式的选项原样保留 main。
+# 3. bisheng 分别生成原算子和各变体 object。两种编程模式的选项保留 main。
 # SIMT 是 mixed 外壳 + VF；Echo 是 pure SIMT，不能用同一组编译选项。
 set(SIMT_FLAGS
     --cce-auto-sync=off -Wno-deprecated-declarations
@@ -130,11 +130,34 @@ foreach(_name IN ITEMS simt echo)
 endforeach()
 set_source_files_properties(${KERNEL_OBJECTS} PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
 
-# 4. 系统 C++ 编译两个 plugin，合并 kernel object，得到可被 torch.ops 加载的库。
+# 11 个用户提供的 SIMT 版本，各自有独立 kernel/VF/launch/torch.ops 名称。
+# 显式列出版本，新增版本必须同时更新 catalog，避免隐式加载其他代码。
+set(SIMT_VARIANTS
+    00_baseline 01_a_hit_short_circuit 02_b_parallel_scan 03_c_compact_partition
+    04_d_cold_start 05_ab 06_abc 07_abcd 08_e_validity_markers 09_bce 10_bcde)
+set(VARIANT_PLUGINS "")
+foreach(_variant IN LISTS SIMT_VARIANTS)
+    set(_variant_dir "${CMAKE_CURRENT_SOURCE_DIR}/csrc/variants/${_variant}")
+    set(_source "${_variant_dir}/sparse_kv_plan_launch.cpp")
+    set(_object "${CMAKE_CURRENT_BINARY_DIR}/kernel_${_variant}.o")
+    add_custom_command(OUTPUT "${_object}"
+        COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+                ${KERNEL_OPT_FLAGS} ${SIMT_FLAGS} ${KERNEL_INCLUDE_ARGS}
+                -I${_variant_dir} -c "${_source}" -o "${_object}"
+        DEPENDS "${_source}" "${_variant_dir}/sparse_kv_plan_compute.h"
+                "${_variant_dir}/sparse_kv_plan_config.h" "csrc/variants/variant_tiling_data.h"
+        COMMENT "bisheng 编译 ${_variant}" VERBATIM)
+    set_source_files_properties("${_object}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+    list(APPEND KERNEL_OBJECTS "${_object}")
+    list(APPEND VARIANT_PLUGINS "${_variant_dir}/sparse_kv_plan_plugin.cpp")
+endforeach()
+
+# 4. 系统 C++ 编译各路 plugin，合并 kernel object，得到可被 torch.ops 加载的库。
 # TORCH_LIBRARY 的静态初始化已负责注册，不需要 Python 包/pybind 入口。
 add_library(simt_vs_echo_ops SHARED
     csrc/simt/sparse_kv_plan_plugin.cpp
     csrc/echo/echo_lru_plugin.cpp
+    ${VARIANT_PLUGINS}
     ${KERNEL_OBJECTS})
 separate_arguments(TORCH_CXX_FLAGS_LIST NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 target_compile_options(simt_vs_echo_ops PRIVATE ${TORCH_CXX_FLAGS_LIST})

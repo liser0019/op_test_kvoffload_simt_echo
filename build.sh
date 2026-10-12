@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# 只做两件事：CMake 配置 → 编译本目录两个算子的共享库，不依赖原工程。
+# CMake 配置 → 编译原 SIMT、Echo 和 11 个 SIMT 候选，不依赖原工程。
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_PYTHON="${PYTHON:-python3}"

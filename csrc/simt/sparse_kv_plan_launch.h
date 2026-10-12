@@ -59,8 +59,9 @@ inline uint64_t SparseKvPlanHashCapacity(int64_t topk) {
 
 // 单行临时区元素数:keys[H] + firstPos[H] + owner[H] + evictSlots[C] + hitSlots[C]
 // + missPositions[T],单位 int32。移植自 sparse_kv_plan_tiling.cpp。
-inline uint64_t SparseKvPlanRowElements(int64_t topk, int64_t capacity) {
-  return 3U * SparseKvPlanHashCapacity(topk) + 2U * static_cast<uint64_t>(capacity) +
+// capacityArrays=2 是基线布局；C 系列为 1，对应其 RowWorkspaceElements。
+inline uint64_t SparseKvPlanRowElements(int64_t topk, int64_t capacity, uint32_t capacityArrays = 2U) {
+  return 3U * SparseKvPlanHashCapacity(topk) + capacityArrays * static_cast<uint64_t>(capacity) +
          static_cast<uint64_t>(topk);
 }
 
@@ -76,10 +77,11 @@ inline uint32_t SparseKvPlanLocalMemoryBytes(uint64_t workspaceRowElements) {
 // host 侧组装完整 tiling 结构(纯函数,不查平台)。
 inline SparseKvPlanTilingData MakeSparseKvPlanTiling(int64_t maxRows, int64_t topk, int64_t capacity,
                                                     int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks,
-                                                    int64_t hostNumBlocks, int64_t blockSize) {
+                                                    int64_t hostNumBlocks, int64_t blockSize,
+                                                    uint32_t capacityArrays = 2U) {
   SparseKvPlanTilingData tiling{};
   const uint64_t hashCapacity = SparseKvPlanHashCapacity(topk);
-  const uint64_t rowElements = SparseKvPlanRowElements(topk, capacity);
+  const uint64_t rowElements = SparseKvPlanRowElements(topk, capacity, capacityArrays);
   tiling.hashCapacity = hashCapacity;
   tiling.workspaceRowElements = rowElements;
   tiling.maxRows = maxRows;

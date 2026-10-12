@@ -1,0 +1,140 @@
+{
+  "source": "用户提供的 var_simt_ops 目录",
+  "baseline_commit": "cd84b83c566e62ac26934758cc563b152292f41e",
+  "threads": 2048,
+  "adaptation": "计算部分（含 VF）逐字提取到 compute.h，末尾只增加结束标记注释；保留配置头；只改 kernel 名、tiling 宏读取和未使用 workspace 参数，添加 launch。",
+  "variants": [
+    {
+      "name": "00_baseline",
+      "op_name": "sparse_kv_plan_v00",
+      "points": "",
+      "description": "clean_simt 原版对照",
+      "capacity_arrays": 2,
+      "source_kernel_sha256": "a03401a79d87cad40cdf1de92f2daf1c21593ff4c2bdb8378de6ab3ef9f474c5",
+      "compute_sha256": "fb241582a255bc6f3e2a6ddfae3852bc769e3d47fe512cea5e7d1c0df12547eb",
+      "config_sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "source_host_tiling_sha256": "5a6e1a495ae33e25974ce282d173db9ea98dc67b82dab1d4843dc3a672d87631",
+      "upstream_compute_prefix_sha256": "99e46389ec0c62b7197126dd020250e22fdc16795122311f75414c8b9f256f26"
+    },
+    {
+      "name": "01_a_hit_short_circuit",
+      "op_name": "sparse_kv_plan_v01",
+      "points": "A",
+      "description": "命中项跳过第二次源有效性检查",
+      "capacity_arrays": 2,
+      "source_kernel_sha256": "8ee82bd7ba2fdba0eebbca9a757aa8936d3ec33dc8c32919c355865815a032a8",
+      "compute_sha256": "6eda2b6b375cd7fe48ad2269678136a5015fa73a4fba4ab6189a4099c7ce8afe",
+      "config_sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "source_host_tiling_sha256": "5a6e1a495ae33e25974ce282d173db9ea98dc67b82dab1d4843dc3a672d87631",
+      "upstream_compute_prefix_sha256": "d88ddefabe80e2319803f2d193662c78fb4dcedb72f0b0ac922e7beafd8dd510"
+    },
+    {
+      "name": "02_b_parallel_scan",
+      "op_name": "sparse_kv_plan_v02",
+      "points": "B",
+      "description": "并行二级 Scan，调用者负责最后的复用同步",
+      "capacity_arrays": 2,
+      "source_kernel_sha256": "50b894d9680f6c98af7edf9a44f4ba2e2ba34292f7c2113c02a8833915dc4daf",
+      "compute_sha256": "e472314e9c7474bf3b401e75f4af959b4d9317e147a02798bd5062160bd86e8c",
+      "config_sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "source_host_tiling_sha256": "5a6e1a495ae33e25974ce282d173db9ea98dc67b82dab1d4843dc3a672d87631",
+      "upstream_compute_prefix_sha256": "7d7ffd4d56cfa9ca326ef85d2af354c43d413d311e28eeded8ee43ea9d85acff"
+    },
+    {
+      "name": "03_c_compact_partition",
+      "op_name": "sparse_kv_plan_v03",
+      "points": "C",
+      "description": "hit/evict 从同一 capacity 数组的两端写入",
+      "capacity_arrays": 1,
+      "source_kernel_sha256": "8db462c3f60980d6109541cc864ef9fbdb9b44fec17ad2043f01922c07273097",
+      "compute_sha256": "d0bc028d5d7b4b2efff992cf9101aae8a151edb33bddcb42c8d464b0849af8dc",
+      "config_sha256": "a8b081b7cf3539eff89fb2c749209954736b79d59d04578fb37efcca1d0c4e05",
+      "source_host_tiling_sha256": "1d3d93eaba01005bbef1b9cbb43aaa9b79397ae70f4c9fd3d8030cd66a80b9d9",
+      "upstream_compute_prefix_sha256": "f2053cabb1ac65404f62c3261800b5d7e045e6271fc0d72ec9c91dbddd0f219d"
+    },
+    {
+      "name": "04_d_cold_start",
+      "op_name": "sparse_kv_plan_v04",
+      "points": "D",
+      "description": "请求 ID 更换时跳过哈希与 resident 分类",
+      "capacity_arrays": 2,
+      "source_kernel_sha256": "7bc5ccd7900c9e2713eb2c1a7aed0e4a77e51421b26442ce22ad5851375911d2",
+      "compute_sha256": "d897730202843afa7e3bd4a62753f4efa6962894bc2b061234088a92957987ea",
+      "config_sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "source_host_tiling_sha256": "5a6e1a495ae33e25974ce282d173db9ea98dc67b82dab1d4843dc3a672d87631",
+      "upstream_compute_prefix_sha256": "9537e2ee9a0489aac368cfcb67b9a0b6be0bf01ccf15d157815438967010ff19"
+    },
+    {
+      "name": "05_ab",
+      "op_name": "sparse_kv_plan_v05",
+      "points": "AB",
+      "description": "A+B",
+      "capacity_arrays": 2,
+      "source_kernel_sha256": "2cfd8e34449fd6ec7478a1ab979bf34b5394ceff6d9da66507e25d8a72513aec",
+      "compute_sha256": "139e2fa8c268f87c6270056b78b5e00cd185ccf16ce83e2c342180e748aee5f0",
+      "config_sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "source_host_tiling_sha256": "5a6e1a495ae33e25974ce282d173db9ea98dc67b82dab1d4843dc3a672d87631",
+      "upstream_compute_prefix_sha256": "1b4749740042ae18ce72766f4e49a9da87bee2f82e1b200ce87b90e940eb0a46"
+    },
+    {
+      "name": "06_abc",
+      "op_name": "sparse_kv_plan_v06",
+      "points": "ABC",
+      "description": "A+B+C",
+      "capacity_arrays": 1,
+      "source_kernel_sha256": "c59ac670a8b5042103e9b494c450e06d5ebd02da2377955da079721e21080a07",
+      "compute_sha256": "5cd5e18d3f9d8856ca1d9b3b0ff50dec95d06274b2f4b4ceacdf8e08555f89a6",
+      "config_sha256": "a8b081b7cf3539eff89fb2c749209954736b79d59d04578fb37efcca1d0c4e05",
+      "source_host_tiling_sha256": "1d3d93eaba01005bbef1b9cbb43aaa9b79397ae70f4c9fd3d8030cd66a80b9d9",
+      "upstream_compute_prefix_sha256": "ae60744b18495e2f55cf4fa8be101724a936cf8e72f4d962c66c2c8f0fc5c479"
+    },
+    {
+      "name": "07_abcd",
+      "op_name": "sparse_kv_plan_v07",
+      "points": "ABCD",
+      "description": "A+B+C+D",
+      "capacity_arrays": 1,
+      "source_kernel_sha256": "dc7b4aeb1dce9cfbaac13f122f9467712ced6da331f076c621d9f16db9a905cc",
+      "compute_sha256": "1fdf9cb3d241836cb88fbcb1dcb458d33f12882f2d386b0e6ada79b4a1875a99",
+      "config_sha256": "a8b081b7cf3539eff89fb2c749209954736b79d59d04578fb37efcca1d0c4e05",
+      "source_host_tiling_sha256": "1d3d93eaba01005bbef1b9cbb43aaa9b79397ae70f4c9fd3d8030cd66a80b9d9",
+      "upstream_compute_prefix_sha256": "44ec630ce180ea5aafaed10d6d1a3bd8db86bf64e4048e15e81ee870aa891420"
+    },
+    {
+      "name": "08_e_validity_markers",
+      "op_name": "sparse_kv_plan_v08",
+      "points": "E",
+      "description": "复用 currentSlots 的临时负标记，缓存 TopK 有效性",
+      "capacity_arrays": 2,
+      "source_kernel_sha256": "6d2ab3a0604590db18a2d44e3b24d70484bdc1456acec3cbc47ac7b3fc466758",
+      "compute_sha256": "74830cdbabfd64eee64471b0c3536407396091873ba8f4192f7126c61446517f",
+      "config_sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "source_host_tiling_sha256": "5a6e1a495ae33e25974ce282d173db9ea98dc67b82dab1d4843dc3a672d87631",
+      "upstream_compute_prefix_sha256": "6bfc2e759e9683bbf98b0606c30b4e9c1c2fde2019504a30dace61a055f73cc3"
+    },
+    {
+      "name": "09_bce",
+      "op_name": "sparse_kv_plan_v09",
+      "points": "BCE",
+      "description": "B+C+E；E 替代 A",
+      "capacity_arrays": 1,
+      "source_kernel_sha256": "7ac5fe389935945333dccc7f6dab25f6aebc54504fd0af601a631e3df2c69298",
+      "compute_sha256": "102f00e1ab5498378ba526363da4fc29d8b8a9124bdc2cb57744facbecb7e304",
+      "config_sha256": "a8b081b7cf3539eff89fb2c749209954736b79d59d04578fb37efcca1d0c4e05",
+      "source_host_tiling_sha256": "1d3d93eaba01005bbef1b9cbb43aaa9b79397ae70f4c9fd3d8030cd66a80b9d9",
+      "upstream_compute_prefix_sha256": "c391e17850d47d9dbebb80979df0fd2b86ed02cf63222f8ca9bcd8e47d45d6e5"
+    },
+    {
+      "name": "10_bcde",
+      "op_name": "sparse_kv_plan_v10",
+      "points": "BCDE",
+      "description": "B+C+D+E；E 替代 A",
+      "capacity_arrays": 1,
+      "source_kernel_sha256": "568b20785905108d297d70254eab99055002b518488d31a22e0f788576299077",
+      "compute_sha256": "521606d336b3f722243792a2f560ad3a0e412072fbcdd8f7fbdfb0684461d366",
+      "config_sha256": "a8b081b7cf3539eff89fb2c749209954736b79d59d04578fb37efcca1d0c4e05",
+      "source_host_tiling_sha256": "1d3d93eaba01005bbef1b9cbb43aaa9b79397ae70f4c9fd3d8030cd66a80b9d9",
+      "upstream_compute_prefix_sha256": "0bc241c1c77da58580fcfa47d0270e321420d7ad19cb264e14ec3b8e824838c9"
+    }
+  ]
+}
