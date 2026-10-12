@@ -40,7 +40,38 @@ for v in manifest['variants']:
 with tempfile.TemporaryDirectory(prefix='variant_layout_check_') as temporary:
     tmp = Path(temporary)
     cpp = tmp / 'layout.cpp'
-    cpp.write_text(f'#include "{base_header}"\n#include <iostream>\nint main() {{\n' +
+    # 编译实际的 upstream POD + 直调 POD + 入口声明组合。只检查布局字段
+    # 无法发现匿名命名空间中的同名类型与接入层类型发生名称歧义。
+    for v in manifest['variants']:
+        path = ROOT / 'csrc/variants' / v['name']
+        compute = (path / 'sparse_kv_plan_compute.h').read_text()
+        upstream_type = re.search(r'struct SparseKvPlanTilingData \{.*?\n\};', compute, re.S)
+        launch = (path / 'sparse_kv_plan_launch.cpp').read_text()
+        launch_declarations = re.search(
+            r'  const __gm__ \w+\* tilingGm =.*?\n  \w+ tilingData;', launch, re.S)
+        assert upstream_type and launch_declarations, v['name']
+        # 在匿名命名空间内先绑定原类型别名，随后比较布局而不触发同名查找。
+        abi_checks = [
+            'static_assert(sizeof(UpstreamVariantTiling) == sizeof(SparseKvPlanVariantTilingData));',
+            'static_assert(alignof(UpstreamVariantTiling) == alignof(SparseKvPlanVariantTilingData));',
+            *[f'static_assert(offsetof(UpstreamVariantTiling, {field}) == '
+              f'offsetof(SparseKvPlanVariantTilingData, {field}));' for _, field in fields],
+        ]
+        cpp.write_text('#include <cstdint>\n#include <cstddef>\n#define __gm__\nnamespace {\n' +
+                       upstream_type.group(0) + '\nusing UpstreamVariantTiling = SparseKvPlanTilingData;\n}\n' +
+                       f'#include "{ROOT / "csrc/variants/variant_tiling_data.h"}"\n' +
+                       '\n'.join(abi_checks) + '\n' +
+                       'void probe(void* tiling) {\n' + launch_declarations.group(0) + '\n}\n')
+        subprocess.run(['g++', '-std=c++17', '-fsyntax-only', str(cpp)], check=True)
+    host_abi_checks = [
+        'static_assert(sizeof(SparseKvPlanTilingData) == sizeof(SparseKvPlanVariantTilingData));',
+        'static_assert(alignof(SparseKvPlanTilingData) == alignof(SparseKvPlanVariantTilingData));',
+        *[f'static_assert(offsetof(SparseKvPlanTilingData, {field}) == '
+          f'offsetof(SparseKvPlanVariantTilingData, {field}));' for _, field in fields],
+    ]
+    cpp.write_text(f'#include "{base_header}"\n'
+                   f'#include "{ROOT / "csrc/variants/variant_tiling_data.h"}"\n'
+                   '#include <cstddef>\n#include <iostream>\n' + '\n'.join(host_abi_checks) + '\nint main() {\n' +
                    '\n'.join(f'{{auto t=MakeSparseKvPlanTiling(32,{t},{c},262144,32,4096,4096,64,{a});'
                              'std::cout<<t.hashCapacity<<" "<<t.workspaceRowElements<<" "<<t.localMemoryBytes<<"\\n";}'
                              for a in (1, 2) for t, c in shapes) + '\n}\n')
@@ -62,4 +93,6 @@ with tempfile.TemporaryDirectory(prefix='variant_layout_check_') as temporary:
                 assertions.append(f'static_assert(sparse_kv_plan::RowWorkspaceElements({layout["hash_capacity"]},{c},{t}) == {layout["row_elements"]});')
         cpp.write_text(f'#include "{header}"\n'+'\n'.join(assertions))
         subprocess.run(['g++', '-std=c++17', '-fsyntax-only', str(cpp)], check=True)
-print('PASS: 11 source/config hashes and direct ABIs; 16 C++/Python tilings including UB/GM boundaries; 11 production configs')
+print('PASS: 11 source/config hashes and direct ABIs; 11 launch tiling type lookups; '
+      'host/upstream/device POD size, alignment and field offsets; '
+      '16 C++/Python tilings including UB/GM boundaries; 11 production configs')

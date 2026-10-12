@@ -37,6 +37,12 @@
 
 `variants_manifest.json` 记录原基线提交、原 kernel 哈希、实际提取的计算头哈希和配置头哈希。`source_manifest.json` 则保留原工程来源及后续接入修改说明。
 
+### 接入层类型名修复
+
+`e0b4084` 的计算头保留了匿名命名空间中的 `SparseKvPlanTilingData`，直调 POD 又用了同名全局类型，入口会发生 C++ 名称歧义。现在直调 POD 和 11 个入口统一使用 `SparseKvPlanVariantTilingData`。算法头、配置头及其原有哈希保持不变。
+
+`checks/check_variant_layouts.py` 已增加将实际上游结构体与入口声明一起编译的回归检查，覆盖全部 11 路；同时核对 host、上游及直调 POD 的大小、对齐和每个字段偏移。原有检查只对照字段和 host 布局，没有覆盖这次名称冲突。修复后这些检查及 832 次框架 CPU 模拟调用通过；仍未执行 CANN/NPU 编译。
+
 ## 3. 为什么 C 系列不能沿用旧 workspace
 
 令 H 为 `max(32, next_pow2(2*topk))`：

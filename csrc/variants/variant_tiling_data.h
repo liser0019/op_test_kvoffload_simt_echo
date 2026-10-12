@@ -2,7 +2,7 @@
 // 注册版 tiling 宏的 POD 等价布局；字段类型和顺序不变。
 #pragma once
 #include <cstdint>
-struct SparseKvPlanTilingData {
+struct SparseKvPlanVariantTilingData {
   uint64_t hashCapacity;
   uint64_t workspaceRowElements;
   int64_t maxRows;
@@ -15,4 +15,4 @@ struct SparseKvPlanTilingData {
   int32_t blockSize;
   uint32_t localMemoryBytes;
 };
-static_assert(sizeof(SparseKvPlanTilingData) == 80, "Unexpected tiling ABI");
+static_assert(sizeof(SparseKvPlanVariantTilingData) == 80, "Unexpected tiling ABI");

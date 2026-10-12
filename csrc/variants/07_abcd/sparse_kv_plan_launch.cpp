@@ -11,9 +11,9 @@ extern "C" __global__ __aicore__ void sparse_kv_plan_v07_kernel(GM_ADDR reqIds, 
                                                      GM_ADDR tiling) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
   AscendC::InitSocState();
-  const __gm__ SparseKvPlanTilingData* tilingGm =
-      reinterpret_cast<const __gm__ SparseKvPlanTilingData*>(tiling);
-  SparseKvPlanTilingData tilingData;
+  const __gm__ SparseKvPlanVariantTilingData* tilingGm =
+      reinterpret_cast<const __gm__ SparseKvPlanVariantTilingData*>(tiling);
+  SparseKvPlanVariantTilingData tilingData;
   tilingData.hashCapacity = tilingGm->hashCapacity;
   tilingData.workspaceRowElements = tilingGm->workspaceRowElements;
   tilingData.maxRows = tilingGm->maxRows;

@@ -136,5 +136,9 @@
       "source_host_tiling_sha256": "1d3d93eaba01005bbef1b9cbb43aaa9b79397ae70f4c9fd3d8030cd66a80b9d9",
       "upstream_compute_prefix_sha256": "0bc241c1c77da58580fcfa47d0270e321420d7ad19cb264e14ec3b8e824838c9"
     }
+  ],
+  "launch_tiling_type": "SparseKvPlanVariantTilingData",
+  "integration_fixes": [
+    "直调 POD 使用独立类型名，避免与计算头匿名命名空间中的 SparseKvPlanTilingData 歧义；算法和配置哈希未变。"
   ]
 }
