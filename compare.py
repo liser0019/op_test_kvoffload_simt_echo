@@ -407,7 +407,7 @@ def main():
     parser.add_argument("--verify-each-sample", action="store_true", help="短跑审计：在每次预热/测量后全量校验")
     parser.add_argument("--cpu-check", action="store_true", help="只检查共同输入和 CPU 参考，不加载共享库、不计时")
     parser.add_argument("--implementations", nargs="+", choices=IMPLEMENTATIONS, default=list(IMPLEMENTATIONS),
-                        help="参与对比的实现；默认原 SIMT、Echo、11 个原候选及16个新增候选")
+                        help="参与对比的实现；默认原 SIMT、Echo、11 个原候选及9个新增候选")
     parser.add_argument("--reference", choices=IMPLEMENTATIONS,
                         help="统计加速比的基准；默认优先 simt，其次 00_baseline，否则第一路")
     parser.add_argument("--library", type=Path,

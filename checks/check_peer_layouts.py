@@ -50,11 +50,7 @@ with tempfile.TemporaryDirectory(prefix='peer_host_layout_') as temporary:
             actual = list(map(int, rows[name_index * len(shapes) + shape_index].split()))
             expected = b.plan_layout(topk, capacity, 32, name)
             assert actual == [expected['hash_capacity'], expected['row_elements'], expected['local_memory_bytes']], name
-# Default cached variant changes Host logic only; both imported control kernels are byte-identical.
-peer = ROOT / 'csrc/peer_variants'
-assert (peer / 'peer_00_baseline/upstream/sparse_kv_plan_kernel.cpp').read_bytes() == \
-       (peer / 'peer_09_cached_tiling/upstream/sparse_kv_plan_kernel.cpp').read_bytes()
-print(f'PASS: {len(names)} isolated Host ABIs/helpers, {len(names)*len(shapes)} workspace/UB cases; cached control kernel unchanged')
+print(f'PASS: {len(names)} isolated Host ABIs/helpers, {len(names)*len(shapes)} workspace/UB cases')
 
 # Verify literal registered schemas against the existing shared adapter schema.
 base = (ROOT / 'csrc/simt/sparse_kv_plan_plugin.cpp').read_text()

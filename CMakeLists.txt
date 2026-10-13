@@ -159,17 +159,10 @@ set(PEER_VARIANTS
     peer_04_parallel_scan
     peer_05_fused_lookup
     peer_06_packed_lists
-    peer_09_cached_tiling
     combo_bcde_fused
-    combo_bcde_cache
     combo_bcde_1024
-    combo_bcde_1024_cache
-    combo_bcde_fused_cache
     combo_bcde_fused_1024
-    combo_bcde_fused_1024_cache
-    combo_bcde_pair_scan
-    combo_bcde_pair_scan_cache
-    combo_bcde_pair_scan_1024_cache)
+    combo_bcde_pair_scan)
 foreach(_variant IN LISTS PEER_VARIANTS)
     set(_dir "${CMAKE_CURRENT_SOURCE_DIR}/csrc/peer_variants/${_variant}")
     file(GLOB _headers CONFIGURE_DEPENDS "${_dir}/*.h" "${_dir}/upstream/*")

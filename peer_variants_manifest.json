@@ -108,27 +108,6 @@
       "hardware_verified": false
     },
     {
-      "name": "peer_09_cached_tiling",
-      "op_name": "peer_09_cached_tiling",
-      "description": "设备+stream+全部 tiling 字段为 key，有限缓存",
-      "capacity_arrays": 2,
-      "threads": 2048,
-      "scratch_policy": "whole",
-      "source": "09_cached_tiling",
-      "path": "csrc/peer_variants/peer_09_cached_tiling",
-      "file_sha256": {
-        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
-        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
-        "symbol_aliases.h": "7f735332af3950abbd4a9485cb18a206676eca2414c47cfb4c6d43139b7df18a",
-        "upstream/plugin_registered.h": "58f3cb68e2d67d48d73b7835f2df996fa81d18cc6f7a468a2364f7c6e765b6b0",
-        "upstream/sparse_kv_plan_config.h": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
-        "upstream/sparse_kv_plan_kernel.cpp": "44aaa1be11cb6b06c573ed23811306c74c02be338db6318bd4b8567006dace13",
-        "upstream/sparse_kv_plan_launch.h": "1b2bc56c4a0035b0eb545aefac667a74b9d56d097046cd6b3be744ba4f031efa",
-        "upstream/sparse_kv_plan_plugin.cpp": "d019157afd06dba0ea637943c653ebd78b95d77452b49970fbaf8275cfd4456f"
-      },
-      "hardware_verified": false
-    },
-    {
       "name": "combo_bcde_fused",
       "op_name": "combo_bcde_fused",
       "description": "BCDE + insertion bucket reuse/fused hit-miss + scratch LRU read",
@@ -146,27 +125,6 @@
         "upstream/sparse_kv_plan_kernel.cpp": "80aad3a83b12013f5b49ab6f2940e4db3e825142bc9a767e01deac641d4d2e23",
         "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
         "upstream/sparse_kv_plan_plugin.cpp": "4da3cb003530637eaaa064bd94bd0dde44c28c253ec0db705420b07b88c3b236"
-      },
-      "hardware_verified": false
-    },
-    {
-      "name": "combo_bcde_cache",
-      "op_name": "combo_bcde_cache",
-      "description": "BCDE + tiling cache (Host)",
-      "capacity_arrays": 1,
-      "threads": 2048,
-      "scratch_policy": "whole",
-      "source": "BCDE combination",
-      "path": "csrc/peer_variants/combo_bcde_cache",
-      "file_sha256": {
-        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
-        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
-        "symbol_aliases.h": "f8bed184f093a3c504bdf3002c2329f17b8887966b42ecd3cd556c2062ad87d1",
-        "upstream/plugin_registered.h": "5af3bc0055e6741356de458ad619affaf151d9d28f8539d40687fc6c7bb56fe6",
-        "upstream/sparse_kv_plan_config.h": "a8b081b7cf3539eff89fb2c749209954736b79d59d04578fb37efcca1d0c4e05",
-        "upstream/sparse_kv_plan_kernel.cpp": "77a46a098766f5a8fb65c54e1c0eb7b9c9b5a19efc49bae206f5d31754336093",
-        "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
-        "upstream/sparse_kv_plan_plugin.cpp": "d019157afd06dba0ea637943c653ebd78b95d77452b49970fbaf8275cfd4456f"
       },
       "hardware_verified": false
     },
@@ -192,48 +150,6 @@
       "hardware_verified": false
     },
     {
-      "name": "combo_bcde_1024_cache",
-      "op_name": "combo_bcde_1024_cache",
-      "description": "BCDE + 1024 threads + tiling cache (Host)",
-      "capacity_arrays": 1,
-      "threads": 1024,
-      "scratch_policy": "whole",
-      "source": "BCDE combination",
-      "path": "csrc/peer_variants/combo_bcde_1024_cache",
-      "file_sha256": {
-        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
-        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
-        "symbol_aliases.h": "ea66dcc77e4a9a4c1673645228d42ad3af22c42627ecc838ba419da8a61e0337",
-        "upstream/plugin_registered.h": "e3ff707a4ad8b855d4d1617d0aa60d7602af93bd49eea8845cdb299a92fb292c",
-        "upstream/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-        "upstream/sparse_kv_plan_kernel.cpp": "77a46a098766f5a8fb65c54e1c0eb7b9c9b5a19efc49bae206f5d31754336093",
-        "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
-        "upstream/sparse_kv_plan_plugin.cpp": "d019157afd06dba0ea637943c653ebd78b95d77452b49970fbaf8275cfd4456f"
-      },
-      "hardware_verified": false
-    },
-    {
-      "name": "combo_bcde_fused_cache",
-      "op_name": "combo_bcde_fused_cache",
-      "description": "BCDE + F + tiling cache (Host)",
-      "capacity_arrays": 1,
-      "threads": 2048,
-      "scratch_policy": "whole",
-      "source": "BCDE combination",
-      "path": "csrc/peer_variants/combo_bcde_fused_cache",
-      "file_sha256": {
-        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
-        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
-        "symbol_aliases.h": "c361525f2d30e1d47aa99e00aab6ff0c542fe6316a00b20dbc8304d7aa39f589",
-        "upstream/plugin_registered.h": "141eaf8faf9411b9b74ef4aa002a2897faaa06dc57ca0708db3b8b0159ecd63d",
-        "upstream/sparse_kv_plan_config.h": "a8b081b7cf3539eff89fb2c749209954736b79d59d04578fb37efcca1d0c4e05",
-        "upstream/sparse_kv_plan_kernel.cpp": "80aad3a83b12013f5b49ab6f2940e4db3e825142bc9a767e01deac641d4d2e23",
-        "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
-        "upstream/sparse_kv_plan_plugin.cpp": "d019157afd06dba0ea637943c653ebd78b95d77452b49970fbaf8275cfd4456f"
-      },
-      "hardware_verified": false
-    },
-    {
       "name": "combo_bcde_fused_1024",
       "op_name": "combo_bcde_fused_1024",
       "description": "BCDE + F + 1024 threads",
@@ -255,27 +171,6 @@
       "hardware_verified": false
     },
     {
-      "name": "combo_bcde_fused_1024_cache",
-      "op_name": "combo_bcde_fused_1024_cache",
-      "description": "BCDE + F + 1024 threads + tiling cache (Host)",
-      "capacity_arrays": 1,
-      "threads": 1024,
-      "scratch_policy": "whole",
-      "source": "BCDE combination",
-      "path": "csrc/peer_variants/combo_bcde_fused_1024_cache",
-      "file_sha256": {
-        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
-        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
-        "symbol_aliases.h": "e46773535d9c9c49be5f4a5780cd8e9579997cbb1a53035b114377f4d7390d43",
-        "upstream/plugin_registered.h": "d4bae4b5d6794b71b0dfb14ce8b2774a6ad335bed27e9d3600aa56b08c154b92",
-        "upstream/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-        "upstream/sparse_kv_plan_kernel.cpp": "80aad3a83b12013f5b49ab6f2940e4db3e825142bc9a767e01deac641d4d2e23",
-        "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
-        "upstream/sparse_kv_plan_plugin.cpp": "d019157afd06dba0ea637943c653ebd78b95d77452b49970fbaf8275cfd4456f"
-      },
-      "hardware_verified": false
-    },
-    {
       "name": "combo_bcde_pair_scan",
       "op_name": "combo_bcde_pair_scan",
       "description": "BCDE + peer04 pair scan with grouped fallback",
@@ -293,48 +188,6 @@
         "upstream/sparse_kv_plan_kernel.cpp": "e77c8b61c574add8db5b0e84a6f6ae54d6e0e3fda3710b0498c9747bff6ed297",
         "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
         "upstream/sparse_kv_plan_plugin.cpp": "4da3cb003530637eaaa064bd94bd0dde44c28c253ec0db705420b07b88c3b236"
-      },
-      "hardware_verified": false
-    },
-    {
-      "name": "combo_bcde_pair_scan_cache",
-      "op_name": "combo_bcde_pair_scan_cache",
-      "description": "BCDE + peer04 pair scan with grouped fallback + tiling cache (Host)",
-      "capacity_arrays": 1,
-      "threads": 2048,
-      "scratch_policy": "whole",
-      "source": "BCDE combination",
-      "path": "csrc/peer_variants/combo_bcde_pair_scan_cache",
-      "file_sha256": {
-        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
-        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
-        "symbol_aliases.h": "07f1cdf8b05e313b8ac0ce6fa75fede28aa505e08c46b9c1ce77831199684de5",
-        "upstream/plugin_registered.h": "23146dc72bbe4ad2e249f28f61b35a7689c713e7def6e019e967826a222ca801",
-        "upstream/sparse_kv_plan_config.h": "a8b081b7cf3539eff89fb2c749209954736b79d59d04578fb37efcca1d0c4e05",
-        "upstream/sparse_kv_plan_kernel.cpp": "e77c8b61c574add8db5b0e84a6f6ae54d6e0e3fda3710b0498c9747bff6ed297",
-        "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
-        "upstream/sparse_kv_plan_plugin.cpp": "d019157afd06dba0ea637943c653ebd78b95d77452b49970fbaf8275cfd4456f"
-      },
-      "hardware_verified": false
-    },
-    {
-      "name": "combo_bcde_pair_scan_1024_cache",
-      "op_name": "combo_bcde_pair_scan_1024_cache",
-      "description": "BCDE + peer04 pair scan with grouped fallback + 1024 threads + tiling cache (Host)",
-      "capacity_arrays": 1,
-      "threads": 1024,
-      "scratch_policy": "whole",
-      "source": "BCDE combination",
-      "path": "csrc/peer_variants/combo_bcde_pair_scan_1024_cache",
-      "file_sha256": {
-        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
-        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
-        "symbol_aliases.h": "56375307a83e0aa1ee14999f7eadfd3bd96f9228550f4e1f7efbb0dbabc105db",
-        "upstream/plugin_registered.h": "f65f37c89f72b044455e29312fe6a9f046c1b72f2ff253712dc909a638bd6a5d",
-        "upstream/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-        "upstream/sparse_kv_plan_kernel.cpp": "e77c8b61c574add8db5b0e84a6f6ae54d6e0e3fda3710b0498c9747bff6ed297",
-        "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
-        "upstream/sparse_kv_plan_plugin.cpp": "d019157afd06dba0ea637943c653ebd78b95d77452b49970fbaf8275cfd4456f"
       },
       "hardware_verified": false
     }
