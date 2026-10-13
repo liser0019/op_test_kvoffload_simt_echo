@@ -1,5 +1,7 @@
 // Adapted from peer_code/echo_lru_kernel.asc; computational stages retained.
-// echo_lru 纯 SIMT 版本 (Path A: 按行分块) — LRU 8 步元数据 kernel.
+// echo_lru 纯 SIMT 版本 (Path A: 按行分块) — LRU 元数据多步 kernel
+//   (Step0 reset → Step6 set_update, 原 Step1 计数子步与 Step7 final slots
+//    已分别并入 warp 归约与 OpSetUpdate, 见 [P0]/[P2] 标记)。
 //
 // 纯 SIMT 范式 (对照 examples/03_simt_api gather_2d / grid_config):
 //   - 不 include kernel_operator.h (那是 SIMD 头树, 纯 SIMT 后端找不到 kernel_tpipe.h).
@@ -21,6 +23,7 @@
 #include "simt_api/device_sync_functions.h"     // asc_syncthreads
 #include "simt_api/device_atomic_functions.h"   // asc_atomic_add
 #include "simt_api/device_functions.h"          // asc_dcci_entire
+#include "simt_api/device_warp_functions.h"     // asc_shfl_up / asc_reduce_add ([P0/P1/P3] warp 协作)
 // clock() (PerfBegin/PerfEnd 分步打点) 由 common_functions.h → utils/debug/asc_time.h 提供
 // (3510 纯 SIMT 下返回 uint64_t 周期计数).
 // Path A does not use cooperative_groups; avoid an unnecessary CANN 9.2 dependency.
@@ -28,6 +31,63 @@
 namespace ascend_kernel {
 
 constexpr int32_t I32_MAX = 2147483647;
+
+// ===========================================================================
+// [P0/P1/P3 2026-10-13] warp/block 协作辅助 (两级结构对照 SIMT 基线 BlockExclusiveScan)。
+// dav-3510 SIMT 实测特性:
+//   - 同地址 GM atomic 串行化严重 (~9K 周期/次, 1024 线程打同一地址时 OpHitMiss 高达
+//     ~9.4M 周期), 块内计数一律走 warp 归约/扫描 + t0 汇总;
+//   - 1024 线程 asc_syncthreads ~1-2K 周期, 栅栏次数本身是成本, 优先 warp 内解决。
+// warp 数按 blockDim.x 运行时推导 (设备 1024→32 warp; CPU 回归 128→4 warp)。
+// ===========================================================================
+
+// 块内求和并写 GM: 每线程 value, t0 把全块总和写入 *outGm。2 次栅栏, 无 atomic。
+//   lane0 必须拿到 warp 归约结果 —— asc_reduce_add 无论返回给全 warp 还是仅 lane0,
+//   lane0 的值都是正确的 (两种语义下均安全)。
+__aicore__ inline void BlockSumToGm(int32_t value, int32_t* warpTotals, int32_t* outGm) {
+    uint32_t lane = threadIdx.x & 31u;
+    uint32_t warpCount = blockDim.x >> 5;
+    int32_t warpSum = asc_reduce_add(value);   // warp 内归约, 无栅栏
+    if (lane == 0u) warpTotals[threadIdx.x >> 5] = warpSum;
+    asc_syncthreads();
+    if (threadIdx.x == 0u) {
+        int32_t s = 0;
+        for (uint32_t w = 0; w < warpCount; ++w) s += warpTotals[w];
+        *outGm = s;
+    }
+    asc_syncthreads();   // t0 读完 warpTotals 后, 下一行才能复用
+}
+
+// 打包块内独占扫描: value = 字段A | (字段B << shift), 两个字段各自的块内总和都
+//   必须小于 (1 << shift) (打包加法无跨字段进位, 由调用方保证)。返回本线程的
+//   exclusive (同打包格式); t0 另把全块 grand total (打包) 写入 control[0]。
+//   3 次栅栏, 结构与基线 BlockExclusiveScan 一致 (warp shuffle 一级 + t0 扫
+//   warp total 二级 + 尾栅栏保护 scratch 复用)。
+__aicore__ inline int32_t PackedBlockScan(int32_t packedValue,
+                                          int32_t* warpTotals, int32_t* warpBases, int32_t* control) {
+    uint32_t lane = threadIdx.x & 31u;
+    uint32_t warp = threadIdx.x >> 5;
+    uint32_t warpCount = blockDim.x >> 5;
+    int32_t inclusive = packedValue;
+    for (uint32_t offset = 1u; offset < 32u; offset <<= 1u) {
+        int32_t prior = asc_shfl_up(inclusive, offset, 32u);
+        if (lane >= offset) inclusive += prior;
+    }
+    if (lane == 31u) warpTotals[warp] = inclusive;
+    asc_syncthreads();
+    if (threadIdx.x == 0u) {
+        int32_t base = 0;
+        for (uint32_t w = 0; w < warpCount; ++w) {
+            warpBases[w] = base;
+            base += warpTotals[w];
+        }
+        control[0] = base;
+    }
+    asc_syncthreads();
+    int32_t exclusive = warpBases[warp] + inclusive - packedValue;
+    asc_syncthreads();
+    return exclusive;
+}
 
 // ---- argtopk 缓冲 (定义见 echo_lru_tiling.h, host/device 共享) ----
 // [radix select] OpArgtopkRow 用 4 趟 MSB-first 基数选择: key/hist/globalCnt/scalar
@@ -202,11 +262,19 @@ __aicore__ inline void OpSpecAvailAdd(
     }
 }
 
-// ---- Step 1: hit/miss ----
+// ---- Step 1: hit/miss + miss 计数 ----
+// [P0 2026-10-13] miss 计数改 warp 归约 + t0 汇总写 GM。原实现每线程一次
+//   asc_atomic_add 到同一 GM 地址 numHitsGm[row]: warm 场景 ~1024 次/行, 同地址
+//   atomic 串行 ~9K 周期/次 → OpHitMiss 实测 ~9.4M 周期; cold 场景 0 hit 无 atomic
+//   仅 ~10K (耗时与 hit 数几乎无关、与 atomic 次数强相关, 已证实根因)。
+//   现 2 次块栅栏/行, 计数语义不变: 直接数 effTopk 内 curSlots==I32_MAX 的个数,
+//   与原公式 numMisses = effTopk - numHits 恒等。numHitsGm 不再读写 (槽位保留防
+//   workspace 布局漂移)。
 __aicore__ inline void OpHitMiss(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t maxModelLenP1,
     uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* htdGm, int32_t* posGm, int32_t* curSlotsGm, int32_t* numHitsGm) {
+    int32_t* htdGm, int32_t* posGm, int32_t* curSlotsGm, int32_t* numMissesGm,
+    int32_t* warpScratch) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
     for (uint32_t r = 0; r < rowCount; ++r) {
@@ -214,35 +282,16 @@ __aicore__ inline void OpHitMiss(
         if (row >= R) break;
         uint32_t rowOff = row * topkDim;
         uint32_t htdRowOff = row * maxModelLenP1;
-        // [Perf 2026-10-09] hit 计数改每线程本地累加, 行末一次 atomic (原逐 hit 对同一地址
-        //   numHitsGm[row] 原子加, 每行最多 effTopk 次争用; 现降为 ≤ 每行活跃线程数 次).
-        //   atomic 可加任意增量 (见 atomic_intrinsics 示例), 正确性不变 (加法可交换).
-        uint32_t localHits = 0;
+        uint32_t localMiss = 0;
         for (uint32_t j = threadIdx.x; j < topkDim; j += blockDim.x) {
             if (j >= effTopk) { curSlotsGm[rowOff + j] = 0; continue; }
             int32_t tok = posGm[rowOff + j];
             int32_t tokSafe = tok < 0 ? 0 : (tok > (int32_t)(maxModelLenP1 - 1) ? (int32_t)(maxModelLenP1 - 1) : tok);
             int32_t slot = htdGm[htdRowOff + tokSafe];
             curSlotsGm[rowOff + j] = slot;
-            if (slot != I32_MAX) localHits++;
+            if (slot == I32_MAX) localMiss++;
         }
-        if (localHits != 0) asc_atomic_add(&numHitsGm[row], (int32_t)localHits);
-    }
-}
-
-__aicore__ inline void OpNumMisses(
-    uint32_t R, uint32_t effTopk, uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* numHitsGm, int32_t* numMissesGm) {
-    uint32_t startRow = blockIdx.x * rowsPerCore;
-    uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
-    if (threadIdx.x == 0) {
-        for (uint32_t r = 0; r < rowCount; ++r) {
-            uint32_t row = startRow + r;
-            if (row >= R) break;
-            int32_t h = numHitsGm[row];
-            int32_t nm = (int32_t)effTopk - h;
-            numMissesGm[row] = nm < 0 ? 0 : nm;
-        }
+        BlockSumToGm((int32_t)localMiss, warpScratch, &numMissesGm[row]);
     }
 }
 
@@ -420,27 +469,47 @@ __aicore__ inline void OpArgtopkRow(
     uint32_t T = (uint32_t)scalar[0];
     uint32_t quota = (uint32_t)scalar[1];
 
-    if (t == 0) {
-        uint32_t w = 0u;
-        for (uint32_t i = 0; i < Npad; ++i) {
+    // [P1 2026-10-13] emission 并行化: 原实现 t0 串行两遍 Npad 扫描 + 串行补零,
+    //   单线程无法隐藏访存延迟 (full_cache 场景 ArgtopkAllRows 实测 ~2.1M 周期,
+    //   其中直方图 4 趟仅占几万)。现全员按连续切片统计 (nLt | nEq<<16) 打包块扫描
+    //   得各线程写入基址, 再并行写 freeIdxOut 与补零。
+    //   ⚠ 线程切片必须连续 (lo = t*chunk) 而非 grid-stride: 保证跨线程输出仍按
+    //   全局槽号升序 —— 先全部 key<T (槽号升序), 再前 quota 个 key==T (槽号升序),
+    //   与原 t0 串行语义逐位一致 (grid-stride 切片会得到"线程主序", 顺序就错了)。
+    {
+        int32_t* warpTotals = hist;        // hist 在 4 趟选择后已死, 复用作扫描 scratch
+        int32_t* warpBases  = hist + 32;
+        int32_t* control    = hist + 64;
+        uint32_t chunk = (Npad + blockDim.x - 1u) / blockDim.x;
+        uint32_t lo = t * chunk;
+        uint32_t hi = (lo + chunk > Npad || lo > Npad) ? Npad : (lo + chunk);
+        uint32_t nLt = 0u, nEq = 0u;
+        for (uint32_t i = lo; i < hi; ++i) {
+            uint32_t v = (uint32_t)key[i];
+            if (v < T) ++nLt;
+            else if (v == T) ++nEq;
+        }
+        // 字段上界: nLt/nEq 块内总和 ≤ Npad=8192 < 2^16, 16bit 字段无跨字段进位。
+        int32_t excl = PackedBlockScan((int32_t)(nLt | (nEq << 16)), warpTotals, warpBases, control);
+        uint32_t wLt = (uint32_t)excl & 0xFFFFu;            // 本线程之前所有切片的 key<T 总数
+        uint32_t wEq = (uint32_t)excl >> 16;                // 本线程之前所有切片的 key==T 总数
+        uint32_t totalLt = (uint32_t)control[0] & 0xFFFFu;  // 全块 key<T 总数 (= fsClamp - quota)
+        for (uint32_t i = lo; i < hi; ++i) {
             uint32_t v = (uint32_t)key[i];
             if (v < T) {
-                freeIdxOut[row * topkDim + w] = (int32_t)i;
-                ++w;
+                freeIdxOut[row * topkDim + wLt] = (int32_t)i;
+                ++wLt;
+            } else if (v == T && wEq < quota) {
+                freeIdxOut[row * topkDim + totalLt + wEq] = (int32_t)i;
+                ++wEq;
             }
         }
-        uint32_t q = 0u;
-        for (uint32_t i = 0; i < Npad && q < quota; ++i) {
-            uint32_t v = (uint32_t)key[i];
-
-            if (v == T) {
-                freeIdxOut[row * topkDim + w] = (int32_t)i;
-                ++w;
-                ++q;
-            }
+        // 尾部补零 [fsClamp, topkDim) (选择不变量: totalLt + quota == fsClamp)。
+        for (uint32_t i = fsClamp + t; i < topkDim; i += blockDim.x) {
+            freeIdxOut[row * topkDim + i] = 0;
         }
-        for (uint32_t i = w; i < topkDim; ++i) freeIdxOut[row * topkDim + i] = 0;
-        asc_dcci_entire((void*)freeIdxOut);
+        asc_syncthreads();
+        if (t == 0) asc_dcci_entire((void*)freeIdxOut);
     }
     asc_syncthreads();
     (void)segLocal;  // 预留分段 scatter 缓冲, 基数选择路径未使用
@@ -585,11 +654,16 @@ __aicore__ inline void OpAllocPriority(
 }
 
 // ---- Step 6: set_update ----
-// [Perf 2026-10-13] miss 前缀和改并行 Hillis-Steele 扫描: 每线程处理 p0=t 与 p1=t+Bm
-//   (Bm=blockDim.x, 两元素/线程), bufA/bufB 在 argtopk UB 内 ping-pong (argtopk 已完成,
-//   UB 可复用). 条件 topkDim <= 2*Bm && 2*topkDim <= ARGTOPK_UB_NPAD_MAX 不满足时回退
-//   t0 串行累加 (大 topkDim 或 UB 不足). 语义与串行版逐字段一致: wsMissRank = miss 的
-//   exclusive 前缀秩, missPos = miss ? pos : 0.
+// [P3 2026-10-13] miss 前缀和改两级 warp 扫描 (对照基线 BlockExclusiveScan), 替代
+//   Hillis-Steele: 原 11 轮 × 1024 线程块栅栏 (~20K 周期, cold/warm 耗时相同 →
+//   barrier bound 而非 work bound), 现 warp shuffle 一级 + t0 扫 warp total 二级,
+//   3 次栅栏/行。每线程 2 元素打包进一个 int32: 低 12bit = p0 miss, 高 12bit 起
+//   = p1 miss (总数 ≤ topkDim ≤ 2048 < 2^12, 无跨字段进位)。p0 位 = 线程号,
+//   p1 位 = 线程号 + Bm, 均为连续映射 → 排名可由打包前缀直接拼出:
+//   rank(p0=t) = E0(t); rank(p1=t+Bm) = TotalMiss0 + E1(t)。
+// 条件不满足 (topkDim > 2*blockDim 或 2*topkDim > 8192) 时回退 t0 串行累加。
+// 语义与串行版逐字段一致: wsMissRank = miss 的 exclusive 前缀秩,
+// missPos = miss ? pos : 0。
 __aicore__ inline void OpMissCumsum(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* curSlotsGm, int32_t* posGm,
@@ -601,8 +675,9 @@ __aicore__ inline void OpMissCumsum(
     const uint32_t Bm = blockDim.x;
 
     if (topkDim <= 2u * Bm && 2u * topkDim <= ARGTOPK_UB_NPAD_MAX) {
-        int32_t* bufA = scanUb;
-        int32_t* bufB = scanUb + topkDim;
+        int32_t* warpTotals = scanUb;
+        int32_t* warpBases  = scanUb + 32;
+        int32_t* control    = scanUb + 64;
         for (uint32_t r = 0; r < rowCount; ++r) {
             uint32_t row = startRow + r;
             if (row >= R) break;
@@ -615,43 +690,23 @@ __aicore__ inline void OpMissCumsum(
                 bool miss0 = (p0 < effTopk) && (curSlotsGm[rowOff + p0] == I32_MAX);
                 missPosGm[rowOff + p0] = miss0 ? posGm[rowOff + p0] : 0;
                 ind0 = miss0 ? 1 : 0;
-                bufA[p0] = ind0;
             }
             int32_t ind1 = 0;
             if (p1 < topkDim) {
                 bool miss1 = (p1 < effTopk) && (curSlotsGm[rowOff + p1] == I32_MAX);
                 missPosGm[rowOff + p1] = miss1 ? posGm[rowOff + p1] : 0;
                 ind1 = miss1 ? 1 : 0;
-                bufA[p1] = ind1;
             }
-            asc_syncthreads();
-
-            int32_t* src = bufA;
-            int32_t* dst  = bufB;
-            for (uint32_t offset = 1u; offset < topkDim; offset <<= 1) {
-                if (p0 < topkDim) {
-                    int32_t v0 = (p0 >= offset) ? src[p0 - offset] : 0;
-                    dst[p0] = src[p0] + v0;
-                }
-                if (p1 < topkDim) {
-                    int32_t v1 = (p1 >= offset) ? src[p1 - offset] : 0;
-                    dst[p1] = src[p1] + v1;
-                }
-                asc_syncthreads();
-                int32_t* tmp = src;
-                src = dst;
-                dst = tmp;
-            }
-
+            int32_t excl = PackedBlockScan(ind0 | (ind1 << 12), warpTotals, warpBases, control);
+            int32_t e0 = excl & 0xFFF;
+            int32_t e1 = (excl >> 12) & 0xFFF;
+            int32_t total0 = control[0] & 0xFFF;
             if (p0 < topkDim) {
-                int32_t exc0 = src[p0] - ind0;
-                wsMissRankGm[rowOff + p0] = (ind0 != 0) ? exc0 : 0;
+                wsMissRankGm[rowOff + p0] = ind0 ? e0 : 0;
             }
             if (p1 < topkDim) {
-                int32_t exc1 = src[p1] - ind1;
-                wsMissRankGm[rowOff + p1] = (ind1 != 0) ? exc1 : 0;
+                wsMissRankGm[rowOff + p1] = ind1 ? (total0 + e1) : 0;
             }
-            asc_syncthreads();
         }
         return;
     }
@@ -707,6 +762,10 @@ __aicore__ inline void OpSetUpdate(
                 dthGm[dthRowOff + s] = mpos;
                 missAllocFlatGm[rowOff + j] = (int32_t)row * (int32_t)B + aslot;  // row*B+aslot, 32 位足够
                 missMaskGm[rowOff + j] = 1;
+                // [P2 2026-10-13] miss 的最终槽位就是本轮分配的 aslot, 此处顺手写回 curSlots。
+                //   原 OpFinalSlots 对全部 topk 重新 gather htd 属冗余 (hit 位 curSlots 在
+                //   Step1 已正确), 该步已删除; 行内 pos 不重复契约下 htd[pos_j] 恰为 aslot_j。
+                curSlotsGm[rowOff + j] = aslot;
             } else {
                 missAllocFlatGm[rowOff + j] = 0;
                 missMaskGm[rowOff + j] = 0;
@@ -716,25 +775,8 @@ __aicore__ inline void OpSetUpdate(
 }
 
 // ---- Step 7: final slots ----
-__aicore__ inline void OpFinalSlots(
-    uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t maxModelLenP1,
-    uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* htdGm, int32_t* posGm, int32_t* curSlotsGm) {
-    uint32_t startRow = blockIdx.x * rowsPerCore;
-    uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
-    for (uint32_t r = 0; r < rowCount; ++r) {
-        uint32_t row = startRow + r;
-        if (row >= R) break;
-        uint32_t rowOff = row * topkDim;
-        uint32_t htdRowOff = row * maxModelLenP1;
-        for (uint32_t j = threadIdx.x; j < topkDim; j += blockDim.x) {
-            if (j >= effTopk) { curSlotsGm[rowOff + j] = 0; continue; }
-            int32_t tok = posGm[rowOff + j];
-            int32_t tokSafe = tok < 0 ? 0 : (tok > (int32_t)(maxModelLenP1 - 1) ? (int32_t)(maxModelLenP1 - 1) : tok);
-            curSlotsGm[rowOff + j] = htdGm[htdRowOff + tokSafe];
-        }
-    }
-}
+// [P2 2026-10-13] 已并入 OpSetUpdate (miss 位直接写回 aslot, hit 位 Step1 已正确),
+//   独立的 OpFinalSlots (全量 topk 重新 gather htd) 已删除。
 
 __aicore__ inline void OpFillZero(
     uint32_t R, uint32_t rowsPerCore, uint32_t tailRows, int32_t* outGm) {
@@ -791,7 +833,7 @@ public:
         uint32_t o = 0;
         wsCumsumGm_   = ws + o; o += R * (B + 1);
         pushCountGm_  = ws + o; o += R;
-        numHitsGm_    = ws + o; o += R;
+        numHitsGm_    = ws + o; o += R;   // [P0] 已无读写, 槽位保留防 workspace 布局漂移
         numMissesGm_  = ws + o; o += R;
         freeIdxGm_    = ws + o; o += R * topkDim;   // row stride = topkDim (kEff 已删)
         freeSizeGm_   = ws + o; o += R;
@@ -846,7 +888,7 @@ public:
         uint32_t rowsPerCore = tiling_.rowsPerCore;
         uint32_t tailRows = tiling_.tailRows;
 
-        OpFillZero(R, rowsPerCore, tailRows, numHitsGm_);
+        // [P0] numHitsGm 已无读者, 不再清零 (槽位保留防布局漂移); pushCount 供 spec 路径。
         OpFillZero(R, rowsPerCore, tailRows, pushCountGm_);
         SyncGrid();
 
@@ -871,11 +913,11 @@ public:
             PerfBegin(); SyncGrid(); PerfEnd();
         }
 
-        // ---- Step 1: hit/miss ----
-        PerfBegin(); OpHitMiss(R, topkDim, effTopk, maxModelLenP1, rowsPerCore, tailRows, htdGm_, posGm_, curSlotsGm_, numHitsGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
-        PerfBegin(); OpNumMisses(R, effTopk, rowsPerCore, tailRows, numHitsGm_, numMissesGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
+        // ---- Step 1: hit/miss + miss 计数 (warp 归约, 无 atomic) ----
+        PerfBegin(); OpHitMiss(R, topkDim, effTopk, maxModelLenP1, rowsPerCore, tailRows,
+                     htdGm_, posGm_, curSlotsGm_, numMissesGm_, argtopkKeyUb_); PerfEnd();
+        PerfBegin(); SyncGrid(); PerfEnd();  // curSlots 行内跨线程 RAW → Step2 OpProtect;
+                                            // numMissesGm 由 t0 写、OpFreeSize(t0) 同线程读, 无需栅栏。
 
         // ---- Step 2: protect + fifo++ ----
         PerfBegin(); OpProtect(R, topkDim, effTopk, B, rowsPerCore, tailRows, curSlotsGm_, priGm_, fifoGm_); PerfEnd();
@@ -912,17 +954,14 @@ public:
         PerfBegin(); OpFifoInc(R, rowsPerCore, tailRows, fifoGm_); PerfEnd();
         PerfBegin(); SyncGrid(); PerfEnd();
 
-        // ---- Step 6: set_update ----
+        // ---- Step 6: set_update (含最终槽位回写, 原 OpFinalSlots 已并入) ----
         PerfBegin(); OpMissCumsum(R, topkDim, effTopk, rowsPerCore, tailRows,
                      curSlotsGm_, posGm_, wsMissRankGm_, missHostPosGm_, argtopkKeyUb_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
+        PerfBegin(); SyncGrid(); PerfEnd();  // wsMissRank/missPos 跨线程 RAW → OpSetUpdate
         PerfBegin(); OpSetUpdate(R, topkDim, effTopk, B, maxModelLenP1, rowsPerCore, tailRows,
                     curSlotsGm_, wsMissRankGm_, missHostPosGm_, missAllocFlatGm_, missMaskGm_,
                     rawSlotsGm_, htdGm_, dthGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
-
-        // ---- Step 7: final slots ----
-        PerfBegin(); OpFinalSlots(R, topkDim, effTopk, maxModelLenP1, rowsPerCore, tailRows, htdGm_, posGm_, curSlotsGm_); PerfEnd();
+        // [P2] 之后无本 kernel 内读者, 不再需要尾步/尾栅栏 (kernel 结束即对 host 可见)。
     }
 
 private:

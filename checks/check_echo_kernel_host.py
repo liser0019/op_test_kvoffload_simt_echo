@@ -2,10 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Echo 更新回归：直接提取实际 C++ 函数，用 g++/128 个 CPU 线程检查基数选择、hit 与 miss 扫描。
 
-覆盖 2026-10-13 手抄版的三处设备算法改动：
-  - OpArgtopkRow：4 趟 MSB-first 基数选择（阈值 T + 配额 quota），替代旧 4-pass LSD 全排序；
-  - OpMissCumsum：Hillis-Steele 并行前缀扫描（topkDim<=2*blockDim 时），否则回退 t0 串行；
-  - OpHitMiss：每线程本地累计 + 行末一次 atomic（未改动，继续回归）。
+覆盖 2026-10-13 手抄版的三处设备算法改动 + P0-P3 性能优化：
+  - OpHitMiss：miss 计数改 warp 归约 + t0 汇总（[P0] 无 atomic，numMisses 直接写出）；
+  - OpArgtopkRow：4 趟 MSB-first 基数选择 + 并行 emission（[P1] 打包块扫描得各线程
+    写入基址，连续切片保槽号升序，替代 t0 串行扫描）；
+  - OpMissCumsum：两级 warp 扫描（[P3] 打包 p0/p1 miss 标志，替代 Hillis-Steele），
+    否则回退 t0 串行；
+  - BlockSumToGm / PackedBlockScan：warp 协作辅助（shfl_up 模拟）。
 
 依赖 Python 标准库和支持 C++20 的 g++；启用 AddressSanitizer/UBSan。
 这是 CPU 算法和索引检查，不能验证 Ascend 编译、GM D-cache 或 NPU 耗时。
@@ -15,19 +18,25 @@ from pathlib import Path
 import tempfile, subprocess, re
 root=Path(__file__).resolve().parents[1]
 # 当前测试使用与设备一致的 64 路直方图线程（ARGTOPK_GROUP_THREADS），
-# 128 个 CPU 线程模拟一个 block（blockDim.x=128；并行扫描路径 Bm=blockDim.x）。
+# 128 个 CPU 线程模拟一个 block（blockDim.x=128→4 warp；warp 协作辅助按
+# blockDim.x 运行时推导 warp 数）。
 # 断言模型常量与实际头文件一致，防止以后修改 tiling 后误用旧模型。
 tiling=(root/'csrc/echo/echo_lru_tiling.h').read_text()
 for name,value in [('ARGTOPK_GROUP_THREADS',64),('ARGTOPK_UB_NPAD_MAX',8192),
-                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',44)]:
+                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',40)]:
     match=re.search(r'constexpr uint32_t '+name+r'\s*=\s*(\d+)\s*;',tiling)
     assert match and int(match.group(1))==value, f'{name} 已改变，请同步调整 CPU 模型'
 src=(root/'csrc/echo/echo_lru_kernel.h').read_text()
 def extract(name):
-    start=src.index('__aicore__ inline void '+name+'(')
-    end=src.index('\n}\n',start)+3
-    return src[start:end]
-functions=(extract('OpHitMiss')+'\n'+extract('OpArgtopkRow')+'\n'+extract('OpMissCumsum'))
+    for prefix in ('__aicore__ inline void ','__aicore__ inline int32_t '):
+        tag=prefix+name+'('
+        if tag in src:
+            start=src.index(tag)
+            end=src.index('\n}\n',start)+3
+            return src[start:end]
+    raise KeyError(name)
+helpers=(extract('BlockSumToGm')+'\n'+extract('PackedBlockScan'))
+functions=(helpers+'\n'+extract('OpHitMiss')+'\n'+extract('OpArgtopkRow')+'\n'+extract('OpMissCumsum'))
 preamble=r'''
 #include <algorithm>
 #include <atomic>
@@ -50,6 +59,27 @@ std::atomic<uint32_t> atomicCalls{0};
 inline void asc_syncthreads(){syncBlock.arrive_and_wait();}
 inline void asc_dcci_entire(void*){}
 inline int32_t asc_atomic_add(int32_t* p,int32_t v){atomicCalls.fetch_add(1);return std::atomic_ref<int32_t>(*p).fetch_add(v);}
+// warp 原语 CPU 模拟: 设备代码在统一控制流里调用 (无 warp 内发散), 用共享缓冲 +
+// 双栅栏交换即可精确复现语义。asc_shfl_up: lane<delta 时返回自身值 (与 CUDA 一致,
+// 基线的 lane>=offset 判断依赖此语义)。asc_reduce_add: warp 内求和返回全 lane。
+int32_t warpBuf[128];
+inline int32_t asc_shfl_up(int32_t var,uint32_t delta,int32_t){
+    warpBuf[threadIdx.x]=var;
+    syncBlock.arrive_and_wait();
+    uint32_t lane=threadIdx.x&31u;
+    int32_t r=(lane>=delta)?warpBuf[threadIdx.x-delta]:var;
+    syncBlock.arrive_and_wait();
+    return r;
+}
+inline int32_t asc_reduce_add(int32_t val){
+    warpBuf[threadIdx.x]=val;
+    syncBlock.arrive_and_wait();
+    uint32_t base=(threadIdx.x>>5)<<5;
+    int32_t s=0;
+    for(uint32_t i=base;i<base+32u;++i)s+=warpBuf[i];
+    syncBlock.arrive_and_wait();
+    return s;
+}
 template<typename F> void launch(F fn){
     std::vector<std::thread> threads;
     for(uint32_t t=0;t<blockDim.x;++t) threads.emplace_back([=]{threadIdx.x=t;fn();});
@@ -128,24 +158,24 @@ try{
             ++checks;
         }
     }
-    // ---- 2) OpHitMiss: 每线程本地累计 + 一次 atomic ----
+    // ---- 2) OpHitMiss: warp 归约计数, 无 atomic ----
     for(uint32_t eff:{4u,1536u,2048u}){
         constexpr uint32_t R=3,L=4096,T=2048;
-        std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),hits(R,0);
+        std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),misses(R,-777),scratch(65,-777);
         for(uint32_t i=0;i<R*L;++i)htd[i]=(i%4==0)?I32_MAX:static_cast<int32_t>(i%4096);
         for(uint32_t i=0;i<R*T;++i)pos[i]=(i%7==0)?-1:static_cast<int32_t>((i*5)%(L+100));
         atomicCalls=0;
-        launch([&]{OpHitMiss(R,T,eff,L,R,R,htd.data(),pos.data(),out.data(),hits.data());});
+        launch([&]{OpHitMiss(R,T,eff,L,R,R,htd.data(),pos.data(),out.data(),misses.data(),scratch.data());});
         for(uint32_t r=0;r<R;++r){
-            int32_t expectedHits=0;
+            int32_t expectedMisses=0;
             for(uint32_t j=0;j<T;++j){
                 int32_t expectedSlot=j>=eff?0:htd[r*L+std::clamp(pos[r*T+j],0,static_cast<int32_t>(L-1))];
                 require(out[r*T+j]==expectedSlot,"hit slot mismatch");
-                if(j<eff&&expectedSlot!=I32_MAX)++expectedHits;
+                if(j<eff&&expectedSlot==I32_MAX)++expectedMisses;
             }
-            require(hits[r]==expectedHits,"hit count mismatch");
+            require(misses[r]==expectedMisses,"miss count mismatch");
         }
-        require(atomicCalls<=R*blockDim.x,"hit atomic calls exceed active threads");
+        require(atomicCalls==0,"[P0] OpHitMiss must not use atomics");
         ++checks;
     }
     // ---- 3) OpMissCumsum: 并行扫描 (topkDim<=2*blockDim) 与串行回退 ----
@@ -155,7 +185,7 @@ try{
         std::mt19937 rng(topk*7+1);
         std::vector<int32_t> cur(R*topk),pos(R*topk),rank(R*topk,-777),mpos(R*topk,-777);
         for(uint32_t i=0;i<R*topk;++i){cur[i]=(rng()%3==0)?I32_MAX:static_cast<int32_t>(rng()%4097);pos[i]=static_cast<int32_t>(rng()%9000);}
-        std::vector<int32_t> scan(2*topk+16,-777);
+        std::vector<int32_t> scan(std::max<uint32_t>(2*topk+16,80),-777);  // [P3] 只需 warp scratch(65)+哨兵余量
         launch([&]{OpMissCumsum(R,topk,eff,R,R,cur.data(),pos.data(),rank.data(),mpos.data(),scan.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t serial=0;

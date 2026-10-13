@@ -38,9 +38,10 @@ constexpr uint32_t ARGTOPK_GROUP_THREADS = 64;    // 并行直方图线程数 (�
 
 // ---- [Perf 分步打点] ECHO_PERF_STEP 编译宏打开时, 每核把 Process 各步的 clock() 周期数
 //   写入 workspace 尾部 stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx].
-//   非 spec 路径共 36 步 (索引 0..35); specEnabled=1 时 Step0.5 在索引 4 之后额外插入 8 步,
-//   共 44 步. 步名对照见 echo_perf_step.py 的 ECHO_PERF_STEP_NAMES.
-constexpr uint32_t ECHO_PERF_NUM_STEPS = 44;
+//   非 spec 路径共 32 步 (索引 0..31, P0 删除 OpNumMisses 子步、P2 删除 OpFinalSlots
+//   及尾 SyncGrid 后); specEnabled=1 时 Step0.5 在索引 4 之后额外插入 8 步, 共 40 步.
+//   步名对照见 echo_perf_step.py 的 ECHO_PERF_STEP_NAMES.
+constexpr uint32_t ECHO_PERF_NUM_STEPS = 40;
 struct EchoLruTiling {
     // ---- 排布 ----
     uint32_t blockNum;        // ≤ AIV 物理核数 (grid_group::sync 硬约束, 否则卡死)
