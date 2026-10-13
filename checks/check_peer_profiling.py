@@ -99,6 +99,8 @@ class ProfilingChecks(unittest.TestCase):
         self.assertEqual([call[2] for call in calls], ['compare.py', 'profile_peer_variants.py'])
         self.assertIn('--verify-each-sample', calls[0])
         self.assertNotIn('--verify-each-sample', calls[1])
+        for call in calls:
+            self.assertEqual(call[call.index('--reference') + 1], 'combo_bcde_fused_1024')
         self.assertEqual(calls[1][calls[1].index('--repeat') + 1], '60')
 
     def test_runner_invalid_device(self):

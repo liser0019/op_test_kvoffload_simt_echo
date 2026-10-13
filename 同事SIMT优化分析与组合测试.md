@@ -1,5 +1,8 @@
 # 同事 SIMT 优化与 BCDE 的组合评估
 
+2026-10-13 更新：用户实测后选定 `combo_bcde_fused_1024` 为后续基线。
+本文件保留先前的候选筛选过程；当前基线见 [优化基线说明](BCDE_fused_1024优化基线说明.md)。
+
 同事源码来自 `simt@95d520858912ef033435782b1cfbf51a930c015d`。
 测试框架从 `feat/simt-variant-comparison@e9ababc` 派生，当前分支为
 `feat/peer-simt-comparison`。上一轮读到 echo 分支的结论不适用于这份 SIMT 代码。

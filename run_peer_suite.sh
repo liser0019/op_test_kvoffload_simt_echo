@@ -42,7 +42,7 @@ echo "Session output: $PEER_SESSION"
 "$PEER_PYTHON" -X faulthandler compare.py \
     --device "$PEER_DEVICE" --scenario all \
     --rows 32 --topk 2048 --capacity 4096 --max-token 262144 \
-    --implementations "${PEER_IMPLEMENTATIONS[@]}" --reference 10_bcde \
+    --implementations "${PEER_IMPLEMENTATIONS[@]}" --reference combo_bcde_fused_1024 \
     --warmup 2 --repeat 3 --verify-each-sample \
     --json "$PEER_SESSION/short_audit.json" 2>&1 | tee "$PEER_SESSION/short_audit.log"
 
@@ -50,7 +50,7 @@ echo "Session output: $PEER_SESSION"
 "$PEER_PYTHON" -X faulthandler profile_peer_variants.py \
     --device "$PEER_DEVICE" --scenario all \
     --rows 32 --topk 2048 --capacity 4096 --max-token 262144 \
-    --implementations "${PEER_IMPLEMENTATIONS[@]}" --reference 10_bcde \
+    --implementations "${PEER_IMPLEMENTATIONS[@]}" --reference combo_bcde_fused_1024 \
     --warmup 13 --repeat 60 \
     --output "$PEER_SESSION/kernel_profile" 2>&1 | tee "$PEER_SESSION/profile.log"
 

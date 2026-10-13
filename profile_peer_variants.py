@@ -4,7 +4,7 @@
 Run from this repository root, or pass --project /path/to/the/project.
 Example:
   python3 profile_peer_variants.py --device 1 --scenario all \
-      --implementations 10_bcde combo_bcde_1024 combo_bcde_pair_scan \
+      --implementations combo_bcde_fused_1024 10_bcde combo_bcde_1024 \
       --warmup 13 --repeat 60 --output /dev/shm/peer_simt_profile
 
 Each call restores the original state. Goldens and validation stay outside
@@ -109,7 +109,7 @@ def main():
     parser.add_argument("--scenario", default="warm_75pct",
                         choices=("all", "cold_reset", "warm_75pct", "warm_all_hit", "full_cache_75pct"))
     parser.add_argument("--implementations", nargs="+")
-    parser.add_argument("--reference", default="10_bcde")
+    parser.add_argument("--reference", default="combo_bcde_fused_1024")
     parser.add_argument("--warmup", type=int, default=13)
     parser.add_argument("--repeat", type=int, default=26,
                         help="Recorded calls per implementation, excluding profiler warm-up")

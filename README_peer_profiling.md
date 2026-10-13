@@ -30,6 +30,9 @@ CANN、torch、torch_npu 环境。运行脚本不锁定旧提交号；采集脚�
 
 ## 采集内容
 
+默认参照为 `combo_bcde_fused_1024`，原 `10_bcde` 仍参与对照。优化说明见
+`BCDE_fused_1024优化基线说明.md`。
+
 默认尺寸 B/T/C/M=`32/2048/4096/262144`。十路为原 BCDE 和九个新增版本：
 
 ```text
@@ -51,7 +54,7 @@ peer_06_packed_lists
 2. 正式采集在每次调用前恢复相同初始状态，按轮次改变版本执行顺序。
 3. 污染输出审计和预热不计入正式样本。每个场景、每版采集 60 次 kernel。
 4. 只汇总匹配的 Plan kernel duration，排除状态复制及 tiling 上传任务；核对样本数
-   后输出 P50/P95 和相对 BCDE 的 P50 加速比。
+   后输出 P50/P95 和相对 `combo_bcde_fused_1024` 的 P50 加速比。
 
 `compare.py` 的 Event/Host 时间包含接口准备和下发间隔，不能代替这里的纯 kernel
 统计。状态恢复虽不计入 kernel duration，但会影响缓存条件；这些结果也不能直接
@@ -83,7 +86,7 @@ python3 -X faulthandler profile_peer_variants.py \
   --rows 32 --topk 2048 --capacity 4096 --max-token 262144 \
   --implementations 10_bcde combo_bcde_1024 combo_bcde_pair_scan \
                     combo_bcde_fused combo_bcde_fused_1024 \
-  --reference 10_bcde --warmup 13 --repeat 60 \
+  --reference combo_bcde_fused_1024 --warmup 13 --repeat 60 \
   --output /dev/shm/peer_bcde_profile
 ```
 

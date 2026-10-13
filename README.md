@@ -1,8 +1,12 @@
 # 新增同事 SIMT 对照与 BCDE 组合
 
 本分支基于 `feat/simt-variant-comparison`，使用同事的 `simt` 分支。
+
+根据用户实机反馈，后续 Plan 优化基线选用 `combo_bcde_fused_1024`。
+优化原理与源码阅读位置见 [BCDE + fused + 1024 基线说明](BCDE_fused_1024优化基线说明.md)。
+性能采集默认以该版计算加速比，原 BCDE 保留为对照。
 分析和推荐测试命令见 [同事SIMT优化分析与组合测试.md](同事SIMT优化分析与组合测试.md)。
-新增源码在 `csrc/peer_variants/`；优先对比 `10_bcde`、`combo_bcde_1024`、
+新增源码在 `csrc/peer_variants/`；优先对比 `combo_bcde_fused_1024`、`10_bcde`、`combo_bcde_1024`、
 `combo_bcde_pair_scan`。当前只比较 kernel 优化，已移除 Host tiling 缓存及所有包含它的组合。
 默认编译与比较全部 22 路。下方原有说明中的 13 路指新增前的范围。
 
