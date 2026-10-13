@@ -77,6 +77,7 @@ ascend_kernel::EchoLruTiling Check(const at::Tensor& pos, const at::Tensor& spl,
   tiling.effTopk = std::min(topk, capacity);
   tiling.specEnabled = specEnabled;
   tiling.argtopkDebugRow = 0xFFFFFFFFu;
+  tiling.argtopkGroupThreads = ascend_kernel::ARGTOPK_GROUP_THREADS;
   return tiling;
 }
 

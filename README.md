@@ -4,36 +4,37 @@
 
 本文提供阅读顺序、输入与状态语义、正确性检查和构建运行命令。建议从第 1 节的函数表开始，再按第 9 节阅读设备计算源码。
 
-工程基线来自 `kv_plan_single_op_test` 的 `main`，提取提交为 `f51dc079a21c6e9f708e722d245abbccbb73509e`。SIMT、launch、tiling/config 保留基线源码；两个 plugin 仅调整 include 路径。**Echo kernel 已在此基线上应用作者 2026-10-09 的性能补丁**，并补充小尺寸 UB 暂存修复。来源、修订名和 SHA256 记录在 `source_manifest.json`。不包含旧 AIV 或跳过排序的 Echo 实验实现。
+工程基线来自 `kv_plan_single_op_test` 的 `main`。SIMT 是对照基线，保留原样；`csrc/echo/` 在基线之上集成了作者 2026-10-13 的新版优化（人工誊抄，已逐处校对修正，见 `source_manifest.json`），并保留 `checks/check_echo_kernel_host.py` 做 CPU 回归。不包含旧 AIV 或跳过排序的 Echo 实验实现。
 
-### 本次 Echo 更新
+### 本次 Echo 更新（2026-10-13 手抄版，已校对）
 
-- 每线程先累计本行 hit，再执行一次 atomic add，减少同行计数上的原子操作。
-- key/slot 打包改为全员并行；histogram 归并和 scatter 段基址计算改为按桶并行。
-- 桶前缀仍由线程 0 计算，保留四趟稳定 radix 排序及原有淘汰语义。
-- 小尺寸 `Npad<256` 时，256 个桶的暂存区使用现有 UB 四段 ping-pong 后的空闲区域，防止覆盖源数据。生产尺寸 `Npad=8192` 仍复用 `dstKey`，静态 UB 总量仍为 128 KiB。
-- 算子接口、tiling、workspace 公式、SIMT 和 benchmark 的输入、参考算法、状态恢复与计时边界均保留。
+- `OpArgtopkRow` 从 4-pass LSD 全量基数排序改为 **4 趟 MSB-first 基数选择（radix select）**：key 打包与 per-thread 直方图（`ARGTOPK_GROUP_THREADS=64` 路纯写切片）全在单大 `__ubuf__` 数组内，t0 逐字节收敛阈值 `T` 与配额 `quota`，最后按阈值筛出 `freeSize` 个槽；不再有 GM ping-pong / scatter，workspace 每核只用调试 dump 段。
+- `OpMissCumsum` 增加 **Hillis-Steele 并行前缀扫描**（每线程 2 元素，`topkDim<=2*blockDim` 且 `2*topkDim<=8192` 时启用，生产尺寸 2048 命中），否则回退 t0 串行。
+- 新增 **ECHO_PERF_STEP 分步打点**：`Process` 内 36 个非 spec 步（spec 路径 44 步）由 `PerfBegin/PerfEnd` 记录 t0 的 `clock()` 周期，写入 workspace 尾部 `stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx]`；`ECHO_PERF_STEP=ON bash build.sh` 构建到 `build_perf/`，`echo_perf_step.py` 读取并统计（打点构建仅用于诊断，正式对比仍用普通构建 + `compare.py`）。
+- 淘汰语义：`key==T` 平局取最小槽号，与稳定排序的 `(pri, slot)` 字典序一致；`key<T` 组按槽号升序输出 —— 本基准初始 `pri[slot]=slot`（见 `make_echo_initial`），与全排序结果一致。若未来输入存在非单调 pri，淘汰“集合”仍正确，仅 free 栈压栈顺序与全排序版不同。
+- 算子接口、SIMT 基线、benchmark 的输入、参考算法、状态恢复与计时边界均保留。
 
-修改源码后需要重新运行 `bash build.sh --soc=ascend950`，再运行逐样本审计和正式测量。旧共享库不会自动变成新版。此次更新的 NPU 编译、正确性和性能收益仍需服务器验证。
+手抄校对修正的抄写错误（详见 git 提交记录）：`scalar[0] == 0` 误用比较符及 `scalar[2]` 未初始化、直方图候选过滤 `prefix` 位对齐错误、`NNpad` 未定义、`PerEnd()` 拼写、Step0 后 SyncGrid 缺 `PerfEnd`、`PerfEnd` 缺 `__aicore__` 双下划线、`argtopkScalarUb_,,` 双逗号、`argtopkKeyPriUb_` 旧成员名、`OpMissCumsum` 内 `uint32_t threadIdx.x;` 非法声明与 `Bm`/`t` 未定义、并行扫描 `miss1` 误写 `miss0`、`perfLast_` 截断为 32 位、tiling 丢失 `ARGTOPK_GM_NPAD_MAX`、误加 `cooperative_groups.h` include、plugin 未填 `argtopkGroupThreads`。`checks/check_echo_kernel_host.py` 已重写为选择/扫描语义，48 项检查通过。
 
 ```text
-op_test_kvoffload_simt_echo/
-├── compare.py                    # 共同输入 → CPU 参考 → 设备调用 → 校验/计时
-├── build.sh                      # CMake 配置与编译，默认 ascend950
-├── CMakeLists.txt                # 显式编译两个 kernel + 两个 plugin
+kvoffload_simt_echo/
+├── compare.py                    # 共同输入 → CPU 参考 → 设备调用 → 校验/计时（正式对比）
+├── echo_perf_step.py             # ECHO_PERF_STEP 构建的分步耗时统计（诊断用）
+├── build.sh                      # CMake 配置与编译；ECHO_PERF_STEP=ON 或 --perf-step 构建打点版
+├── CMakeLists.txt                # 显式编译两个 kernel + 两个 plugin；ECHO_PERF_STEP 选项
 ├── csrc/
-│   ├── simt/
+│   ├── simt/                     # 对照基线（保留原样，勿改）
 │   │   ├── sparse_kv_plan_kernel.cpp   # SIMT 八阶段计算、kernel 外壳和 launch
 │   │   ├── sparse_kv_plan_launch.h     # tiling 构造、workspace 公式、启动声明
 │   │   ├── sparse_kv_plan_config.h     # 2048 线程、warp、UB 常量
 │   │   └── sparse_kv_plan_plugin.cpp   # torch.ops 校验、tiling 上传、异步下发
 │   └── echo/
-│       ├── echo_lru_kernel.h           # Echo 全部设备计算、radix 排序
+│       ├── echo_lru_kernel.h           # Echo 全部设备计算、radix select、分步打点
 │       ├── echo_lru_launch.cpp         # pure SIMT 四参数 launch
 │       ├── echo_lru_launch.h           # workspace 公式、启动声明
-│       ├── echo_lru_tiling.h           # tiling、1024 线程、128 KiB UB 常量
+│       ├── echo_lru_tiling.h           # tiling、1024 线程、UB/分步常量
 │       └── echo_lru_plugin.cpp         # torch.ops 校验、tiling 上传、异步下发
-├── source_manifest.json          # main 来源提交与各文件的哈希
+├── source_manifest.json          # 以当前状态为初始状态的文件清单与哈希
 ├── checks/check_echo_kernel_host.py  # 可选：直接提取新版函数做 CPU 并行回归
 └── README.md
 ```
@@ -68,11 +69,11 @@ compare.py / invoke
 
 ## 2. 运行条件与命令
 
-先下载工程：
+先下载工程（GitCode 仓库地址以实际托管为准）：
 
 ```bash
-git clone https://github.com/liser0019/op_test_kvoffload_simt_echo.git
-cd op_test_kvoffload_simt_echo
+git clone <仓库地址> kvoffload_simt_echo
+cd kvoffload_simt_echo
 ```
 
 以下命令均在工程根目录运行。
@@ -131,6 +132,20 @@ python3 -X faulthandler compare.py \
 ```bash
 python3 compare.py --device 1 --scenario warm_75pct --warmup 10 --repeat 50
 ```
+
+### NPU：Echo 分步耗时（ECHO_PERF_STEP）
+
+诊断 Echo kernel 每一步的耗时分布。先用打点宏构建（产物在 `build_perf/`，与普通构建 `build/` 互不覆盖），再运行统计脚本：
+
+```bash
+source /usr/local/Ascend/cann-9.1.0/set_env.sh
+ECHO_PERF_STEP=ON bash build.sh --soc=ascend950   # 等价: bash build.sh --perf-step
+python3 echo_perf_step.py --device 1 --warmup 5 --repeat 20
+```
+
+`echo_perf_step.py` 直接 import `compare.py` 的输入构造、参考实现、状态恢复与调用方式（同尺寸、同 seed、同场景），因此分步耗时的各步之和可与 `compare.py` 的 Event 总耗时互相印证。每次调用前用负哨兵填充 workspace，读回每核每步的 `clock()` 周期（非 spec 路径 36 步，步名见 `ECHO_PERF_STEP_NAMES`），按“最慢核”跨轮取中位数，并用 Event 总耗时标定周期频率。测量前后均与 `reference_echo` 全量比对；若加载的不是打点构建，脚本会因哨兵未被覆盖而直接报错。
+
+打点构建改变了 kernel 代码形态，其总耗时不用于正式结论；正式性能对比始终使用普通构建 + `compare.py`。
 
 ## 3. 共同输入到底是什么
 
@@ -192,7 +207,7 @@ Echo 的 `miss_alloc_flat` 保留原接口约定 `row*capacity+one_based_slot`�
 - request reset 的状态与输出语义。
 - 全部持久状态字段和全部输出，包括没有使用的输出尾部、free 栈余量。
 
-CPU Echo 参考只有需要淘汰时才排序，这是参考实现省掉无效计算。**实际调用的是作者新版 Echo，设备内部仍走无条件四趟完整排序路径。** CPU 参考从不参与 NPU 计时。
+CPU Echo 参考只有需要淘汰时才排序，这是参考实现省掉无效计算。**实际调用的作者新版 Echo 走常数 4 趟基数选择路径（radix select），无论是否需要淘汰都执行（`freeSize=0` 时提前返回）。** CPU 参考从不参与 NPU 计时。
 
 `check_common_semantics` 还直接从原始 LRU 推导“最旧的未命中历史 token”集合，检查两版是否淘汰正确，避免仅依赖两份参考互相比较。
 
@@ -217,7 +232,7 @@ elapsed_time * 1000           ← 毫秒转换为微秒
 临时 workspace 按 main 的布局和复用方式分配：
 
 - SIMT：`hash_capacity=next_pow2(2*topk)`，最小为 32；每行 `3*hash_capacity+2*capacity+topk` 个 int32。单行不超过 112 KiB 时走 kernel 内部 UB，外部只分配占位元素，否则分配完整 GM workspace。
-- Echo：保留相同的 GM workspace 公式及默认核数划分，设备仍使用每核 128 KiB 静态 UB。
+- Echo：compare.py 按旧版上界公式分配 workspace（含 GM ping-pong/直方图占位段，严格大于新版所需）；新版 kernel 的 GM workspace 每核只用调试 dump 段 `256+8192`（打点构建再加 `ECHO_PERF_NUM_STEPS=44`），key/hist 等在每核 128 KiB 静态 UB 内。同一次分配可兼容普通与打点两种构建。
 
 两种 kernel 沿用各自的默认线程数和分核策略。共同控制的是设备、输入、初始历史、软件环境、计时口径；算法自己的资源配置属于实现的一部分。
 
@@ -260,6 +275,7 @@ JSON 包含两路的 Event 和 Host 的 P50/P95/min/max、原始样本、执行�
 - 故障注入：故意破坏最后一个正式样本的输出，计时后检查正确报错，没有写出结果 JSON。
 - 补齐独立工程后，再次核对 9 个源码文件的来源和哈希；用新的共享库装载入口重跑上述 64 次 CPU 模拟及故障注入，均通过。
 - `build.sh` 的 shell 语法与参数帮助通过；使用临时依赖占位目录完成 CMake 配置/生成检查，确认仅包含两个 plugin、两个 kernel object、对应编译选项及 runtime 链接。占位目录用于检查构建规则，**没有实际编译 CANN kernel 或生成可运行的 NPU 共享库**。
+- 2026-10-13 手抄版校对：修正上述抄写错误后，`checks/check_echo_kernel_host.py`（48 项，ASan/UBSan）通过；`echo_lru_kernel.h` 在 mock SIMT 头下以 g++ 完成全文件语法检查（开/关 `ECHO_PERF_STEP` 两种配置）；`EchoWorkspaceElements` 公式与 kernel `Init` 布局数值核对一致；`Process` 的 44 个打点与 `ECHO_PERF_STEP_NAMES` 逐一对应。NPU 编译、正确性与性能仍需服务器验证。
 
 上述 CPU 模拟不产生可用的性能数字。服务器应先运行第 2 节的逐样本短跑审计，再运行正式测量。
 
@@ -271,7 +287,7 @@ JSON 包含两路的 Event 和 Host 的 P50/P95/min/max、原始样本、执行�
 python3 checks/check_echo_kernel_host.py
 ```
 
-脚本直接提取当前头文件里的 `OpArgtopkRow` 和 `OpHitMiss`，用 128 个 CPU 线程、同步屏障和原子操作模拟执行，并启用 AddressSanitizer/UBSan。33 项检查覆盖 capacity 1～4096、随机/平局/无效时间戳、完整排序结果、调试直方图、释放输出、缓冲区边界和每线程 hit 累加。它不参与正式性能测试，也不能替代 NPU 编译、设备缓存一致性或性能验证。此次本地运行通过；四个性能场景的 CPU 参考检查也通过。
+脚本直接提取当前头文件里的 `OpHitMiss`、`OpArgtopkRow` 和 `OpMissCumsum`，用 128 个 CPU 线程、同步屏障和原子操作模拟执行，并启用 AddressSanitizer/UBSan。48 项检查覆盖 capacity 1～4096、随机/平局/无效时间戳、基数选择的阈值与配额、选择集合与稳定排序 golden 的交叉验证、调试直方图（高字节）、释放输出、`freeSize=0` 提前返回、UB 越界哨兵、每线程 hit 累加，以及并行/串行两路 miss 前缀和。它不参与正式性能测试，也不能替代 NPU 编译、设备缓存一致性或性能验证。本次手抄校对后本地运行通过。
 
 ## 9. 算子源码怎么读
 
@@ -288,9 +304,9 @@ python3 checks/check_echo_kernel_host.py
 1. `echo_lru_plugin.cpp` 的 `EchoNpu`：校验布局，上传 tiling，按原 main 的 `RunOpApi` 方式调用 launch；`EchoCoreCount` 查询当前设备核数。
 2. `echo_lru_launch.cpp`：`<<<blockNum, ECHO_LRU_THREAD_NUM, 0, stream>>>`；线程数由 `echo_lru_tiling.h` 定义，目前为 1024。
 3. `echo_lru_kernel.h` 尾部的 `echo_lru_kernel`：分配单块 128 KiB UB，初始化 `EchoLruKernel` 并调用 `Process`。
-4. `EchoLruKernel::Process`：按阶段读 reset、hit/miss、protect、free、alloc、priority、映射更新和最终输出；每核处理自己的连续行段。
-5. `ArgtopkAllRows` → `OpArgtopkRow`：每行计算 `freeSize` 后仍执行完整四趟 radix 排序，最后只输出需要释放的槽。本目录没有添加 `freeSize=0` 的提前返回。
+4. `EchoLruKernel::Process`：按阶段读 reset、hit/miss、protect、free、alloc、priority、映射更新和最终输出；每核处理自己的连续行段。`ECHO_PERF_STEP` 构建下每步由 `PerfBegin/PerfEnd` 打点。
+5. `ArgtopkAllRows` → `OpArgtopkRow`：每行把 pri 打包进 UB key 数组（全员并行），`ARGTOPK_GROUP_THREADS` 路线程并行直方图 + 按桶归并，t0 逐字节（高→低）收敛阈值 `T` 与配额 `quota`，最后按 `key<T` / `key==T` 筛出 `freeSize` 个槽。`freeSize=0` 提前返回，不再做全量 scatter 排序。
 
-Echo 文件仍保留部分早期注释和注释掉的旧实现，涉及 512 线程、bitonic、GM ping-pong 或 grid sync；这些文字与当前有效代码不同。阅读时以 `ECHO_LRU_THREAD_NUM=1024`、有效的 `OpArgtopkRow`、顶层 `argtopkUb` 和 `Process` 内实际调用为准。新版排序中的并行打包、桶归并、`bucketPrefix` 暂存及分段 scatter 注释已同步更新。
+Echo 文件仍保留少量早期注释，涉及 512 线程、bitonic 或 grid sync 的历史描述；这些文字与当前有效代码不同。阅读时以 `ECHO_LRU_THREAD_NUM=1024`、有效的 `OpArgtopkRow`（radix select）、顶层 `argtopkUb` 单大 UB 分段和 `Process` 内实际调用为准。
 
 构建方面，SIMT 保留 mixed/VF 编译选项，Echo 保留 `--enable-simt`，两者均为 `-O3`、`dav-3510`。系统 C++ 编译两个 plugin，链接 main 相同的 torch、torch_npu、ascendcl、tiling_api、platform 和 AscendC runtime。仅去掉了 Python 包/pybind 装载壳，改由 `torch.ops.load_library` 触发相同的算子注册。

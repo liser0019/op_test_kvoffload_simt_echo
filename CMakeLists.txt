@@ -93,12 +93,19 @@ message(STATUS "torch lib: ${TORCH_LIB_DIR}; torch_npu: ${TORCH_NPU_DIR}")
 
 # 3. bisheng 单独生成两个 object。两种编程模式的选项原样保留 main。
 # SIMT 是 mixed 外壳 + VF；Echo 是 pure SIMT，不能用同一组编译选项。
+# ECHO_PERF_STEP=ON 时给 Echo kernel 与 plugin 同时定义 ECHO_PERF_STEP 宏：
+# kernel 在 workspace 尾部写每核分步 clock() 周期（EchoWorkspaceElements 同步扩容），
+# 供 echo_perf_step.py 读取；会改变计时特性，正式性能对比（compare.py）请保持 OFF。
+option(ECHO_PERF_STEP "Instrument echo_lru per-step cycles into workspace" OFF)
 set(SIMT_FLAGS
     --cce-auto-sync=off -Wno-deprecated-declarations
     -mllvm -cce-vf-remove-membar=false
     -mllvm -cce-aicore-hoist-movemask=false
     -mllvm -cce-aicore-dcci-before-kernel-end=false)
 set(ECHO_FLAGS --enable-simt -Wno-deprecated-declarations)
+if(ECHO_PERF_STEP)
+    list(APPEND ECHO_FLAGS -DECHO_PERF_STEP)
+endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(KERNEL_OPT_FLAGS -O0 -g)
 else()
@@ -147,5 +154,8 @@ target_link_directories(simt_vs_echo_ops PRIVATE
 target_link_libraries(simt_vs_echo_ops PRIVATE
     torch torch_cpu torch_python c10 torch_npu ascendcl tiling_api platform
     "${ASCENDC_RUNTIME_LIBRARY}")
+if(ECHO_PERF_STEP)
+    target_compile_definitions(simt_vs_echo_ops PRIVATE ECHO_PERF_STEP)
+endif()
 set_target_properties(simt_vs_echo_ops PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

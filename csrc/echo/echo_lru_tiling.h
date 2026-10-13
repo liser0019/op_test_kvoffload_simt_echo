@@ -22,27 +22,25 @@ namespace ascend_kernel {
 constexpr uint32_t ECHO_LRU_THREAD_NUM = 1024;
 
 // ---- argtopk 缓冲上界 (host/device 共享) ----
-// [Step2] OpArgtopkRow 用 4-pass 8-bit LSD 基数排序: ping-pong keyPriA/SlotA + keyPriB/SlotB
-//   + **per-thread 局部直方图** 全放 GM workspace. histogram 并行: ARGTOPK_HIST_THREADS 个线程各
-//   写自己独占的 count[256] GM 切片 (纯写无争用), dcci 后 t0 串行归并+prefix (无 atomic).
-//   pack/clear/prefix/scatter 仍 t0 串行保 LSD 稳定性. Npad=next_pow2(B+1) 决定 GM 段大小,
-//   可达 4096 不受 UB 布局约束, 不 trap. host/torch 侧 CHECK(B<=ARGTOPK_B_MAX).
-// ⚠ atomic 路线已弃: asc_atomic_add 写后设备端立即读不可靠 (dcci 不排空 atomic 写缓冲, 见
-//   OpArgtopkRow 注释); UB/GM atomic 均在 len=262144 spec 路径非确定丢增量 (87/98/115 错运行间变).
-//   per-thread 局部直方图纯写 → dcci → t0 读, 已验证可靠 (类 OpResetFree 多线程纯写 GM 后 dcci 读).
-// ARGTOPK_NPAD_MAX 仅 __ubuf__ 占位数组大小 (GM radix 不读, 保持小值防 1024 线程 UB trap).
-// 旧值 (B<=64): ARGTOPK_B_MAX=64, ARGTOPK_NPAD_MAX=128, 注释保留便于回退.
+// [Perf 2026-10-13] OpArgtopkRow 改为 4 趟 MSB-first 基数选择 (radix select):
+//   key 打包 + 前缀桶直方图在 UB (单大 __ubuf__ 数组分段, 见 EchoLruKernel::Init),
+//   不再做全量 scatter 排序, GM 中不再需要 ping-pong key/slot 段与 per-thread 直方图段.
+//   ARGTOPK_GROUP_THREADS 个线程各写自己独占的 hist[256] UB 切片 (纯写无争用, 无 atomic),
+//   归并到 globalCnt[256] 后由 t0 逐字节收敛阈值 T 与配额 quota, 最后按阈值筛出 freeSize 个槽.
+//   host/torch 侧 CHECK(B<=ARGTOPK_B_MAX).
 constexpr uint32_t ARGTOPK_B_MAX = 4096;          // B 上界 (per-request KV block 数 / buffer 容量)
 constexpr uint32_t ARGTOPK_NPAD_MAX = 128;        // UB 占位数组大小 (GM radix 不读, 保持小值防 trap)
 constexpr uint32_t ARGTOPK_GM_NPAD_MAX = 8192;    // [诊断3] GM 调试 dump 区每核打包 srcKey 容量 (=next_pow2(B_MAX+1))
-// [UB 攻关 2026-09-30] argtopk ping-pong key/slot 搬顶层单大 __ubuf__ 数组的编译期容量.
-//   NpadMax = next_pow2(ARGTOPK_B_MAX+1) = next_pow2(4097) = 8192. 4 段 (keyPriA/SlotA/keyPriB/SlotB)
 //   → 4*NpadMax = 32768 int32 = 128KB. probe_ub_size 实测 32768 元素 (128KB) + 1024 线程 PASS.
-constexpr uint32_t ARGTOPK_UB_NPAD_MAX = 8192;    // = next_pow2(ARGTOPK_B_MAX+1), argtopk 单趟排序元素上界
-constexpr uint32_t ARGTOPK_UB_ELEMS = 4u * ARGTOPK_UB_NPAD_MAX;  // 单大 __ubuf__ 数组总元素 (4 段 ping-pong)
-constexpr uint32_t ARGTOPK_HIST_THREADS = 64;     // 并行直方图线程数 (各独占 count[256] GM 切片, 无 atomic)
-constexpr uint32_t ARGTOPK_SCAT_THREADS = 64;     // 并行 scatter 线程数 (各独占 localCnt[256] GM 切片, 纯写无争用)
+constexpr uint32_t ARGTOPK_UB_NPAD_MAX = 8192;    // = next_pow2(ARGTOPK_B_MAX+1), argtopk key 打包元素上界
+constexpr uint32_t ARGTOPK_UB_ELEMS = 4u * ARGTOPK_UB_NPAD_MAX;  // 单大 __ubuf__ 数组总元素 (key/hist/globalCnt/seg/scalar 分段)
+constexpr uint32_t ARGTOPK_GROUP_THREADS = 64;    // 并行直方图线程数 (各独占 hist[256] UB 切片, 无 atomic)
 
+// ---- [Perf 分步打点] ECHO_PERF_STEP 编译宏打开时, 每核把 Process 各步的 clock() 周期数
+//   写入 workspace 尾部 stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx].
+//   非 spec 路径共 36 步 (索引 0..35); specEnabled=1 时 Step0.5 在索引 4 之后额外插入 8 步,
+//   共 44 步. 步名对照见 echo_perf_step.py 的 ECHO_PERF_STEP_NAMES.
+constexpr uint32_t ECHO_PERF_NUM_STEPS = 44;
 struct EchoLruTiling {
     // ---- 排布 ----
     uint32_t blockNum;        // ≤ AIV 物理核数 (grid_group::sync 硬约束, 否则卡死)
@@ -65,6 +63,7 @@ struct EchoLruTiling {
                               // 0=非 spec (前缀全长 spl==maxModelLenP1, Step0.5 整段跳过).
                               // host/torch 侧按 min(spl)<maxModelLenP1 判定. 默认 0 (非 spec).
     uint32_t argtopkDebugRow; // [诊断3] 需 dump pass0 归并后直方图的行号; 0xFFFFFFFF=关闭.
+    uint32_t argtopkGroupThreads;
 };
 
 }  // namespace ascend_kernel
