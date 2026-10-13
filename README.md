@@ -6,6 +6,16 @@
 `combo_bcde_pair_scan`。当前只比较 kernel 优化，已移除 Host tiling 缓存及所有包含它的组合。
 默认编译与比较全部 22 路。下方原有说明中的 13 路指新增前的范围。
 
+采集脚本已包含在工程中，使用方法见 [kernel 性能采集](README_peer_profiling.md)。
+在服务器更新并构建后直接运行：
+
+```bash
+PYTHON=python3 JOBS=3 bash build.sh
+PYTHON=python3 bash run_peer_suite.sh 1
+```
+
+末尾 `1` 是逻辑 NPU 卡号。先逐调用审计，通过后采集十路、四场景的 kernel 时间。
+
 # SIMT 变体与作者新版 Echo：可阅读的性能测试
 
 这是一个可独立构建的性能测试工程，**包含原 SIMT、作者新版 Echo 和 11 个 SIMT 候选的 C++/AscendC 源码**。`compare.py` 把输入生成、状态转换、golden、校验和计时集中在一个文件；`build.sh` 编译全部 13 路，Python 直接加载共享库。
