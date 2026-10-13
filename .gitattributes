@@ -1,0 +1,4 @@
+# 统一 LF 行尾：build.sh 的 set -o pipefail、bisheng 编译的源码、CMake 解析
+# 都对 CRLF 敏感。eol=lf 使任何平台 git 检出的工作区都是 LF，
+# 阻断 Windows 克隆 (core.autocrlf) 之后再 scp 到服务器这类链路引入 \r。
+* text=auto eol=lf
