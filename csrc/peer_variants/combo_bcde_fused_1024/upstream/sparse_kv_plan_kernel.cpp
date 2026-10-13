@@ -3,45 +3,14 @@
  * MemFabric_Hybrid is licensed under Mulan PSL v2.
  * 本文件为 SparseKvPlan 的 direct launch(直调)单算子版本。
  *
- * 计算逻辑逐行取自 vllm-ascend 仓
- * csrc/attention/sparse_kv_plan/op_kernel/sparse_kv_plan_apt.cpp(只搬不改),
- * 仅对入口层做了 direct launch 适配:
- *   1. 去掉 GE/op-build 框架专用的 REGISTER_TILING_DEFAULT 与 workspace 形参
- *      (直调不经过 GE 图编译,workspace 从未被 kernel 读取)。
- *   2. GET_TILING_DATA_WITH_STRUCT 替换为等价的显式结构体加载:tiling 形参
- *      指向 device 侧缓冲,内容为 host 侧 MakeSparseKvPlanTiling() 填充的
- *      SparseKvPlanTilingData(布局与原注册结构逐字段一致)。
- *   3. KERNEL_TASK_TYPE_DEFAULT 加存在性兜底(部分直调工具链不提供该宏)。
- *   4. 文件尾新增 host 侧 calc_sparse_kv_plan_block_dim / launch_sparse_kv_plan
- *      直调入口。
- * 其余(注释、算法、线程组织、barrier、业务语义约束)与原文件保持一致。
- *
- * 昇腾 950PR/950DT:运行时 shape 的 Sparse KV Plan,64 个 AIV block,
- * 每个有任务的 block 调用一个 2048-thread SIMT VF。
- *
- * 本实现通过 direct launch 接口接收持久化的 NPU LRU 状态。
- * batch、topk、capacity、max_token 均来自运行时或 tiling 数据。
- *
- * 阅读顺序:Host 启动函数 -> mixed kernel 外壳 -> SIMT VF -> ProcessRuntimeRow。
- * 一条 request 的 Plan 由一个 block 完成,避免引入跨 block 同步。
- * block b 处理 b、b+blockDim、b+2*blockDim……行;B 小于 blockDim 时,
- * 多余 block 在外壳直接返回。blockDim 上限为 64,实际值取决于目标 SKU 的 AIV 数量。
- *
- * 必须保留的业务语义:
- * - LRU 从旧到新排列,miss 优先使用最老的可淘汰 slot。
- * - 同一 token 重复出现在 TopK 时,仅第一次位置获得已有 resident hit;
- *   后续重复位置仍可能各自产生 miss。
- * - 同 token 驻留在多个 slot 时,旧 LRU 最后一个 owner 提供命中 slot,
- *   这些 resident slot 仍全部保留在 hit 段。
- * - missCount 只统计实际分到 slot 的 miss;未分配输出保持 -1。
- * - LRU 应由上层维护为 slot 的排列;保留原版对越界 LRU 项的跳过行为。
- * - stablePrefixLens 之后的 KV(投机后缀)不可靠,resident 命中前先失效。
- *
- * 集成与调优:
- * - UB 快路径不读写用户提供的 GM 临时区;行临时区超过 112 KiB 时走 GM
- *   compactWorkspace。
- * - 2048 是线程配置,并不保证比 1024 快。应检查目标 CANN 的编译资源报告、
- *   寄存器溢出以及实机时延。
+ * Sparse KV Plan 直调测试版本：combo_bcde_fused_1024。
+ * 计算源自 Sparse KV Plan；本版本的算法差异见 peer_variants_manifest.json。
+ * 当前配置为 1024 个 SIMT 线程，launch bound、循环步长和 Scan 空间
+ * 均使用公共配置头中的 PLAN_THREADS / PLAN_WARP_COUNT。
+ * Host 显式上传 80 字节 tiling，通过 mixed kernel 外壳调用 SIMT VF。
+ * block 按 query 行分配任务，并以 blockDim 为步长处理后续行；核数上限为 64。
+ * 行临时区不超过 112 KiB 时使用 UB，否则使用 compactWorkspace 的 GM 行区。
+ * LRU 更新、重复 TopK 处理和投机后缀失效语义保留；实机性能仍需测量。
  */
 
 #include <algorithm>
@@ -313,7 +282,7 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
   // Their total never exceeds capacity, even when invalid LRU entries are skipped.
   ScratchPtr missPositions = evictableSlots + capacity;
 
-  // 阶段 1：每个线程以 2048 为步长初始化输出与 hash，支持任意合法 runtime T/H。
+  // 阶段 1：每个线程以 PLAN_THREADS 为步长初始化输出与 hash，支持任意合法 runtime T/H。
   for (uint32_t pos = thread; pos < topk; pos += PLAN_THREADS) {
     currentSlots[topkBase + pos] = INVALID_TOKEN;
     missTokens[topkBase + pos] = INVALID_TOKEN;

@@ -47,6 +47,9 @@ B/C/D/E 主体保留，默认 BCDE 仍是 2048 线程；1024 是独立实验，�
 局部变量，再执行 Scan 的 barrier，随后写 compact 结果。输出位置不超过原 query
 位置，前一个 tile 不覆盖尚未读取的后一个 tile；保留 scatter 后的 barrier。
 
+融合版的 hit 槽号仍从 GM `lruSlots` 读取，LRU 重建时的新 miss 槽号仍从 GM
+`missSlots` 读取。当前没有独立的 scratch LRU 读取优化，不应将它计入 F 的收益。
+
 重复 TopK、重复 resident token、未分配 miss 的 `-1` 输出、request-ID 重置和 MTP
 后缀失效语义沿用原版。稳定前缀失效仍进入 warm 路径，不能当成新 request 的冷启动。
 
