@@ -33,36 +33,25 @@ namespace ascend_kernel {
 constexpr int32_t I32_MAX = 2147483647;
 
 // ===========================================================================
-// [P0/P1/P3 2026-10-13] warp/block 协作辅助 (两级结构对照 SIMT 基线 BlockExclusiveScan)。
+// [P0/P1/P3/P4 2026-10-13] warp/block 协作辅助 (两级结构对照 SIMT 基线 BlockExclusiveScan)。
 // dav-3510 SIMT 实测特性:
 //   - 同地址 GM atomic 串行化严重 (~9K 周期/次, 1024 线程打同一地址时 OpHitMiss 高达
 //     ~9.4M 周期), 块内计数一律走 warp 归约/扫描 + t0 汇总;
-//   - 1024 线程 asc_syncthreads ~1-2K 周期, 栅栏次数本身是成本, 优先 warp 内解决。
+//   - 1024 线程 asc_syncthreads ~6-8K 周期 (fs=0 早退路径实测), 栅栏次数本身是
+//     大成本, 优先 warp 内解决、并逐个证明可删的栅栏。
 // warp 数按 blockDim.x 运行时推导 (设备 1024→32 warp; CPU 回归 128→4 warp)。
 // ===========================================================================
-
-// 块内求和并写 GM: 每线程 value, t0 把全块总和写入 *outGm。2 次栅栏, 无 atomic。
-//   lane0 必须拿到 warp 归约结果 —— asc_reduce_add 无论返回给全 warp 还是仅 lane0,
-//   lane0 的值都是正确的 (两种语义下均安全)。
-__aicore__ inline void BlockSumToGm(int32_t value, int32_t* warpTotals, int32_t* outGm) {
-    uint32_t lane = threadIdx.x & 31u;
-    uint32_t warpCount = blockDim.x >> 5;
-    int32_t warpSum = asc_reduce_add(value);   // warp 内归约, 无栅栏
-    if (lane == 0u) warpTotals[threadIdx.x >> 5] = warpSum;
-    asc_syncthreads();
-    if (threadIdx.x == 0u) {
-        int32_t s = 0;
-        for (uint32_t w = 0; w < warpCount; ++w) s += warpTotals[w];
-        *outGm = s;
-    }
-    asc_syncthreads();   // t0 读完 warpTotals 后, 下一行才能复用
-}
 
 // 打包块内独占扫描: value = 字段A | (字段B << shift), 两个字段各自的块内总和都
 //   必须小于 (1 << shift) (打包加法无跨字段进位, 由调用方保证)。返回本线程的
 //   exclusive (同打包格式); t0 另把全块 grand total (打包) 写入 control[0]。
-//   3 次栅栏, 结构与基线 BlockExclusiveScan 一致 (warp shuffle 一级 + t0 扫
-//   warp total 二级 + 尾栅栏保护 scratch 复用)。
+//   2 次栅栏: warp shuffle 一级 + t0 扫 warp total 二级。
+//   [P4] 基线的第 3 次"保护 scratch 复用"栅栏已删, 顺序论证 (所有调用方都是
+//   统一控制流的逐行循环):
+//   (a) 线程 X 读 warpBases/control (b2 之后、返回前) vs t0 下一轮写它们
+//       (b1(next) 之后): t0 须等全部线程到达 b1(next), X 的读在其到达之前 → 读先于写;
+//   (b) t0 读 warpTotals (b1~b2 之间) vs lane31 下一轮写它 (b2 之后): t0 的读
+//       在 t0 到达 b2 之前, lane31 的写在 b2 释放之后 → 读先于写。两对均安全。
 __aicore__ inline int32_t PackedBlockScan(int32_t packedValue,
                                           int32_t* warpTotals, int32_t* warpBases, int32_t* control) {
     uint32_t lane = threadIdx.x & 31u;
@@ -84,9 +73,7 @@ __aicore__ inline int32_t PackedBlockScan(int32_t packedValue,
         control[0] = base;
     }
     asc_syncthreads();
-    int32_t exclusive = warpBases[warp] + inclusive - packedValue;
-    asc_syncthreads();
-    return exclusive;
+    return warpBases[warp] + inclusive - packedValue;
 }
 
 // ---- argtopk 缓冲 (定义见 echo_lru_tiling.h, host/device 共享) ----
@@ -262,28 +249,35 @@ __aicore__ inline void OpSpecAvailAdd(
     }
 }
 
-// ---- Step 1: hit/miss + miss 计数 ----
+// ---- Step 1: hit/miss + miss 计数 + freeSize ----
 // [P0 2026-10-13] miss 计数改 warp 归约 + t0 汇总写 GM。原实现每线程一次
 //   asc_atomic_add 到同一 GM 地址 numHitsGm[row]: warm 场景 ~1024 次/行, 同地址
 //   atomic 串行 ~9K 周期/次 → OpHitMiss 实测 ~9.4M 周期; cold 场景 0 hit 无 atomic
 //   仅 ~10K (耗时与 hit 数几乎无关、与 atomic 次数强相关, 已证实根因)。
-//   现 2 次块栅栏/行, 计数语义不变: 直接数 effTopk 内 curSlots==I32_MAX 的个数,
-//   与原公式 numMisses = effTopk - numHits 恒等。numHitsGm 不再读写 (槽位保留防
-//   workspace 布局漂移)。
+// [P4 2026-10-13] 原 OpFreeSize (独立 t0 步 + SyncGrid) 折叠进 t0 汇总段:
+//   fs = nm - avail (clamp ≥0) 顺手写入 freeSizeGm。avail 此时恒为本轮初值
+//   (写入点仅 Step0/0.5 reset 与 Step5 尾折叠更新), 经 Step1 尾 SyncGrid 的
+//   dcci 后对 Step3 全员读者可见。计数语义不变: nm 直接数 effTopk 内
+//   curSlots==I32_MAX 的个数, 与原公式 effTopk - numHits 恒等。
+//   numHitsGm 不再读写 (槽位保留防 workspace 布局漂移)。
 __aicore__ inline void OpHitMiss(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t maxModelLenP1,
     uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* htdGm, int32_t* posGm, int32_t* curSlotsGm, int32_t* numMissesGm,
+    int32_t* htdGm, int32_t* posGm, int32_t* curSlotsGm,
+    int32_t* numMissesGm, int32_t* availGm, int32_t* freeSizeGm,
     int32_t* warpScratch) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
+    uint32_t t = threadIdx.x;
+    uint32_t lane = t & 31u;
+    uint32_t warpCount = blockDim.x >> 5;
     for (uint32_t r = 0; r < rowCount; ++r) {
         uint32_t row = startRow + r;
         if (row >= R) break;
         uint32_t rowOff = row * topkDim;
         uint32_t htdRowOff = row * maxModelLenP1;
         uint32_t localMiss = 0;
-        for (uint32_t j = threadIdx.x; j < topkDim; j += blockDim.x) {
+        for (uint32_t j = t; j < topkDim; j += blockDim.x) {
             if (j >= effTopk) { curSlotsGm[rowOff + j] = 0; continue; }
             int32_t tok = posGm[rowOff + j];
             int32_t tokSafe = tok < 0 ? 0 : (tok > (int32_t)(maxModelLenP1 - 1) ? (int32_t)(maxModelLenP1 - 1) : tok);
@@ -291,7 +285,18 @@ __aicore__ inline void OpHitMiss(
             curSlotsGm[rowOff + j] = slot;
             if (slot == I32_MAX) localMiss++;
         }
-        BlockSumToGm((int32_t)localMiss, warpScratch, &numMissesGm[row]);
+        // warp 归约 (无栅栏) → lane0 写 UB → 1 栅栏 → t0 汇总: 写 numMisses + fs。
+        int32_t warpSum = asc_reduce_add((int32_t)localMiss);
+        if (lane == 0u) warpScratch[t >> 5] = warpSum;
+        asc_syncthreads();
+        if (t == 0u) {
+            int32_t nm = 0;
+            for (uint32_t w = 0; w < warpCount; ++w) nm += warpScratch[w];
+            numMissesGm[row] = nm;
+            int32_t fs = nm - availGm[row];
+            freeSizeGm[row] = fs < 0 ? 0 : fs;
+        }
+        asc_syncthreads();   // t0 读完 warpScratch 后, 下一行才能复用
     }
 }
 
@@ -333,25 +338,30 @@ __aicore__ inline void OpFifoInc(
     }
 }
 
-// ---- Step 3: free (argtopk bitonic + release + push) ----
-
-__aicore__ inline void OpFreeSize(
+// Step5 尾: fifo++ 与 avail 折叠更新 (替代原 OpFifoInc + OpFreeAvailAdd + OpAllocAvailSub
+//   两个独立 t0 步及其前后 SyncGrid)。
+// [P4 2026-10-13] avail 终值 = availOld + fs - nm, 与旧版两步序列 (+fs 后 -nm) 恒等,
+//   且恒 ≥ 0: fs = max(nm - availOld, 0) → nm > availOld 时终值 0, 否则 availOld - nm ≥ 0。
+//   t0 读的 fifo/freeSize/numMisses 均为 t0 自己在 Step0~1 写入 (同线程 GM RAW 安全);
+//   avail 的全员读者 (OpFreePush/OpAllocPop) 已被 Step4 尾 SyncGrid 与本步前 SyncBlock
+//   排空, t0 写不与他们竞争; fifo 的全员读者 (OpAllocPriority) 同理。
+__aicore__ inline void OpFifoAvailUpdate(
     uint32_t R, uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* numMissesGm, int32_t* availGm, int32_t* freeSizeGm) {
+    int32_t* fifoGm, int32_t* availGm, int32_t* freeSizeGm, int32_t* numMissesGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
     if (threadIdx.x == 0) {
         for (uint32_t r = 0; r < rowCount; ++r) {
             uint32_t row = startRow + r;
             if (row >= R) break;
-            int32_t nm = numMissesGm[row];
-            int32_t av = availGm[row];
-            int32_t fs = nm - av;          // 真实需弹栈量, 不再被 kEff 截断 (kEff 已删)
-            if (fs < 0) fs = 0;
-            freeSizeGm[row] = fs;
+            fifoGm[row] = fifoGm[row] + 1;
+            availGm[row] = availGm[row] + freeSizeGm[row] - numMissesGm[row];
         }
     }
 }
+
+// ---- Step 3: free (argtopk select + release + push) ----
+// [P4 2026-10-13] OpFreeSize (独立 t0 步 + SyncGrid) 已折进 OpHitMiss 的 t0 汇总段。
 
 // per-row 基数选择 (radix select, 4 趟 MSB-first, 全定长, 无递归, 无动态分配).
 // 目标: 从打包 key 中选出 pri 最小的 freeSize 个槽 (平局按槽号升序), 写 freeIdxOut.
@@ -572,59 +582,47 @@ __aicore__ inline void OpFreePush(
     }
 }
 
-__aicore__ inline void OpFreeAvailAdd(
-    uint32_t R, uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* availGm, int32_t* freeSizeGm) {
-    uint32_t startRow = blockIdx.x * rowsPerCore;
-    uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
-    if (threadIdx.x == 0) {
-        for (uint32_t r = 0; r < rowCount; ++r) {
-            uint32_t row = startRow + r;
-            if (row >= R) break;
-            availGm[row] = availGm[row] + freeSizeGm[row];
-        }
-    }
-}
-
 // ---- Step 4: alloc pop ----
+// [P4 2026-10-13] 直读 freeIdx: 旧版 avail 先 +=fs 再 -=nm 后从 free 栈弹出
+//   free[availOld+fs-nm+j]; 而新压入段满足 free[availOld+k] == freeIdx[k] (k<fs),
+//   故弹出等价拆分为: readIdx ≥ availOld → freeIdx[readIdx-availOld] (不依赖
+//   OpFreePush 对 free 栈新段的写入), readIdx < availOld → 老栈 free[readIdx]
+//   (本 kernel 从未写该区段) —— 与旧版逐值一致, 且 FreePush 的写入在本 kernel
+//   内不再有读者 (仅持久化给下一次调用), FreePush→AllocPop 间的 SyncGrid 可删。
+//   avail 的两步更新 (原 OpFreeAvailAdd +=fs / OpAllocAvailSub -=nm) 合并为
+//   Step5 尾 OpFifoAvailUpdate 的一次写; 本函数读到的 avail 恒为初值 availOld。
 __aicore__ inline void OpAllocPop(
     uint32_t R, uint32_t topkDim, uint32_t freeStackSize, uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* numMissesGm, int32_t* availGm,
-    int32_t* freeGm, int32_t* rawSlotsGm) {
+    int32_t* numMissesGm, int32_t* freeSizeGm, int32_t* availGm,
+    int32_t* freeIdxGm, int32_t* freeGm, int32_t* rawSlotsGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
     for (uint32_t r = 0; r < rowCount; ++r) {
         uint32_t row = startRow + r;
         if (row >= R) break;
         int32_t nm = numMissesGm[row];
-        int32_t avail = availGm[row];
+        int32_t avail = availGm[row];      // 初值 availOld (更新推迟到 Step5 尾)
+        int32_t fs = freeSizeGm[row];
         uint32_t rowOff = row * topkDim;
         uint32_t freeRowOff = row * freeStackSize;
         for (uint32_t j = threadIdx.x; j < topkDim; j += blockDim.x) {
             int32_t slot;
             if (j < (uint32_t)nm) {
-                int32_t readIdx = avail - nm + (int32_t)j;
-                if (readIdx < 0) readIdx = 0;
-                if (readIdx >= (int32_t)freeStackSize) readIdx = (int32_t)freeStackSize - 1;
-                slot = freeGm[freeRowOff + readIdx];
+                int32_t readIdx = avail + fs - (int32_t)nm + (int32_t)j;
+                if (readIdx >= avail) {
+                    int32_t fi = readIdx - avail;                 // ∈ [0, fs) ⊂ [0, topkDim)
+                    if (fi < 0) fi = 0;
+                    if (fi >= (int32_t)topkDim) fi = (int32_t)topkDim - 1;
+                    slot = freeIdxGm[rowOff + fi];
+                } else {
+                    if (readIdx < 0) readIdx = 0;                 // 老栈区段, 本 kernel 未写
+                    if (readIdx >= (int32_t)freeStackSize) readIdx = (int32_t)freeStackSize - 1;
+                    slot = freeGm[freeRowOff + readIdx];
+                }
             } else {
                 slot = 0;
             }
             rawSlotsGm[rowOff + j] = slot;
-        }
-    }
-}
-
-__aicore__ inline void OpAllocAvailSub(
-    uint32_t R, uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* availGm, int32_t* numMissesGm) {
-    uint32_t startRow = blockIdx.x * rowsPerCore;
-    uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
-    if (threadIdx.x == 0) {
-        for (uint32_t r = 0; r < rowCount; ++r) {
-            uint32_t row = startRow + r;
-            if (row >= R) break;
-            availGm[row] = availGm[row] - numMissesGm[row];
         }
     }
 }
@@ -913,11 +911,12 @@ public:
             PerfBegin(); SyncGrid(); PerfEnd();
         }
 
-        // ---- Step 1: hit/miss + miss 计数 (warp 归约, 无 atomic) ----
+        // ---- Step 1: hit/miss + miss 计数 + freeSize (warp 归约, 无 atomic) ----
         PerfBegin(); OpHitMiss(R, topkDim, effTopk, maxModelLenP1, rowsPerCore, tailRows,
-                     htdGm_, posGm_, curSlotsGm_, numMissesGm_, argtopkKeyUb_); PerfEnd();
+                     htdGm_, posGm_, curSlotsGm_, numMissesGm_, availGm_, freeSizeGm_,
+                     argtopkKeyUb_); PerfEnd();
         PerfBegin(); SyncGrid(); PerfEnd();  // curSlots 行内跨线程 RAW → Step2 OpProtect;
-                                            // numMissesGm 由 t0 写、OpFreeSize(t0) 同线程读, 无需栅栏。
+                                            // numMisses/freeSize (t0 写) 经本 dcci 对 Step3/4 全员可见。
 
         // ---- Step 2: protect + fifo++ ----
         PerfBegin(); OpProtect(R, topkDim, effTopk, B, rowsPerCore, tailRows, curSlotsGm_, priGm_, fifoGm_); PerfEnd();
@@ -930,29 +929,26 @@ public:
         PerfBegin(); SyncGrid(); PerfEnd(); // pri 行内写 → step3 argtopk 行内读 (行内跨线程 RAW)
 
         // ---- Step 3: free ----
-        PerfBegin(); OpFreeSize(R, rowsPerCore, tailRows, numMissesGm_, availGm_, freeSizeGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
-        PerfBegin(); ArgtopkAllRows(); PerfEnd();   // [Step2] GM count 并行 histogram (UB atomic 非真原子, 已回 GM)
-        PerfBegin(); SyncGrid(); PerfEnd();
+        // [P4] OpFreeSize 已折进 Step1 t0 (fs 与 numMisses 同点写入, 经 Step1 尾 dcci 可见);
+        //   FreeRelease→FreePush 无 RAW (后者只读 freeIdx/avail/fs), FreePush→AllocPop
+        //   无 RAW (AllocPop 直读 freeIdx + 老栈, 不读 push 新段), 两个 SyncGrid 已删;
+        //   OpFreeAvailAdd/OpAllocAvailSub 合并进 Step5 尾 OpFifoAvailUpdate。
+        PerfBegin(); ArgtopkAllRows(); PerfEnd();   // radix select (原 [Step2] GM histogram 已在 UB)
+        PerfBegin(); SyncGrid(); PerfEnd();         // freeIdx 行内跨线程 RAW → OpFreeRelease
         PerfBegin(); OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxGm_, freeSizeGm_, priGm_, dthGm_, htdGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
         PerfBegin(); OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxGm_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
-        PerfBegin(); OpFreeAvailAdd(R, rowsPerCore, tailRows, availGm_, freeSizeGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
 
         // ---- Step 4: alloc pop ----
-        PerfBegin(); OpAllocPop(R, topkDim, freeStackSize, rowsPerCore, tailRows, numMissesGm_, availGm_, freeGm_, rawSlotsGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
-        PerfBegin(); OpAllocAvailSub(R, rowsPerCore, tailRows, availGm_, numMissesGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
+        PerfBegin(); OpAllocPop(R, topkDim, freeStackSize, rowsPerCore, tailRows,
+                     numMissesGm_, freeSizeGm_, availGm_, freeIdxGm_, freeGm_, rawSlotsGm_); PerfEnd();
+        PerfBegin(); SyncGrid(); PerfEnd();  // rawSlots 跨线程 RAW → OpAllocPriority
 
-        // ---- Step 5: alloc priority + fifo++ ----
+        // ---- Step 5: alloc priority + fifo/avail 折叠更新 ----
         PerfBegin(); OpAllocPriority(R, topkDim, B, rowsPerCore, tailRows, rawSlotsGm_, numMissesGm_, priGm_, fifoGm_); PerfEnd();
         PerfBegin(); asc_syncthreads(); PerfEnd();  // ⚠ Bug2 fix (同 Step2): OpAllocPriority 全线程写 pri=fifo 完成后,
-                            //   t0 才能 OpFifoInc fifo+=1, 防 pri 多 1 race.
-        PerfBegin(); OpFifoInc(R, rowsPerCore, tailRows, fifoGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
+                            //   t0 才能 fifo+=1, 防 pri 多 1 race; 同时排空 avail 的全员读者。
+        PerfBegin(); OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_); PerfEnd();
+        // [P4] 尾 SyncGrid 已删: pri/fifo/avail 此后无本 kernel 内读者。
 
         // ---- Step 6: set_update (含最终槽位回写, 原 OpFinalSlots 已并入) ----
         PerfBegin(); OpMissCumsum(R, topkDim, effTopk, rowsPerCore, tailRows,

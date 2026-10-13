@@ -2,13 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Echo 更新回归：直接提取实际 C++ 函数，用 g++/128 个 CPU 线程检查基数选择、hit 与 miss 扫描。
 
-覆盖 2026-10-13 手抄版的三处设备算法改动 + P0-P3 性能优化：
+覆盖 2026-10-13 手抄版的三处设备算法改动 + P0-P4 性能优化：
   - OpHitMiss：miss 计数改 warp 归约 + t0 汇总（[P0] 无 atomic，numMisses 直接写出）；
   - OpArgtopkRow：4 趟 MSB-first 基数选择 + 并行 emission（[P1] 打包块扫描得各线程
     写入基址，连续切片保槽号升序，替代 t0 串行扫描）；
   - OpMissCumsum：两级 warp 扫描（[P3] 打包 p0/p1 miss 标志，替代 Hillis-Steele），
     否则回退 t0 串行；
-  - BlockSumToGm / PackedBlockScan：warp 协作辅助（shfl_up 模拟）。
+  - OpHitMiss 内联块求和并顺手写 freeSize（[P4] 原 OpFreeSize 折叠）；
+  - OpAllocPop：直读 freeIdx + 老栈（[P4] 不依赖 FreePush 新段，与旧栈弹出语义
+    逐值等价）；OpFifoAvailUpdate：fifo++/avail += fs-nm 折叠（[P4] 替代两个
+    独立 t0 步，终值与旧两步序列恒等）；
+  - PackedBlockScan：warp 协作辅助（shfl_up 模拟，2 次栅栏版本）。
 
 依赖 Python 标准库和支持 C++20 的 g++；启用 AddressSanitizer/UBSan。
 这是 CPU 算法和索引检查，不能验证 Ascend 编译、GM D-cache 或 NPU 耗时。
@@ -23,7 +27,7 @@ root=Path(__file__).resolve().parents[1]
 # 断言模型常量与实际头文件一致，防止以后修改 tiling 后误用旧模型。
 tiling=(root/'csrc/echo/echo_lru_tiling.h').read_text()
 for name,value in [('ARGTOPK_GROUP_THREADS',64),('ARGTOPK_UB_NPAD_MAX',8192),
-                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',40)]:
+                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',31)]:
     match=re.search(r'constexpr uint32_t '+name+r'\s*=\s*(\d+)\s*;',tiling)
     assert match and int(match.group(1))==value, f'{name} 已改变，请同步调整 CPU 模型'
 src=(root/'csrc/echo/echo_lru_kernel.h').read_text()
@@ -35,8 +39,8 @@ def extract(name):
             end=src.index('\n}\n',start)+3
             return src[start:end]
     raise KeyError(name)
-helpers=(extract('BlockSumToGm')+'\n'+extract('PackedBlockScan'))
-functions=(helpers+'\n'+extract('OpHitMiss')+'\n'+extract('OpArgtopkRow')+'\n'+extract('OpMissCumsum'))
+functions=(extract('PackedBlockScan')+'\n'+extract('OpHitMiss')+'\n'+extract('OpArgtopkRow')
+           +'\n'+extract('OpMissCumsum')+'\n'+extract('OpAllocPop')+'\n'+extract('OpFifoAvailUpdate'))
 preamble=r'''
 #include <algorithm>
 #include <atomic>
@@ -158,14 +162,17 @@ try{
             ++checks;
         }
     }
-    // ---- 2) OpHitMiss: warp 归约计数, 无 atomic ----
+    // ---- 2) OpHitMiss: warp 归约计数 (含 [P4] 折叠的 freeSize), 无 atomic ----
     for(uint32_t eff:{4u,1536u,2048u}){
         constexpr uint32_t R=3,L=4096,T=2048;
-        std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),misses(R,-777),scratch(65,-777);
+        std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),misses(R,-777),fsOut(R,-777),scratch(65,-777);
+        std::vector<int32_t> avail(R);
+        for(uint32_t r=0;r<R;++r)avail[r]=static_cast<int32_t>(r*700+13);
         for(uint32_t i=0;i<R*L;++i)htd[i]=(i%4==0)?I32_MAX:static_cast<int32_t>(i%4096);
         for(uint32_t i=0;i<R*T;++i)pos[i]=(i%7==0)?-1:static_cast<int32_t>((i*5)%(L+100));
         atomicCalls=0;
-        launch([&]{OpHitMiss(R,T,eff,L,R,R,htd.data(),pos.data(),out.data(),misses.data(),scratch.data());});
+        launch([&]{OpHitMiss(R,T,eff,L,R,R,htd.data(),pos.data(),out.data(),
+                             misses.data(),avail.data(),fsOut.data(),scratch.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t expectedMisses=0;
             for(uint32_t j=0;j<T;++j){
@@ -174,6 +181,8 @@ try{
                 if(j<eff&&expectedSlot==I32_MAX)++expectedMisses;
             }
             require(misses[r]==expectedMisses,"miss count mismatch");
+            int32_t expectedFs=expectedMisses-avail[r];
+            require(fsOut[r]==(expectedFs<0?0:expectedFs),"[P4] folded free size mismatch");
         }
         require(atomicCalls==0,"[P0] OpHitMiss must not use atomics");
         ++checks;
@@ -196,6 +205,46 @@ try{
                 require(mpos[r*topk+j]==expectPos,"miss pos mismatch");
                 if(miss)++serial;
             }
+        }
+        ++checks;
+    }
+    // ---- 4) [P4] OpAllocPop 直读 freeIdx + OpFifoAvailUpdate 折叠: 与旧栈语义逐值等价 ----
+    {
+        constexpr uint32_t R=4,T=64,FS=96;   // T=topkDim, FS=freeStackSize
+        // 覆盖 nm<fs / nm==fs / nm>fs / nm=0 / fs=0 组合 (fs 由 avail/nm 推出)。
+        const int32_t nmList[R]={20,30,10,0}, availList[R]={40,10,50,25};
+        std::vector<int32_t> nm(nmList,nmList+R),avail(availList,availList+R),fs(R);
+        for(uint32_t r=0;r<R;++r){fs[r]=nm[r]-avail[r];if(fs[r]<0)fs[r]=0;}
+        std::mt19937 rng(99);
+        std::vector<int32_t> freeIdx(R*T),free(R*FS,-777),raw(R*T,-777);
+        for(uint32_t i=0;i<R*T;++i)freeIdx[i]=static_cast<int32_t>(rng()%(FS-1)+1);
+        for(uint32_t i=0;i<R*FS;++i)free[i]=static_cast<int32_t>(rng()%1000+1);   // 老栈随机内容
+        launch([&]{OpAllocPop(R,T,FS,R,R,nm.data(),fs.data(),avail.data(),
+                              freeIdx.data(),free.data(),raw.data());});
+        for(uint32_t r=0;r<R;++r){
+            // 旧版 golden: 先 push (free[avail+k]=freeIdx[k]) 再从栈尾弹 nm 个。
+            std::vector<int32_t> stack(free.begin()+r*FS,free.begin()+(r+1)*FS);
+            for(int32_t k=0;k<fs[r];++k)stack[avail[r]+k]=freeIdx[r*T+k];
+            for(uint32_t j=0;j<T;++j){
+                int32_t expected=0;
+                if(j<static_cast<uint32_t>(nm[r])){
+                    int32_t readIdx=avail[r]+fs[r]-nm[r]+static_cast<int32_t>(j);
+                    if(readIdx<0)readIdx=0;
+                    if(readIdx>=static_cast<int32_t>(FS))readIdx=FS-1;
+                    expected=stack[readIdx];
+                }
+                require(raw[r*T+j]==expected,"[P4] alloc pop mismatch with stack golden");
+            }
+        }
+        // fifo/avail 折叠更新: 终值与旧两步序列 (+=fs 后 -=nm) 恒等且 ≥0。
+        std::vector<int32_t> fifo(R),avail2(avail);
+        for(uint32_t r=0;r<R;++r)fifo[r]=static_cast<int32_t>(100+r);
+        launch([&]{OpFifoAvailUpdate(R,R,R,fifo.data(),avail2.data(),fs.data(),nm.data());});
+        for(uint32_t r=0;r<R;++r){
+            int32_t expectedAvail=avail[r]+fs[r]-nm[r];
+            require(fifo[r]==101+r,"fifo increment mismatch");
+            require(avail2[r]==expectedAvail,"[P4] folded avail mismatch");
+            require(avail2[r]>=0,"[P4] folded avail must stay non-negative");
         }
         ++checks;
     }

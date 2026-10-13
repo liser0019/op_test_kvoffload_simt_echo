@@ -1,8 +1,8 @@
 {
-  "manifest_revision": "p0p3-2026-10-13",
-  "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前对 kv_plan_single_op_test / GitHub 仓库的来源与哈希溯源不再保留，需要时查 git 历史。",
+  "manifest_revision": "p4-2026-10-13",
+  "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
-  "echo_revision": "radix-select-warp-coop-2026-10-13",
+  "echo_revision": "radix-select-warp-coop-2026-10-13-p4",
   "files": [
     {
       "path": "build.sh",
@@ -24,15 +24,15 @@
     },
     {
       "path": "echo_perf_step.py",
-      "sha256": "77f03d1ee057350ee9124d4903626c0fe13997de5b4693fb6ee579ea78565e24",
-      "bytes": 13194,
+      "sha256": "3c1d264038e86914beee3ae19d73b933992fda5be82672d26d8912d7bc7c4062",
+      "bytes": 13235,
       "role": "ECHO_PERF_STEP 构建的分步耗时统计（诊断用）"
     },
     {
       "path": "checks/check_echo_kernel_host.py",
-      "sha256": "9b783f76a893e0a1485109e7834d9f35aef89a63fe702222bee8c6a3ee62bbd1",
-      "bytes": 11673,
-      "role": "CPU 并行回归：提取 warp 辅助 + OpHitMiss/OpArgtopkRow/OpMissCumsum，ASan/UBSan"
+      "sha256": "e4349cef3fd4e71ab2506b3d7eca67d1fadc5b760b0b4ed76d35d21b12cdf7e2",
+      "bytes": 14788,
+      "role": "CPU 并行回归：warp 辅助 + 五个 Op 函数提取，ASan/UBSan"
     },
     {
       "path": "csrc/simt/sparse_kv_plan_kernel.cpp",
@@ -60,9 +60,9 @@
     },
     {
       "path": "csrc/echo/echo_lru_kernel.h",
-      "sha256": "e80c8b5c0c18dffcf050836a6746640415bb5c1a17c6024c998f87f530c0ffb2",
-      "bytes": 54793,
-      "role": "Echo 设备计算：radix select + warp 协作（P0-P3）+ 分步打点"
+      "sha256": "eb20811adf4d91df5385a382737412d97eb143478917ecb69521dcbcaddd932d",
+      "bytes": 56482,
+      "role": "Echo 设备计算：radix select + warp 协作（P0-P4）+ 分步打点"
     },
     {
       "path": "csrc/echo/echo_lru_launch.cpp",
@@ -78,8 +78,8 @@
     },
     {
       "path": "csrc/echo/echo_lru_tiling.h",
-      "sha256": "b2b0bbfe24c769914bf8c2d8b6e5be5106ca8c1244a1378093361818413435b9",
-      "bytes": 4469,
+      "sha256": "f9f777a8fe4cbe8da5e40ea1b894a27d0f5061bd30999f47be4e322bda61d94f",
+      "bytes": 4540,
       "role": "Echo tiling 与 UB/分步常量"
     },
     {
@@ -90,8 +90,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "100f231fb25039cc9f3fc9638839edf959a2fb542203b9bac0870ded156c75fc",
-      "bytes": 24805,
+      "sha256": "5b94302a8b0d4d641285e4e393109bfa7d1b59f80e8cbc12e2e1ad8b814aa172",
+      "bytes": 25631,
       "role": "阅读指南与运行说明"
     },
     {
@@ -99,37 +99,37 @@
       "sha256": "872fd170c9cf04baaf1f14737e6cebb430ce42824d504e584abea6bb6e5c0e89",
       "bytes": 56,
       "role": "忽略构建产物/结果/缓存"
+    },
+    {
+      "path": ".gitattributes",
+      "sha256": "a4d46fbdab08305b4c723d9d3623e82a95a3b6495454ff0f63ff09cb4b668003",
+      "bytes": 282,
+      "role": "强制 LF 行尾"
     }
   ],
   "echo_update": {
-    "source": "作者 2026-10-13 新版 echo_lru 优化（人工誊抄到本工程后逐处校对修正）+ P0-P3 性能优化",
+    "source": "作者 2026-10-13 新版 echo_lru 优化（人工誊抄逐处校对修正）+ P0-P4 性能优化",
     "changes": [
-      "OpArgtopkRow：4-pass LSD 全量基数排序改为 4 趟 MSB-first 基数选择（阈值 T + 配额 quota，key/hist 全在单大 __ubuf__ 数组，无 GM ping-pong/scatter）",
-      "OpMissCumsum：并行前缀和（两级 warp 扫描，topkDim<=2*blockDim 且 2*topkDim<=8192 启用，否则 t0 串行）",
-      "ECHO_PERF_STEP 分步打点：非 spec 32 步 / spec 40 步的 t0 clock() 周期写入 workspace 尾部",
-      "EchoLruTiling 新增 argtopkGroupThreads 字段（plugin 侧填充，kernel 用编译期常量 ARGTOPK_GROUP_THREADS）"
+      "OpArgtopkRow：4-pass LSD 全量基数排序改为 4 趟 MSB-first 基数选择（阈值 T + 配额 quota）",
+      "OpMissCumsum：两级 warp 扫描（topkDim<=2*blockDim 且 2*topkDim<=8192 启用，否则 t0 串行）",
+      "ECHO_PERF_STEP 分步打点：非 spec 23 步 / spec 31 步的 t0 clock() 周期写入 workspace 尾部",
+      "EchoLruTiling 的 argtopkGroupThreads 字段（plugin 侧填充）"
     ],
     "perf_optimizations": [
-      "[P0] OpHitMiss 去 GM 同地址 atomic（warm 实测 ~9.4M 周期）：asc_reduce_add warp 归约 + t0 汇总直接写 numMisses，删除 OpNumMisses 子步（计数语义不变）；numHitsGm 槽位保留不读写",
-      "[P1] Argtopk emission 并行化（full_cache 实测 ~2.1M 周期）：全员连续切片统计 (nLt|nEq<<16) 经 PackedBlockScan 得写入基址后并行写 freeIdxOut + 并行补零；连续切片保证输出仍按全局槽号升序（grid-stride 会得到线程主序，顺序即错）",
-      "[P2] OpFinalSlots 删除：miss 最终槽位即本轮 aslot，由 OpSetUpdate 顺手写回 curSlots（hit 位 Step1 已正确），省去全量重查 htd 与尾步栅栏",
-      "[P3] OpMissCumsum 去 Hillis-Steele（11 轮块栅栏 ~20K 周期）：warp shuffle 一级 + t0 扫 warp total 二级（3 次栅栏/行），p0/p0+blockDim 连续映射使 rank 可由打包前缀直接拼出",
-      "新增 warp/block 协作辅助 BlockSumToGm / PackedBlockScan（两级结构对照 SIMT 基线 BlockExclusiveScan，warp 数按 blockDim.x 运行时推导）"
+      "[P0] OpHitMiss 去 GM 同地址 atomic（warm 实测 ~9.4M 周期 → ~19K）：warp 归约 + t0 汇总直接写 numMisses",
+      "[P1] Argtopk emission 并行化（full_cache 2.1M → 398K）：连续切片 + PackedBlockScan 写入基址",
+      "[P2] OpFinalSlots 删除：miss 最终槽位由 OpSetUpdate 顺手写回 curSlots",
+      "[P3] OpMissCumsum 去 Hillis-Steele（20K → 13K）：两级 warp 扫描",
+      "[P4] 栅栏削减：OpFreeSize 折进 Step1 t0；OpAllocPop 直读 freeIdx+老栈（与旧栈弹出逐值等价，不再读 FreePush 新段）；OpFreeAvailAdd/OpAllocAvailSub 合并为 Step5 尾 OpFifoAvailUpdate；删 3 个无 RAW/无读者的 SyncGrid；PackedBlockScan 去保护性第 3 栅栏（顺序论证见注释）。步骤 40→31（非 spec 32→23）"
     ],
     "transcription_fixes": [
-      "echo_lru_kernel.h: scalar[0] == 0 比较符误用改为赋值，并补 scalar[2]=0 初始化",
-      "echo_lru_kernel.h: pass>0 直方图候选过滤 prefix 位对齐错误（v>>(shift+8) 与完整 32 位 prefix 比较改为两侧同右移对齐）",
-      "echo_lru_kernel.h: NNpad 未定义改为 Npad；PerEnd() 拼写（8 处）；Step0 后 SyncGrid 补 PerfEnd()；PerfEnd 补 __aicore__ 双下划线；argtopkScalarUb_,, 双逗号；argtopkKeyPriUb_ 旧成员名改 argtopkKeyUb_",
-      "echo_lru_kernel.h: OpMissCumsum 删除非法声明 uint32_t threadIdx.x/blockDim.x，补 t 与 Bm=blockDim.x，p1 分支 miss0 误写改 miss1，调用处补 scanUb 实参",
-      "echo_lru_kernel.h: perfLast_ 由 uint32_t 改为 uint64_t；移除误加的 simt_api/cooperative_groups.h include",
-      "echo_lru_tiling.h: 恢复被误删的 ARGTOPK_GM_NPAD_MAX=8192，新增 ECHO_PERF_NUM_STEPS（P0-P3 后为 40）",
-      "echo_lru_launch.h: workspace 公式按新布局重写并加 ECHO_PERF_STEP 条件段",
-      "echo_lru_plugin.cpp: Check() 填充 tiling.argtopkGroupThreads",
-      "CMakeLists.txt/build.sh: ECHO_PERF_STEP 选项与 build_perf/ 独立构建目录",
-      "checks/check_echo_kernel_host.py: 重写为基数选择/并行扫描/warp 协作语义（48 项检查）"
+      "scalar[0]==0 误用比较符及 scalar[2] 未初始化；直方图候选过滤 prefix 位对齐错误",
+      "NNpad 未定义；PerEnd() 拼写（8 处）；Step0 后 SyncGrid 缺 PerfEnd；PerfEnd 缺 __aicore__；双逗号；旧成员名",
+      "OpMissCumsum 非法声明/未定义 Bm,t/miss1 误写；perfLast_ 32 位截断；误加 cooperative_groups include",
+      "tiling 恢复 ARGTOPK_GM_NPAD_MAX；launch workspace 公式重写；plugin 填 argtopkGroupThreads"
     ],
-    "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出（本基准 pri[slot]=slot，与全排序输出一致）",
-    "verification": "CPU: checks 48 项 ASan/UBSan 通过（含并行 emission 顺序与零 atomic 断言）；g++ mock-SIMT 全头语法检查（开/关 ECHO_PERF_STEP）通过；bisheng dav-3510 实际编译普通/打点 kernel 通过（含 warp 原语 pure SIMT 可用性）。NPU 正确性与性能待服务器验证。"
+    "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出",
+    "verification": "CPU: checks 49 项 ASan/UBSan 通过（含直读 freeIdx 弹栈与旧栈 golden 逐值等价、avail 折叠终值恒等）；g++ mock-SIMT 全头语法检查（开/关 ECHO_PERF_STEP）通过；bisheng dav-3510 实际编译普通/打点 kernel 通过。NPU 正确性与性能待服务器验证。"
   },
-  "note": "本文件由 2026-10-13 整理时重写并于 P0-P3 后更新；echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
+  "note": "echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
 }

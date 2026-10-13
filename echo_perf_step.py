@@ -17,7 +17,7 @@ reference_echo 全量比对（本脚本是诊断工具，不是正式性能结�
 
 kernel 侧打点：PerfBegin/PerfEnd（threadIdx.x==0 的 clock() 差值）写入
 workspace 尾部 stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx]，
-非 spec 路径共 32 步（spec 路径 40 步，本基准 spec_enabled=False）。
+非 spec 路径共 23 步（spec 路径 31 步，本基准 spec_enabled=False）。
 """
 from __future__ import annotations
 
@@ -43,20 +43,21 @@ _MATCH = re.search(r"constexpr uint32_t ECHO_PERF_NUM_STEPS\s*=\s*(\d+)\s*;", _T
 assert _MATCH, "echo_lru_tiling.h 中找不到 ECHO_PERF_NUM_STEPS"
 ECHO_PERF_NUM_STEPS = int(_MATCH.group(1))
 
-# 非 spec 路径 Process() 内 PerfBegin/PerfEnd 的 32 个打点（顺序即 perfStepIdx_ 顺序）。
+# 非 spec 路径 Process() 内 PerfBegin/PerfEnd 的 23 个打点（顺序即 perfStepIdx_ 顺序）。
 # P0 后 Step1 = OpHitMiss(含 warp 归约计数) + 1 次 SyncGrid（原 OpNumMisses 子步已删）；
-# P2 后 Step6 = OpMissCumsum + SyncGrid + OpSetUpdate(含最终槽位回写，原 OpFinalSlots 已删)。
+# P2 后 Step6 = OpMissCumsum + SyncGrid + OpSetUpdate(含最终槽位回写，原 OpFinalSlots 已删)；
+# P4 后 Step1 的 t0 顺手写 freeSize（原 OpFreeSize 步删）、Step3 删 FreeRelease/FreePush
+# 间与 FreePush 后的无 RAW SyncGrid、OpFreeAvailAdd/OpAllocAvailSub 合并进 Step5 尾
+# OpFifoAvailUpdate。
 # specEnabled=1 时 Step0.5 在 "Step0.SyncGrid" 之后额外插入 8 步，本基准不覆盖。
 ECHO_PERF_STEP_NAMES = [
     "Step0.OpResetRows", "Step0.OpResetDthPri", "Step0.OpResetFree", "Step0.OpResetAvailFifo",
     "Step0.SyncGrid",
     "Step1.OpHitMiss", "Step1.SyncGrid",
     "Step2.OpProtect", "Step2.SyncBlock", "Step2.OpFifoInc", "Step2.SyncGrid",
-    "Step3.OpFreeSize", "Step3.SyncGrid", "Step3.ArgtopkAllRows", "Step3.SyncGrid",
-    "Step3.OpFreeRelease", "Step3.SyncGrid", "Step3.OpFreePush", "Step3.SyncGrid",
-    "Step3.OpFreeAvailAdd", "Step3.SyncGrid",
-    "Step4.OpAllocPop", "Step4.SyncGrid", "Step4.OpAllocAvailSub", "Step4.SyncGrid",
-    "Step5.OpAllocPriority", "Step5.SyncBlock", "Step5.OpFifoInc", "Step5.SyncGrid",
+    "Step3.ArgtopkAllRows", "Step3.SyncGrid", "Step3.OpFreeRelease", "Step3.OpFreePush",
+    "Step4.OpAllocPop", "Step4.SyncGrid",
+    "Step5.OpAllocPriority", "Step5.SyncBlock", "Step5.OpFifoAvailUpdate",
     "Step6.OpMissCumsum", "Step6.SyncGrid", "Step6.OpSetUpdate",
 ]
 ECHO_PERF_NONSPEC_STEPS = len(ECHO_PERF_STEP_NAMES)

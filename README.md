@@ -6,15 +6,16 @@
 
 工程基线来自 `kv_plan_single_op_test` 的 `main`。SIMT 是对照基线，保留原样；`csrc/echo/` 在基线之上集成了作者 2026-10-13 的新版优化（人工誊抄，已逐处校对修正，见 `source_manifest.json`），并保留 `checks/check_echo_kernel_host.py` 做 CPU 回归。不包含旧 AIV 或跳过排序的 Echo 实验实现。
 
-### 本次 Echo 更新（2026-10-13 手抄版 + P0-P3 性能优化）
+### 本次 Echo 更新（2026-10-13 手抄版 + P0-P4 性能优化）
 
 - `OpArgtopkRow` 从 4-pass LSD 全量基数排序改为 **4 趟 MSB-first 基数选择（radix select）**：key 打包与 per-thread 直方图（`ARGTOPK_GROUP_THREADS=64` 路纯写切片）全在单大 `__ubuf__` 数组内，t0 逐字节收敛阈值 `T` 与配额 `quota`，最后按阈值筛出 `freeSize` 个槽；不再有 GM ping-pong / scatter，workspace 每核只用调试 dump 段。
 - `OpMissCumsum` 改为 **两级 warp 扫描**（每线程 2 元素，`topkDim<=2*blockDim` 且 `2*topkDim<=8192` 时启用，生产尺寸 2048 命中），否则回退 t0 串行。
 - **[P0] OpHitMiss 去 atomic**：原每线程一次 `asc_atomic_add` 打同一 GM 地址（warm 场景 ~1024 次/行 × ~9K 周期 → 该步实测 ~9.4M 周期），改 `asc_reduce_add` warp 归约 + t0 汇总直接写 `numMisses`（2 次栅栏/行）；`OpNumMisses` 子步删除，`numHitsGm` 槽位保留但不再读写。
 - **[P1] Argtopk emission 并行化**：原 t0 串行两遍 Npad 扫描 + 串行补零（full_cache 场景该步实测 ~2.1M 周期），改全员连续切片统计 `(nLt|nEq<<16)` 打包块扫描得写入基址后并行写 + 并行补零；连续切片保证输出仍按全局槽号升序，与原语义逐位一致。
 - **[P2] OpFinalSlots 删除**：miss 的最终槽位就是本轮分配的 `aslot`，由 `OpSetUpdate` 顺手写回 `curSlots`（hit 位 Step1 已正确），省去全量 topk 重新 gather htd 与尾步栅栏。
+- **[P4] 栅栏削减**：OpFreeSize 折进 Step1 的 t0 汇总段（fs 与 numMisses 同点写出）；OpAllocPop 改直读 `freeIdx` + 老栈（新压入段满足 `free[avail+k]==freeIdx[k]`，弹出与旧栈语义逐值等价，且不再依赖 FreePush 的写入）；`OpFreeAvailAdd`/`OpAllocAvailSub` 合并为 Step5 尾 `OpFifoAvailUpdate` 一次 `avail += fs - nm`（终值与旧两步序列恒等）；删除 FreeRelease→FreePush、FreePush→AllocPop 两个无 RAW 的 SyncGrid 与 Step5 尾无读者的 SyncGrid；`PackedBlockScan` 去掉保护性第 3 栅栏（下一轮 barrier1/barrier2 已保证 scratch 读先于写，注释含顺序论证）。步骤数 40→31（非 spec 32→23）。
 - **[P3] OpMissCumsum 去 Hillis-Steele**：原 11 轮 1024 线程块栅栏（~20K 周期，barrier bound），改 warp shuffle 一级 + t0 扫 warp total 二级（3 次栅栏/行），p0/p0+blockDim 连续映射使排名可由打包前缀直接拼出。
-- 新增 **ECHO_PERF_STEP 分步打点**：`Process` 内 32 个非 spec 步（spec 路径 40 步）由 `PerfBegin/PerfEnd` 记录 t0 的 `clock()` 周期，写入 workspace 尾部 `stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx]`；`ECHO_PERF_STEP=ON bash build.sh` 构建到 `build_perf/`，`echo_perf_step.py` 读取并统计（打点构建仅用于诊断，正式对比仍用普通构建 + `compare.py`）。
+- 新增 **ECHO_PERF_STEP 分步打点**：`Process` 内 23 个非 spec 步（spec 路径 31 步）由 `PerfBegin/PerfEnd` 记录 t0 的 `clock()` 周期，写入 workspace 尾部 `stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx]`；`ECHO_PERF_STEP=ON bash build.sh` 构建到 `build_perf/`，`echo_perf_step.py` 读取并统计（打点构建仅用于诊断，正式对比仍用普通构建 + `compare.py`）。
 - 淘汰语义：`key==T` 平局取最小槽号，与稳定排序的 `(pri, slot)` 字典序一致；`key<T` 组按槽号升序输出 —— 本基准初始 `pri[slot]=slot`（见 `make_echo_initial`），与全排序结果一致。若未来输入存在非单调 pri，淘汰“集合”仍正确，仅 free 栈压栈顺序与全排序版不同。
 - 算子接口、SIMT 基线、benchmark 的输入、参考算法、状态恢复与计时边界均保留（workspace 布局未动）。
 
@@ -147,7 +148,7 @@ ECHO_PERF_STEP=ON bash build.sh --soc=ascend950   # 等价: bash build.sh --perf
 python3 echo_perf_step.py --device 1 --warmup 5 --repeat 20
 ```
 
-`echo_perf_step.py` 直接 import `compare.py` 的输入构造、参考实现、状态恢复与调用方式（同尺寸、同 seed、同场景），因此分步耗时的各步之和可与 `compare.py` 的 Event 总耗时互相印证。每次调用前用负哨兵填充 workspace，读回每核每步的 `clock()` 周期（非 spec 路径 32 步，步名见 `ECHO_PERF_STEP_NAMES`），按“最慢核”跨轮取中位数，并用 Event 总耗时标定周期频率。测量前后均与 `reference_echo` 全量比对；若加载的不是打点构建，脚本会因哨兵未被覆盖而直接报错。
+`echo_perf_step.py` 直接 import `compare.py` 的输入构造、参考实现、状态恢复与调用方式（同尺寸、同 seed、同场景），因此分步耗时的各步之和可与 `compare.py` 的 Event 总耗时互相印证。每次调用前用负哨兵填充 workspace，读回每核每步的 `clock()` 周期（非 spec 路径 23 步，步名见 `ECHO_PERF_STEP_NAMES`），按“最慢核”跨轮取中位数，并用 Event 总耗时标定周期频率。测量前后均与 `reference_echo` 全量比对；若加载的不是打点构建，脚本会因哨兵未被覆盖而直接报错。
 
 打点构建改变了 kernel 代码形态，其总耗时不用于正式结论；正式性能对比始终使用普通构建 + `compare.py`。
 
@@ -236,7 +237,7 @@ elapsed_time * 1000           ← 毫秒转换为微秒
 临时 workspace 按 main 的布局和复用方式分配：
 
 - SIMT：`hash_capacity=next_pow2(2*topk)`，最小为 32；每行 `3*hash_capacity+2*capacity+topk` 个 int32。单行不超过 112 KiB 时走 kernel 内部 UB，外部只分配占位元素，否则分配完整 GM workspace。
-- Echo：compare.py 按旧版上界公式分配 workspace（含 GM ping-pong/直方图占位段，严格大于新版所需）；新版 kernel 的 GM workspace 每核只用调试 dump 段 `256+8192`（打点构建再加 `ECHO_PERF_NUM_STEPS=40`），key/hist 等在每核 128 KiB 静态 UB 内。同一次分配可兼容普通与打点两种构建。
+- Echo：compare.py 按旧版上界公式分配 workspace（含 GM ping-pong/直方图占位段，严格大于新版所需）；新版 kernel 的 GM workspace 每核只用调试 dump 段 `256+8192`（打点构建再加 `ECHO_PERF_NUM_STEPS=31`），key/hist 等在每核 128 KiB 静态 UB 内。同一次分配可兼容普通与打点两种构建。
 
 两种 kernel 沿用各自的默认线程数和分核策略。共同控制的是设备、输入、初始历史、软件环境、计时口径；算法自己的资源配置属于实现的一部分。
 
@@ -279,7 +280,7 @@ JSON 包含两路的 Event 和 Host 的 P50/P95/min/max、原始样本、执行�
 - 故障注入：故意破坏最后一个正式样本的输出，计时后检查正确报错，没有写出结果 JSON。
 - 补齐独立工程后，再次核对 9 个源码文件的来源和哈希；用新的共享库装载入口重跑上述 64 次 CPU 模拟及故障注入，均通过。
 - `build.sh` 的 shell 语法与参数帮助通过；使用临时依赖占位目录完成 CMake 配置/生成检查，确认仅包含两个 plugin、两个 kernel object、对应编译选项及 runtime 链接。占位目录用于检查构建规则，**没有实际编译 CANN kernel 或生成可运行的 NPU 共享库**。
-- 2026-10-13 手抄版校对：修正上述抄写错误后，`checks/check_echo_kernel_host.py`（48 项，ASan/UBSan）通过；`echo_lru_kernel.h` 在 mock SIMT 头下以 g++ 完成全文件语法检查（开/关 `ECHO_PERF_STEP` 两种配置）；`EchoWorkspaceElements` 公式与 kernel `Init` 布局数值核对一致；`Process` 的打点与 `ECHO_PERF_STEP_NAMES` 逐一对应；P0-P3 后 `bash build.sh` 的 bisheng 实际编译（普通/打点两配置）与 CPU 回归均通过。NPU 正确性与性能仍需服务器验证。
+- 2026-10-13 手抄版校对：修正上述抄写错误后，`checks/check_echo_kernel_host.py`（48 项，ASan/UBSan）通过；`echo_lru_kernel.h` 在 mock SIMT 头下以 g++ 完成全文件语法检查（开/关 `ECHO_PERF_STEP` 两种配置）；`EchoWorkspaceElements` 公式与 kernel `Init` 布局数值核对一致；`Process` 的打点与 `ECHO_PERF_STEP_NAMES` 逐一对应；P0-P4 后 `bash build.sh` 的 bisheng 实际编译（普通/打点两配置）与 CPU 回归均通过。NPU 正确性与性能仍需服务器验证。
 
 上述 CPU 模拟不产生可用的性能数字。服务器应先运行第 2 节的逐样本短跑审计，再运行正式测量。
 
@@ -291,7 +292,7 @@ JSON 包含两路的 Event 和 Host 的 P50/P95/min/max、原始样本、执行�
 python3 checks/check_echo_kernel_host.py
 ```
 
-脚本直接提取当前头文件里的 `BlockSumToGm`、`PackedBlockScan`、`OpHitMiss`、`OpArgtopkRow` 和 `OpMissCumsum`，用 128 个 CPU 线程、同步屏障、warp 原语模拟（shfl_up/reduce_add）执行，并启用 AddressSanitizer/UBSan。48 项检查覆盖 capacity 1～4096、随机/平局/无效时间戳、基数选择的阈值与配额、选择集合与稳定排序 golden 的交叉验证、并行 emission 输出顺序、调试直方图（高字节）、释放输出、`freeSize=0` 提前返回、UB 越界哨兵、warp 归约 miss 计数（且断言零 atomic），以及并行/串行两路 miss 前缀和。它不参与正式性能测试，也不能替代 NPU 编译、设备缓存一致性或性能验证。本次手抄校对后本地运行通过。
+脚本直接提取当前头文件里的 `PackedBlockScan`、`OpHitMiss`、`OpArgtopkRow`、`OpMissCumsum`、`OpAllocPop` 和 `OpFifoAvailUpdate`，用 128 个 CPU 线程、同步屏障、warp 原语模拟（shfl_up/reduce_add）执行，并启用 AddressSanitizer/UBSan。48 项检查覆盖 capacity 1～4096、随机/平局/无效时间戳、基数选择的阈值与配额、选择集合与稳定排序 golden 的交叉验证、并行 emission 输出顺序、调试直方图（高字节）、释放输出、`freeSize=0` 提前返回、UB 越界哨兵、warp 归约 miss 计数（且断言零 atomic）、折叠 freeSize、直读 freeIdx 的弹栈与旧栈 golden 逐值等价、avail 折叠终值恒等，以及并行/串行两路 miss 前缀和。它不参与正式性能测试，也不能替代 NPU 编译、设备缓存一致性或性能验证。本次手抄校对后本地运行通过。
 
 ## 9. 算子源码怎么读
 
