@@ -104,6 +104,9 @@ for name in b.IMPLEMENTATIONS:
     else:
         lib.define(op + plan_schema)
         lib.impl(op, callback(name), 'CPU')
+lib.define('peer_variants_info() -> str')
+from peer_build_info import catalog_identity
+lib.impl('peer_variants_info', lambda: json.dumps(catalog_identity()), 'CompositeExplicitAutograd')
 lib.define('echo_lru_core_count() -> int')
 lib.impl('echo_lru_core_count', lambda: 2, 'CompositeExplicitAutograd')
 
@@ -140,15 +143,15 @@ with tempfile.TemporaryDirectory(prefix='variant_protocol_') as temporary:
     library.touch()
     common = ['--library', str(library), '--json', str(tmp / 'result.json'), '--audit-repeat', '2', '--warmup', '1']
     run(common + ['--rows', '2', '--topk', '4', '--capacity', '8', '--max-token', '64',
-                  '--repeat', '13', '--verify-each-sample'])
+                  '--repeat', str(len(b.IMPLEMENTATIONS)), '--verify-each-sample'])
     result = json.loads((tmp / 'result.json').read_text())
-    assert len(invocations) == 4 * 13 * (2 + 1 + 13)
+    assert len(invocations) == 4 * len(b.IMPLEMENTATIONS) * (2 + 1 + len(b.IMPLEMENTATIONS))
     for scenario in result['scenarios'].values():
         assert scenario['correctness'] == 'passed'
         orders = scenario['execution_orders']
         for name in b.IMPLEMENTATIONS:
-            assert scenario[name]['event']['count'] == 13
-            assert sorted(order.index(name) for order in orders) == list(range(13))
+            assert scenario[name]['event']['count'] == len(b.IMPLEMENTATIONS)
+            assert sorted(order.index(name) for order in orders) == list(range(len(b.IMPLEMENTATIONS)))
     full_calls = len(invocations)
     invocations.clear()
     run(common + ['--rows', '1', '--topk', '2048', '--capacity', '8192', '--max-token', '16384',
@@ -166,4 +169,4 @@ with tempfile.TemporaryDirectory(prefix='variant_protocol_') as temporary:
     else:
         raise AssertionError('final sample corruption was not detected')
     assert not (tmp / 'result.json').exists(), 'failure must not publish performance JSON'
-print(f'PASS: 13 CPU schemas, {full_calls} calls across four scenarios; GM/UB split and failure gate checked. Not NPU timing.')
+print(f'PASS: {len(b.IMPLEMENTATIONS)} CPU schemas, {full_calls} calls across four scenarios; GM/UB split and failure gate checked. Not NPU timing.')

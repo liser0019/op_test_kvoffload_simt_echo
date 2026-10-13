@@ -152,12 +152,59 @@ foreach(_variant IN LISTS SIMT_VARIANTS)
     list(APPEND VARIANT_PLUGINS "${_variant_dir}/sparse_kv_plan_plugin.cpp")
 endforeach()
 
+# Peer sources and BCDE combinations have isolated kernel/VF/helper/op symbols.
+set(PEER_VARIANTS
+    peer_00_baseline
+    peer_01_threads_1024
+    peer_04_parallel_scan
+    peer_05_fused_lookup
+    peer_06_packed_lists
+    peer_09_cached_tiling
+    combo_bcde_fused
+    combo_bcde_cache
+    combo_bcde_1024
+    combo_bcde_1024_cache
+    combo_bcde_fused_cache
+    combo_bcde_fused_1024
+    combo_bcde_fused_1024_cache
+    combo_bcde_pair_scan
+    combo_bcde_pair_scan_cache
+    combo_bcde_pair_scan_1024_cache)
+foreach(_variant IN LISTS PEER_VARIANTS)
+    set(_dir "${CMAKE_CURRENT_SOURCE_DIR}/csrc/peer_variants/${_variant}")
+    file(GLOB _headers CONFIGURE_DEPENDS "${_dir}/*.h" "${_dir}/upstream/*")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        ${_headers} "${_dir}/kernel.cpp" "${_dir}/plugin.cpp")
+    set(_object "${CMAKE_CURRENT_BINARY_DIR}/kernel_${_variant}.o")
+    add_custom_command(OUTPUT "${_object}"
+        COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+                ${KERNEL_OPT_FLAGS} ${SIMT_FLAGS} ${KERNEL_INCLUDE_ARGS}
+                -I${_dir} -c "${_dir}/kernel.cpp" -o "${_object}"
+        DEPENDS "${_dir}/kernel.cpp" ${_headers}
+        COMMENT "bisheng compile ${_variant}" VERBATIM)
+    set_source_files_properties("${_object}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+    list(APPEND KERNEL_OBJECTS "${_object}")
+    list(APPEND VARIANT_PLUGINS "${_dir}/plugin.cpp")
+endforeach()
+# Bake source identity into the library; refuse altered imports or a stale .so.
+set(PEER_INFO_CPP "${CMAKE_CURRENT_BINARY_DIR}/peer_build_info.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/peer_variants_manifest.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/checks/peer_build_info.py")
+execute_process(COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/checks/peer_build_info.py" --output "${PEER_INFO_CPP}"
+    RESULT_VARIABLE _peer_info_result)
+if(NOT _peer_info_result EQUAL 0)
+    message(FATAL_ERROR "Peer source identity check failed")
+endif()
+
 # 4. 系统 C++ 编译各路 plugin，合并 kernel object，得到可被 torch.ops 加载的库。
 # TORCH_LIBRARY 的静态初始化已负责注册，不需要 Python 包/pybind 入口。
 add_library(simt_vs_echo_ops SHARED
     csrc/simt/sparse_kv_plan_plugin.cpp
     csrc/echo/echo_lru_plugin.cpp
     ${VARIANT_PLUGINS}
+    "${PEER_INFO_CPP}"
     ${KERNEL_OBJECTS})
 separate_arguments(TORCH_CXX_FLAGS_LIST NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 target_compile_options(simt_vs_echo_ops PRIVATE ${TORCH_CXX_FLAGS_LIST})

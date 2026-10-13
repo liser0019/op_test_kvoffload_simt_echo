@@ -1,3 +1,10 @@
+# 新增同事 SIMT 对照与 BCDE 组合
+
+本分支基于 `feat/simt-variant-comparison`，使用同事的 `simt` 分支。
+分析、09 的计时口径和推荐测试命令见 [同事SIMT优化分析与组合测试.md](同事SIMT优化分析与组合测试.md)。
+新增源码在 `csrc/peer_variants/`；优先对比 `10_bcde`、`combo_bcde_cache`、
+`combo_bcde_1024`、`combo_bcde_1024_cache`。当前默认编译与比较全部 29 路。下方原有说明中的 13 路指新增前的范围。
+
 # SIMT 变体与作者新版 Echo：可阅读的性能测试
 
 这是一个可独立构建的性能测试工程，**包含原 SIMT、作者新版 Echo 和 11 个 SIMT 候选的 C++/AscendC 源码**。`compare.py` 把输入生成、状态转换、golden、校验和计时集中在一个文件；`build.sh` 编译全部 13 路，Python 直接加载共享库。

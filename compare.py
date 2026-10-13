@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """阅读入口：main() → make_case() → 两份 reference → NPU 状态 → 校验 → 计时。
 
-比较原 SIMT、作者新版 Echo 和 11 个 SIMT 候选；设备源码在本目录 csrc/。
+比较原 SIMT、ECHO、我们的变体、同事 SIMT 及组合；设备源码在 csrc/。
 先 bash build.sh，再运行本文件.
 
 运行 NPU：python3 compare.py --device 1 --warmup 10 --repeat 50
@@ -33,6 +33,9 @@ ECHO_STATE = ("htd", "dth", "pri", "free_slots", "avail", "fifo")
 ECHO_OUTPUT = ("current_slots", "miss_host_pos", "miss_alloc_flat", "miss_mask")
 VARIANTS = {v["name"]: v for v in json.loads(
     (Path(__file__).resolve().parent / "variants_manifest.json").read_text())["variants"]}
+PEER_CATALOG = json.loads((Path(__file__).resolve().parent / "peer_variants_manifest.json").read_text())
+PEER_VARIANTS = {v["name"]: v for v in PEER_CATALOG["variants"]}
+VARIANTS.update(PEER_VARIANTS)
 IMPLEMENTATIONS = ("simt", "echo", *VARIANTS)
 
 
@@ -41,11 +44,14 @@ def plan_layout(topk, capacity, rows, name):
     arrays = VARIANTS[name]["capacity_arrays"] if name in VARIANTS else 2
     hash_capacity = max(32, 1 << (2 * topk - 1).bit_length())
     row_elements = 3 * hash_capacity + arrays * capacity + topk
+    threads = VARIANTS[name].get("threads", 2048) if name in VARIANTS else 2048
+    scan_bytes = (((2 * (threads // 32) + 8) * 4) + 31) & ~31
     aligned_bytes = (row_elements * 4 + 31) & ~31
     use_ub = aligned_bytes <= 112 * 1024
-    return {"capacity_arrays": arrays, "hash_capacity": hash_capacity,
+    row_ub_bytes = aligned_bytes if use_ub else 0
+    return {"threads": threads, "scan_bytes": scan_bytes, "capacity_arrays": arrays, "hash_capacity": hash_capacity,
             "row_elements": row_elements, "scratch_path": "UB" if use_ub else "GM",
-            "local_memory_bytes": 544 + (aligned_bytes if use_ub else 0),
+            "local_memory_bytes": scan_bytes + row_ub_bytes,
             "workspace_elements": 1 if use_ub else rows * row_elements}
 
 
@@ -401,7 +407,7 @@ def main():
     parser.add_argument("--verify-each-sample", action="store_true", help="短跑审计：在每次预热/测量后全量校验")
     parser.add_argument("--cpu-check", action="store_true", help="只检查共同输入和 CPU 参考，不加载共享库、不计时")
     parser.add_argument("--implementations", nargs="+", choices=IMPLEMENTATIONS, default=list(IMPLEMENTATIONS),
-                        help="参与对比的实现；默认原 SIMT、Echo 和全部 11 个候选")
+                        help="参与对比的实现；默认原 SIMT、Echo、11 个原候选及16个新增候选")
     parser.add_argument("--reference", choices=IMPLEMENTATIONS,
                         help="统计加速比的基准；默认优先 simt，其次 00_baseline，否则第一路")
     parser.add_argument("--library", type=Path,
@@ -453,9 +459,18 @@ def main():
         for op_name in required_ops:
             if not hasattr(torch.ops.sparse_kv_plan_op, op_name):
                 parser.error(f"共享库缺少 {op_name}，请重新构建本目录")
+        peer_build = None
+        if any(name in PEER_VARIANTS for name in names):
+            from checks.peer_build_info import catalog_identity
+            if not hasattr(torch.ops.sparse_kv_plan_op, "peer_variants_info"):
+                parser.error("library lacks peer_variants_info; rebuild this branch")
+            peer_build = json.loads(torch.ops.sparse_kv_plan_op.peer_variants_info())
+            if peer_build != catalog_identity():
+                parser.error("loaded peer library source identity is stale; rebuild")
         manifest_path = Path(__file__).resolve().parent / "source_manifest.json"
         manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
         metadata = {
+            "peer_build": peer_build,
             "device_index": args.device, "device": torch.npu.get_device_name(args.device),
             "torch": torch.__version__, "torch_npu": torch_npu.__version__,
             "library_path": str(library_path),
