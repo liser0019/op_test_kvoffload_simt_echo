@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# CMake 配置 → 编译原 SIMT、Echo 和 11 个 SIMT 候选，不依赖原工程。
+# CMake 配置 → 编译 BCDE fused 1024 与 16 个优化候选，不依赖原工程。
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_PYTHON="${PYTHON:-python3}"
@@ -32,6 +32,6 @@ for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
     fi
 done
 cmake "${CMAKE_ARGS[@]}"
-cmake --build "$SCRIPT_DIR/build" --target simt_vs_echo_ops --parallel "$BUILD_JOBS"
-echo "已构建: $SCRIPT_DIR/build/libsimt_vs_echo_ops.so"
+cmake --build "$SCRIPT_DIR/build" --target simt_plan_variants_ops --parallel "$BUILD_JOBS"
+echo "已构建: $SCRIPT_DIR/build/libsimt_plan_variants_ops.so"
 echo "下一步: $BUILD_PYTHON $SCRIPT_DIR/compare.py --device 1 --warmup 2 --repeat 4 --verify-each-sample"

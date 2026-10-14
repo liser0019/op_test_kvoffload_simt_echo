@@ -1,0 +1,334 @@
+{
+  "baseline_commit": "a282f5db73997a1fdacf9c192df6db6af21a3d1d",
+  "baseline_kernel_sha256": "1114df2886bcd89986ec3efb57e94e638ddbc4975939c394b5bc44a18b199542",
+  "threads": 1024,
+  "row_ub_limit_bytes": 114688,
+  "feature_bits": {
+    "A": 1,
+    "B": 2,
+    "C": 4,
+    "D": 8,
+    "E": 16,
+    "F": 32,
+    "G": 64,
+    "H": 128
+  },
+  "variants": [
+    {
+      "name": "baseline",
+      "op_name": "combo_bcde_fused_1024",
+      "kernel_name": "sparse_kv_plan_kernel_combo_bcde_fused_1024",
+      "path": "csrc/plan_variants/00_baseline",
+      "points": "",
+      "description": "原 BCDE + fused + 1024，计算源码逐字保留",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": true,
+      "hardware_verification_note": "用户已测试原基线",
+      "file_sha256": {
+        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
+        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
+        "symbol_aliases.h": "9a31e708f50b68fc73e9978131635dcec1394715df7e29a15c63c035193c6b11",
+        "upstream/plugin_registered.h": "ac5a266bae83c60ce0e0ccfd9c417561ef9ba656781324a70392cdc8298cb3d1",
+        "upstream/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
+        "upstream/sparse_kv_plan_kernel.cpp": "1114df2886bcd89986ec3efb57e94e638ddbc4975939c394b5bc44a18b199542",
+        "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
+        "upstream/sparse_kv_plan_plugin.cpp": "4da3cb003530637eaaa064bd94bd0dde44c28c253ec0db705420b07b88c3b236"
+      }
+    },
+    {
+      "name": "a_no_pending",
+      "op_name": "plan_a_no_pending",
+      "kernel_name": "sparse_kv_plan_kernel_plan_a_no_pending",
+      "path": "csrc/plan_variants/01_a_no_pending",
+      "points": "A",
+      "description": "删除 PENDING_SLOT 中间写入及清理",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "47b037ecb769dcd97259262b72d013d7decdef54130d2ca91db2be61e2d5c452",
+        "symbol_aliases.h": "77da2b073bc28d84bcf6703a119c60e9351fd12a68707969fc6c3d68028ad093",
+        "variant_config.h": "486aed1547345c710e15142e5e3d3efc5c513feaa8fc20cdf0ebb072495cebd7"
+      }
+    },
+    {
+      "name": "b_scratch_lru",
+      "op_name": "plan_b_scratch_lru",
+      "kernel_name": "sparse_kv_plan_kernel_plan_b_scratch_lru",
+      "path": "csrc/plan_variants/02_b_scratch_lru",
+      "points": "B",
+      "description": "LRU 重建读取已有 scratch 槽号，不回读 missSlots",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "316ac9e8b9b770cdbf0c39ed6aed43b6c028cbf87f7448913c4b86edd1e4d441",
+        "symbol_aliases.h": "81c8655cb4828445f5d59b4b083cadd0f7fc63ff93a0b5ef357b564e3bf529d2",
+        "variant_config.h": "576538b6cf02091e999cbfec23536a29fbd972eccaf296a34c9f045b601f479a"
+      }
+    },
+    {
+      "name": "c_tail_clear",
+      "op_name": "plan_c_tail_clear",
+      "kernel_name": "sparse_kv_plan_kernel_plan_c_tail_clear",
+      "path": "csrc/plan_variants/03_c_tail_clear",
+      "points": "C",
+      "description": "miss 输出只清理未分配尾部",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "1067ab721bf2aeafac25ef55b90b00459fa052e4c9e0d811ca9efe5e00cc19dd",
+        "symbol_aliases.h": "23c445fd08a64e35fc8012afb70412b02cc6125df38f1e0cf08f6e101e6f2c4b",
+        "variant_config.h": "e2693f8684f74a1dffbc2ceeaf7e5ba4473febac7b1dbdebf70135a5151096a2"
+      }
+    },
+    {
+      "name": "d_packed_owner",
+      "op_name": "plan_d_packed_owner",
+      "kernel_name": "sparse_kv_plan_kernel_plan_d_packed_owner",
+      "path": "csrc/plan_variants/04_d_packed_owner",
+      "points": "D",
+      "description": "安全范围内打包 order/slot；capacity>32768 保留原路径",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "1d70b81491d299e16b7b5e5c16f23108cbd925f1ddd92787e7493e1a88e874e6",
+        "symbol_aliases.h": "d1ec7e255c8c059f9edf83831d902d4b9b7c2f301068243831dafa1eba92afb6",
+        "variant_config.h": "9cacff6ff7e9794bcf1387dff4b4043b006d88d807baa7b7124e2e46ca381030"
+      }
+    },
+    {
+      "name": "e_row_context",
+      "op_name": "plan_e_row_context",
+      "kernel_name": "sparse_kv_plan_kernel_plan_e_row_context",
+      "path": "csrc/plan_variants/05_e_row_context",
+      "points": "E",
+      "description": "行元数据外提、非负可见长度、二次幂页号移位与稳定前缀区间",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "ebbb59972d5a590ec18cf8c47dabd9701af2f6e9013f26480d08edba12407f42",
+        "symbol_aliases.h": "6a22b62d85d4ab667b83f9d745d79c56cc9b3f2ea13c793b904eefcaec87ca53",
+        "variant_config.h": "d7b1a958380f4fba5c9d604c36cde2589aba785aa596e95607acbf87a6d2dcbc"
+      }
+    },
+    {
+      "name": "f_warp_total",
+      "op_name": "plan_f_warp_total",
+      "kernel_name": "sparse_kv_plan_kernel_plan_f_warp_total",
+      "path": "csrc/plan_variants/06_f_warp_total",
+      "points": "F",
+      "description": "单 warp 的二级 Scan 特化，省略总数回传 shuffle",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "08c16e0ab750aa29537f5e26731e1d845ee1812f899cb921f1b0aa735df9dbbe",
+        "symbol_aliases.h": "163e649f76b0bbc8693c4248251770071c8c7fc6f5f8a75c4a18d7f064da78b9",
+        "variant_config.h": "61bab038b157f7a4b0d38fc13d6c611b2822818b35c7c984ef20bbf254ef07cb"
+      }
+    },
+    {
+      "name": "g_reset_merge",
+      "op_name": "plan_g_reset_merge",
+      "kernel_name": "sparse_kv_plan_kernel_plan_g_reset_merge",
+      "path": "csrc/plan_variants/07_g_reset_merge",
+      "points": "G",
+      "description": "每线程判断 reset，合并热路径输出/hash 初始化同步",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "77aead4dad86b77a87cbe9b54acc27cd417024d41da817806979b96363c75df6",
+        "symbol_aliases.h": "2a7185127a29ce0fc59d086c296952a3b06ef58da3942563029271df002fa48d",
+        "variant_config.h": "718689da37147c0fa4e412a900178cc361375edc970d748134a73eb123370fd9"
+      }
+    },
+    {
+      "name": "h_tile_sync",
+      "op_name": "plan_h_tile_sync",
+      "kernel_name": "sparse_kv_plan_kernel_plan_h_tile_sync",
+      "path": "csrc/plan_variants/08_h_tile_sync",
+      "points": "H",
+      "description": "利用下轮 Scan 同步，保留末 tile 屏障，减少中间 tile 尾屏障",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "a0828acd6939093687f8fa12df8af0332cdf23e1304810cda2935c850d4617e4",
+        "symbol_aliases.h": "19ec079acd21374fdeecb2767f2f289272cf13aa1fa02189cbb93bb189bb8b86",
+        "variant_config.h": "713a641341c8243949b56c9749c06bb29380a33d128d6903b49218106179561b"
+      }
+    },
+    {
+      "name": "ab",
+      "op_name": "plan_ab",
+      "kernel_name": "sparse_kv_plan_kernel_plan_ab",
+      "path": "csrc/plan_variants/09_ab",
+      "points": "AB",
+      "description": "A+B，并删除失去数据依赖的分配后屏障",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "d2a6bc40bf6117e4128b062fadbe0fb291890afc2243f72dcdf47facef107faa",
+        "symbol_aliases.h": "1eac0f9d2ad5084eb7d792ac16e3931ce56d22b747fde7aa933a2e2c0a8a62e8",
+        "variant_config.h": "26d996703beda79dd0aa66b6aac969bf6a077463405ee65a6a640113d21f3fa5"
+      }
+    },
+    {
+      "name": "abc",
+      "op_name": "plan_abc",
+      "kernel_name": "sparse_kv_plan_kernel_plan_abc",
+      "path": "csrc/plan_variants/10_abc",
+      "points": "ABC",
+      "description": "A+B+C",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "d55b482f65d2272c6e06ee495fd50c10080f70b8bd99b9d55b7169aace07a4f8",
+        "symbol_aliases.h": "18e02bf8eab3bd4ba2a7cc3785eae514390ebb7375970bc1f6729c9817c07ce2",
+        "variant_config.h": "7bb9d40c9274de534763c3998c7614d9dd9e71601d3516bc378a4625332a48ab"
+      }
+    },
+    {
+      "name": "abcd",
+      "op_name": "plan_abcd",
+      "kernel_name": "sparse_kv_plan_kernel_plan_abcd",
+      "path": "csrc/plan_variants/11_abcd",
+      "points": "ABCD",
+      "description": "A+B+C+D",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "bb2d922a95cb48b3efccb395dd8de0c19b9bf2220a288409833e66f3a1c1cca8",
+        "symbol_aliases.h": "2cc0da935864c2f6bca7b4f4104e7f0712df7bd0e78f53fe3e0306475dd188be",
+        "variant_config.h": "387819e7fd370cbc97c204b8c9b103f429c7b0dce8e8d35df6db48da37e754cf"
+      }
+    },
+    {
+      "name": "abcde",
+      "op_name": "plan_abcde",
+      "kernel_name": "sparse_kv_plan_kernel_plan_abcde",
+      "path": "csrc/plan_variants/12_abcde",
+      "points": "ABCDE",
+      "description": "ABCD + 行上下文优化",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "830822c3f5d6f198b674a894aa89691cc24681cdb482d2d4a21eeb0aee25d18b",
+        "symbol_aliases.h": "abecabc7bb7bb87e9bc09692c888f3763205e95aa9d0256fa2343f0a10de01b1",
+        "variant_config.h": "af934bbc6456c136a32a5b8ab01fc3abf6be48d86fad7d849ab3842214c25ae3"
+      }
+    },
+    {
+      "name": "abcdf",
+      "op_name": "plan_abcdf",
+      "kernel_name": "sparse_kv_plan_kernel_plan_abcdf",
+      "path": "csrc/plan_variants/13_abcdf",
+      "points": "ABCDF",
+      "description": "ABCD + Scan 总数特化",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "2f53c4be78e464155a269b7d28690d8fd64fcc1d30ed4adcd3bdd0bb4d1265c0",
+        "symbol_aliases.h": "ebd3154a22efcb5a77195e13f090fb0c89ea6541f874f7a8df9c357992796006",
+        "variant_config.h": "e46868124d3b5b534852f3fb6ad2044af9671e43414d43b15d677896e7a9ec43"
+      }
+    },
+    {
+      "name": "abcdg",
+      "op_name": "plan_abcdg",
+      "kernel_name": "sparse_kv_plan_kernel_plan_abcdg",
+      "path": "csrc/plan_variants/14_abcdg",
+      "points": "ABCDG",
+      "description": "ABCD + reset 同步合并",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "540c46457549988e81f3a9d7e03fcabf9ed2d021f1a1a6f06a1e5f9fb2bf9248",
+        "symbol_aliases.h": "61a01256c236961a522c530fdb03c209ac52ae924ea7a09ff96d2993e61d54dc",
+        "variant_config.h": "335d7325d4851d8484862feae702365b5ceed759ab983b87c76cab5ddeeb9a69"
+      }
+    },
+    {
+      "name": "abcdh",
+      "op_name": "plan_abcdh",
+      "kernel_name": "sparse_kv_plan_kernel_plan_abcdh",
+      "path": "csrc/plan_variants/15_abcdh",
+      "points": "ABCDH",
+      "description": "ABCD + tile 同步削减",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "9f8af35e39b621c74ebf57e29443bc8421ccab8cd7356ab216dbaeb9328fc8d6",
+        "symbol_aliases.h": "f25981ef5963ded678996c630a6db1699928ba346171eaf256dfcd4329b5cabb",
+        "variant_config.h": "def5840c8fa5935fc2f8c18241510f88bb450e08d1f48e3ca78aff5b60f9aef1"
+      }
+    },
+    {
+      "name": "abcdefgh",
+      "op_name": "plan_abcdefgh",
+      "kernel_name": "sparse_kv_plan_kernel_plan_abcdefgh",
+      "path": "csrc/plan_variants/16_abcdefgh",
+      "points": "ABCDEFGH",
+      "description": "全部八项组合；收益需实测",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "3e5b1c1307b646693893b59cc9b119d9f129e407d7100d777b00bacfb4ffba7f",
+        "symbol_aliases.h": "3511e66ff96165c8f2e17923236b5353728a334c4afe9e9281dc910c4a6cd0c7",
+        "variant_config.h": "ffea0aff7164ffc70cd15198c6839aa035bb3be8dcddadd0629e67214e60b0cb"
+      }
+    }
+  ],
+  "shared_file_sha256": {
+    "csrc/plan_variants/common/plan_kernel_impl.h": "6564d52abe1b41ca60df8b4bb27dae6cc4fa0430473b6c3bfeb0056a4ef25e84",
+    "csrc/plan_variants/common/plan_plugin_impl.h": "0d344379aa4f7f406f5adfe55f52dc67ec8c8883b544d3e50253d5da58d4bd05",
+    "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
+    "csrc/plan_variants/common/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222"
+  }
+}

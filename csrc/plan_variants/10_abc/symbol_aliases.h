@@ -1,0 +1,12 @@
+// Separate symbols and inline helpers for each independently linked experiment.
+#pragma once
+#define sparse_kv_plan sparse_kv_plan_plan_abc
+#define SparseKvPlanTilingData SparseKvPlanTilingData_plan_abc
+#define SparseKvPlanHashCapacity SparseKvPlanHashCapacity_plan_abc
+#define SparseKvPlanRowElements SparseKvPlanRowElements_plan_abc
+#define SparseKvPlanLocalMemoryBytes SparseKvPlanLocalMemoryBytes_plan_abc
+#define MakeSparseKvPlanTiling MakeSparseKvPlanTiling_plan_abc
+#define calc_sparse_kv_plan_block_dim calc_sparse_kv_plan_block_dim_plan_abc
+#define launch_sparse_kv_plan launch_sparse_kv_plan_plan_abc
+#define sparse_kv_plan_kernel sparse_kv_plan_kernel_plan_abc
+#define SparseKvPlanRuntimeVf SparseKvPlanRuntimeVf_plan_abc
