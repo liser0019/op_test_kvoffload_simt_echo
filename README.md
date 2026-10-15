@@ -6,7 +6,7 @@
 
 工程基线来自 `kv_plan_single_op_test` 的 `main`。SIMT 是对照基线，保留原样；`csrc/echo/` 在基线之上集成了作者 2026-10-13 的新版优化（人工誊抄，已逐处校对修正，见 `source_manifest.json`），并保留 `checks/check_echo_kernel_host.py` 做 CPU 回归。不包含旧 AIV 或跳过排序的 Echo 实验实现。
 
-### 本次 Echo 更新（2026-10-13 手抄版 + P0-P4 性能优化）
+### 本次 Echo 更新（2026-10-13 手抄版 + P0-P4/B 性能优化）
 
 - `OpArgtopkRow` 从 4-pass LSD 全量基数排序改为 **4 趟 MSB-first 基数选择（radix select）**：key 打包与 per-thread 直方图（`ARGTOPK_GROUP_THREADS=64` 路纯写切片）全在单大 `__ubuf__` 数组内，t0 逐字节收敛阈值 `T` 与配额 `quota`，最后按阈值筛出 `freeSize` 个槽；不再有 GM ping-pong / scatter，workspace 每核只用调试 dump 段。
 - `OpMissCumsum` 改为 **两级 warp 扫描**（每线程 2 元素，`topkDim<=2*blockDim` 且 `2*topkDim<=8192` 时启用，生产尺寸 2048 命中），否则回退 t0 串行。
@@ -14,6 +14,9 @@
 - **[P1] Argtopk emission 并行化**：原 t0 串行两遍 Npad 扫描 + 串行补零（full_cache 场景该步实测 ~2.1M 周期），改全员连续切片统计 `(nLt|nEq<<16)` 打包块扫描得写入基址后并行写 + 并行补零；连续切片保证输出仍按全局槽号升序，与原语义逐位一致。
 - **[P2] OpFinalSlots 删除**：miss 的最终槽位就是本轮分配的 `aslot`，由 `OpSetUpdate` 顺手写回 `curSlots`（hit 位 Step1 已正确），省去全量 topk 重新 gather htd 与尾步栅栏。
 - **[P4] 栅栏削减**：OpFreeSize 折进 Step1 的 t0 汇总段（fs 与 numMisses 同点写出）；OpAllocPop 改直读 `freeIdx` + 老栈（新压入段满足 `free[avail+k]==freeIdx[k]`，弹出与旧栈语义逐值等价，且不再依赖 FreePush 的写入）；`OpFreeAvailAdd`/`OpAllocAvailSub` 合并为 Step5 尾 `OpFifoAvailUpdate` 一次 `avail += fs - nm`（终值与旧两步序列恒等）；删除 FreeRelease→FreePush、FreePush→AllocPop 两个无 RAW 的 SyncGrid 与 Step5 尾无读者的 SyncGrid；`PackedBlockScan` 去掉保护性第 3 栅栏（下一轮 barrier1/barrier2 已保证 scratch 读先于写，注释含顺序论证）。步骤数 40→31（非 spec 32→23）。
+- **[B] Argtopk 重构**（full_cache 该步 ~410K 周期，占 80%）：pass 0 的 pack 与 clear+hist0 合并为单相位（hist0 直读 priGm，不读 key，无交叉 RAW）；scalar 初始化与 dbg dump 折进 pass 0 的 t0 决策段；每趟栅栏 4→3；merge 改 256 桶并行（墙钟 G 次读）；hist/pack/emission 只扫有效区 `[0, B+1)`，`Npad-(B+1)` 个 padding 键（恒为 I32_MAX）在 merge 相位解析式计入，emission 越过有效区时按槽号升序补 padding 索引——与旧满扫描输出逐位一致。
+- **[C1] 无淘汰整段跳过**：Step1 的 t0 在 UB 写"本核任一行 fs>0"标志，全 0 时 Argtopk/SyncGrid/FreeRelease/FreePush 四步整体跳过（freeIdx 无读者、循环体不执行、对状态零影响；步数/步名不变，跳过时记录 ≈0 周期）。
+- **[C2] OpHitMiss 末行栅栏**：warpScratch 复用保护栅栏仅在还有下一行时执行。
 - **[P3] OpMissCumsum 去 Hillis-Steele**：原 11 轮 1024 线程块栅栏（~20K 周期，barrier bound），改 warp shuffle 一级 + t0 扫 warp total 二级（3 次栅栏/行），p0/p0+blockDim 连续映射使排名可由打包前缀直接拼出。
 - 新增 **ECHO_PERF_STEP 分步打点**：`Process` 内 23 个非 spec 步（spec 路径 31 步）由 `PerfBegin/PerfEnd` 记录 t0 的 `clock()` 周期，写入 workspace 尾部 `stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx]`；`ECHO_PERF_STEP=ON bash build.sh` 构建到 `build_perf/`，`echo_perf_step.py` 读取并统计（打点构建仅用于诊断，正式对比仍用普通构建 + `compare.py`）。
 - 淘汰语义：`key==T` 平局取最小槽号，与稳定排序的 `(pri, slot)` 字典序一致；`key<T` 组按槽号升序输出 —— 本基准初始 `pri[slot]=slot`（见 `make_echo_initial`），与全排序结果一致。若未来输入存在非单调 pri，淘汰“集合”仍正确，仅 free 栈压栈顺序与全排序版不同。
@@ -310,7 +313,7 @@ python3 checks/check_echo_kernel_host.py
 2. `echo_lru_launch.cpp`：`<<<blockNum, ECHO_LRU_THREAD_NUM, 0, stream>>>`；线程数由 `echo_lru_tiling.h` 定义，目前为 1024。
 3. `echo_lru_kernel.h` 尾部的 `echo_lru_kernel`：分配单块 128 KiB UB，初始化 `EchoLruKernel` 并调用 `Process`。
 4. `EchoLruKernel::Process`：按阶段读 reset、hit/miss（含 warp 归约 miss 计数）、protect、free、alloc、priority 和映射更新（含最终槽位回写）；每核处理自己的连续行段。`ECHO_PERF_STEP` 构建下每步由 `PerfBegin/PerfEnd` 打点。warp 协作辅助 `BlockSumToGm`/`PackedBlockScan`（两级：warp shuffle + t0 扫 warp total）见文件头部。
-5. `ArgtopkAllRows` → `OpArgtopkRow`：每行把 pri 打包进 UB key 数组（全员并行），`ARGTOPK_GROUP_THREADS` 路线程并行直方图 + 按桶归并，t0 逐字节（高→低）收敛阈值 `T` 与配额 `quota`，最后全员连续切片 + `PackedBlockScan` 并行写出 `freeSize` 个槽并补零。`freeSize=0` 提前返回，不再做全量 scatter 排序。
+5. `ArgtopkAllRows` → `OpArgtopkRow`：pass 0 单相位完成 pack（全员写各自 key 切片）与直方图（G 路直读 priGm）；每趟 `[clear+hist] → [merge] → [t0 决策]` 三栅栏，merge 为 256 桶并行并把 padding 键解析式计入；全部扫描只走有效区 `[0, B+1)`；emission 全员连续切片 + `PackedBlockScan` 并行写出并按需补 padding 索引。`freeSize=0` 提前返回；全核无淘汰行时 Process 整段跳过（见 [C1]）。
 
 Echo 文件仍保留少量早期注释，涉及 512 线程、bitonic 或 grid sync 的历史描述；这些文字与当前有效代码不同。阅读时以 `ECHO_LRU_THREAD_NUM=1024`、有效的 `OpArgtopkRow`（radix select）、顶层 `argtopkUb` 单大 UB 分段和 `Process` 内实际调用为准。
 

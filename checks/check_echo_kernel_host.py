@@ -153,11 +153,15 @@ try{
             for(uint32_t i=0;i<B;++i)
                 require(out[i]==(i<fsClamp?expected[i]:0),"free output mismatch");
             for(uint32_t i=B;i<out.size();++i)require(out[i]==-777,"free output overrun");
-            for(uint32_t i=0;i<n;++i)require(ub[i]==packed[i],"key region permuted or corrupted");
+            // [B] key 只写有效区 [0, B+1); padding 区不再打包 (选择时解析式计入)。
+            for(uint32_t i=0;i<=B;++i)require(ub[i]==packed[i],"key region permuted or corrupted");
+            for(uint32_t i=B+1;i<n;++i)require(ub[i]==-777,"padding region must stay untouched");
             for(uint32_t i=footprint;i<ub.size();++i)require(ub[i]==-777,"UB overrun past footprint");
-            for(uint32_t i=0;i<n;++i)require(dbgKey[i]==packed[i],"debug packed key mismatch");
+            for(uint32_t i=0;i<=B;++i)require(dbgKey[i]==packed[i],"debug packed key mismatch");
+            for(uint32_t i=B+1;i<n;++i)require(dbgKey[i]==-777,"dbgKey padding region untouched");
+            // dbgCount golden 含 padding (merge 解析式计入): 用完整打包键直方图。
             std::vector<uint32_t> expectedHist(256,0);
-            for(uint32_t i=0;i<n;++i)++expectedHist[(static_cast<uint32_t>(dbgKey[i])>>24)&255u];
+            for(uint32_t i=0;i<n;++i)++expectedHist[(static_cast<uint32_t>(packed[i])>>24)&255u];
             require(dbgCount==expectedHist,"debug high-byte histogram mismatch");
             ++checks;
         }
@@ -171,6 +175,7 @@ try{
         for(uint32_t i=0;i<R*L;++i)htd[i]=(i%4==0)?I32_MAX:static_cast<int32_t>(i%4096);
         for(uint32_t i=0;i<R*T;++i)pos[i]=(i%7==0)?-1:static_cast<int32_t>((i*5)%(L+100));
         atomicCalls=0;
+        int32_t anyFs=0;   // [C1] 淘汰标志 golden: 本核任一行 fs>0
         launch([&]{OpHitMiss(R,T,eff,L,R,R,htd.data(),pos.data(),out.data(),
                              misses.data(),avail.data(),fsOut.data(),scratch.data());});
         for(uint32_t r=0;r<R;++r){
@@ -182,8 +187,11 @@ try{
             }
             require(misses[r]==expectedMisses,"miss count mismatch");
             int32_t expectedFs=expectedMisses-avail[r];
-            require(fsOut[r]==(expectedFs<0?0:expectedFs),"[P4] folded free size mismatch");
+            if(expectedFs<0)expectedFs=0;
+            require(fsOut[r]==expectedFs,"[P4] folded free size mismatch");
+            if(expectedFs>0)anyFs=1;
         }
+        require(scratch[64]==anyFs,"[C1] eviction flag mismatch");
         require(atomicCalls==0,"[P0] OpHitMiss must not use atomics");
         ++checks;
     }

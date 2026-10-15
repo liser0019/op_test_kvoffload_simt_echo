@@ -1,8 +1,8 @@
 {
-  "manifest_revision": "p4-2026-10-13",
+  "manifest_revision": "b-2026-10-15",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
-  "echo_revision": "radix-select-warp-coop-2026-10-13-p4",
+  "echo_revision": "radix-select-warp-coop-2026-10-15-b",
   "files": [
     {
       "path": "build.sh",
@@ -30,8 +30,8 @@
     },
     {
       "path": "checks/check_echo_kernel_host.py",
-      "sha256": "e4349cef3fd4e71ab2506b3d7eca67d1fadc5b760b0b4ed76d35d21b12cdf7e2",
-      "bytes": 14788,
+      "sha256": "ba706fed3b54f0615c1517d9b3186e865ed90f03d4fe27869ca35a78b395177a",
+      "bytes": 15395,
       "role": "CPU 并行回归：warp 辅助 + 五个 Op 函数提取，ASan/UBSan"
     },
     {
@@ -60,9 +60,9 @@
     },
     {
       "path": "csrc/echo/echo_lru_kernel.h",
-      "sha256": "eb20811adf4d91df5385a382737412d97eb143478917ecb69521dcbcaddd932d",
-      "bytes": 56482,
-      "role": "Echo 设备计算：radix select + warp 协作（P0-P4）+ 分步打点"
+      "sha256": "64333e84bf2bbf61078dd978faebc97bd71c778b6ef408a093450be9633485cb",
+      "bytes": 59542,
+      "role": "Echo 设备计算：radix select + warp 协作（P0-P4/B/C1/C2）+ 分步打点"
     },
     {
       "path": "csrc/echo/echo_lru_launch.cpp",
@@ -90,8 +90,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "5b94302a8b0d4d641285e4e393109bfa7d1b59f80e8cbc12e2e1ad8b814aa172",
-      "bytes": 25631,
+      "sha256": "3a02b45389274d125d9f1b2bd294f7d4fde713d905f1c2136b731fc8c6b7aa6b",
+      "bytes": 26651,
       "role": "阅读指南与运行说明"
     },
     {
@@ -108,7 +108,7 @@
     }
   ],
   "echo_update": {
-    "source": "作者 2026-10-13 新版 echo_lru 优化（人工誊抄逐处校对修正）+ P0-P4 性能优化",
+    "source": "作者 2026-10-13 新版 echo_lru 优化（人工誊抄逐处校对修正）+ P0-P4/B 性能优化",
     "changes": [
       "OpArgtopkRow：4-pass LSD 全量基数排序改为 4 趟 MSB-first 基数选择（阈值 T + 配额 quota）",
       "OpMissCumsum：两级 warp 扫描（topkDim<=2*blockDim 且 2*topkDim<=8192 启用，否则 t0 串行）",
@@ -116,20 +116,23 @@
       "EchoLruTiling 的 argtopkGroupThreads 字段（plugin 侧填充）"
     ],
     "perf_optimizations": [
-      "[P0] OpHitMiss 去 GM 同地址 atomic（warm 实测 ~9.4M 周期 → ~19K）：warp 归约 + t0 汇总直接写 numMisses",
-      "[P1] Argtopk emission 并行化（full_cache 2.1M → 398K）：连续切片 + PackedBlockScan 写入基址",
-      "[P2] OpFinalSlots 删除：miss 最终槽位由 OpSetUpdate 顺手写回 curSlots",
-      "[P3] OpMissCumsum 去 Hillis-Steele（20K → 13K）：两级 warp 扫描",
-      "[P4] 栅栏削减：OpFreeSize 折进 Step1 t0；OpAllocPop 直读 freeIdx+老栈（与旧栈弹出逐值等价，不再读 FreePush 新段）；OpFreeAvailAdd/OpAllocAvailSub 合并为 Step5 尾 OpFifoAvailUpdate；删 3 个无 RAW/无读者的 SyncGrid；PackedBlockScan 去保护性第 3 栅栏（顺序论证见注释）。步骤 40→31（非 spec 32→23）"
+      "[P0] OpHitMiss 去 GM 同地址 atomic（warm ~9.4M → ~19K）",
+      "[P1] Argtopk emission 并行化（full_cache 2.1M → 398K）",
+      "[P2] OpFinalSlots 删除（miss 槽位由 OpSetUpdate 写回）",
+      "[P3] OpMissCumsum 去 Hillis-Steele（20K → ~9K）",
+      "[P4] 栅栏削减：OpFreeSize 折进 Step1；OpAllocPop 直读 freeIdx+老栈；avail 折叠更新；删 3 个无 RAW SyncGrid；PackedBlockScan 去尾栅栏（步骤 40→31）",
+      "[B] Argtopk 重构（full_cache 410K → 待验证）：pass0 pack 与 hist0 单相位（hist0 直读 priGm）；scalar init/dbg 折进 t0 决策段；每趟 4→3 栅栏（共 23→16）；merge 256 桶并行；全部扫描只走 [0,B+1)，padding 解析式计入直方图 + emission 补齐",
+      "[C1] 无淘汰行整段跳过淘汰流水线（UB 标志，warm/cold 四步 ≈0 周期）",
+      "[C2] OpHitMiss 末行省 warpScratch 复用栅栏"
     ],
     "transcription_fixes": [
       "scalar[0]==0 误用比较符及 scalar[2] 未初始化；直方图候选过滤 prefix 位对齐错误",
-      "NNpad 未定义；PerEnd() 拼写（8 处）；Step0 后 SyncGrid 缺 PerfEnd；PerfEnd 缺 __aicore__；双逗号；旧成员名",
+      "NNpad 未定义；PerEnd() 拼写（8 处）；PerfEnd 缺 __aicore__；双逗号；旧成员名",
       "OpMissCumsum 非法声明/未定义 Bm,t/miss1 误写；perfLast_ 32 位截断；误加 cooperative_groups include",
       "tiling 恢复 ARGTOPK_GM_NPAD_MAX；launch workspace 公式重写；plugin 填 argtopkGroupThreads"
     ],
-    "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出",
-    "verification": "CPU: checks 49 项 ASan/UBSan 通过（含直读 freeIdx 弹栈与旧栈 golden 逐值等价、avail 折叠终值恒等）；g++ mock-SIMT 全头语法检查（开/关 ECHO_PERF_STEP）通过；bisheng dav-3510 实际编译普通/打点 kernel 通过。NPU 正确性与性能待服务器验证。"
+    "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出；padding 索引仅在越过有效区时按序补齐",
+    "verification": "CPU: checks 49 项 ASan/UBSan 通过（key/dbgKey 只写有效区+padding 哨兵、padding 解析式直方图 golden、淘汰标志断言）；g++ mock-SIMT 全头语法检查（开/关 ECHO_PERF_STEP）通过；bisheng dav-3510 实际编译普通/打点 kernel 通过；23 步打点顺序逐一核对。NPU 正确性与性能待服务器验证。"
   },
   "note": "echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
 }

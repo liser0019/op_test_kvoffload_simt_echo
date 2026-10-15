@@ -260,6 +260,8 @@ __aicore__ inline void OpSpecAvailAdd(
 //   dcci 后对 Step3 全员读者可见。计数语义不变: nm 直接数 effTopk 内
 //   curSlots==I32_MAX 的个数, 与原公式 effTopk - numHits 恒等。
 //   numHitsGm 不再读写 (槽位保留防 workspace 布局漂移)。
+// [C1/C2 2026-10-13] 栅栏 2 次/行 → 末行省 1 次 (复用保护); t0 另在 warpScratch[64]
+//   写淘汰标志, 供 Process 整段跳过 fs 全 0 的淘汰流水线。
 __aicore__ inline void OpHitMiss(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t maxModelLenP1,
     uint32_t rowsPerCore, uint32_t tailRows,
@@ -271,6 +273,7 @@ __aicore__ inline void OpHitMiss(
     uint32_t t = threadIdx.x;
     uint32_t lane = t & 31u;
     uint32_t warpCount = blockDim.x >> 5;
+    int32_t fsAny = 0;   // [C1] t0 跨行累计: 本核任一行是否需要淘汰 (仅 t0 写)
     for (uint32_t r = 0; r < rowCount; ++r) {
         uint32_t row = startRow + r;
         if (row >= R) break;
@@ -294,10 +297,18 @@ __aicore__ inline void OpHitMiss(
             for (uint32_t w = 0; w < warpCount; ++w) nm += warpScratch[w];
             numMissesGm[row] = nm;
             int32_t fs = nm - availGm[row];
-            freeSizeGm[row] = fs < 0 ? 0 : fs;
+            if (fs < 0) fs = 0;
+            freeSizeGm[row] = fs;
+            if (fs != 0) fsAny = 1;
         }
-        asc_syncthreads();   // t0 读完 warpScratch 后, 下一行才能复用
+        // [C2] 该栅栏仅为下一行复用 warpScratch 的保护 (t0 读 vs 下行 lane0 写);
+        //   末行无后续写入, 省一次。t0 的 GM 写可见性由 Step1 尾 SyncGrid 兜底。
+        if (r + 1u < rowCount) asc_syncthreads();
     }
+    // [C1] 淘汰流水线整段跳过标志: 全行 fs==0 时 Argtopk/FreeRelease/FreePush 对
+    //   状态零影响 (freeIdx 无读者 —— fs=0 时 OpAllocPop 恒走老栈路径), 见 Process。
+    //   槽位 64 与 warp 归约的 [0,32) 不冲突; 经 Step1 尾 SyncGrid 对全员可见。
+    if (t == 0u) warpScratch[64] = fsAny;
 }
 
 // ---- Step 2: protect + fifo++ ----
@@ -366,19 +377,24 @@ __aicore__ inline void OpFifoAvailUpdate(
 // per-row 基数选择 (radix select, 4 趟 MSB-first, 全定长, 无递归, 无动态分配).
 // 目标: 从打包 key 中选出 pri 最小的 freeSize 个槽 (平局按槽号升序), 写 freeIdxOut.
 //   key[i] = (i==0 || i>B || pri<0) ? I32_MAX : pri  → 全非负, 无效/填充沉底.
-// 每趟 (pass 0..3, shift 从高字节到低字节):
-//   (1) G=ARGTOPK_GROUP_THREADS 个线程各清零自己独占的 hist[t*256] UB 切片 (纯写无争用);
-//   (2) 并行直方图: pass 0 统计全部 key, pass>0 只统计 (v >> (shift+8)) == prefix 的候选;
-//   (3) 按桶并行归并到 globalCnt[256];
-//   (4) t0 找到第一个 cum+c >= remaining 的桶 b, 更新 scalar[0]=阈值前缀 T,
-//       scalar[1]=remaining-cum (桶内还需的配额 quota), scalar[2]=新 prefix, scalar[3]=完成标志.
-//   不变量: |{key < T}| + quota == fsClamp; 全程 UB + asc_syncthreads, 无 dcci/无 atomic.
-// 输出 (t0): 先按槽号升序写全部 key < T 的槽, 再按槽号升序补 quota 个 key == T 的槽,
-//   尾部补 0 (下游按 freeSize 裁剪). key==T 平局取最小槽号, 与稳定排序的 (pri, slot)
-//   字典序一致; key<T 组内部按槽号序输出 —— 本基准的初始 pri 满足 pri[slot]=slot
-//   (见 compare.py make_echo_initial), 与 (pri, slot) 排序结果一致; 若未来输入存在
-//   非单调 pri, 被淘汰"集合"仍正确, 仅 free 栈内的压栈顺序与全排序版不同.
-// [回退保留] 旧 4-pass LSD 全排序与 GM bitonic 实现已删除, 见 git 历史 (9cb776e 及更早).
+// [B 2026-10-13] 栅栏与工作量重构 (重构前 full_cache 实测 ~410K 周期):
+//   (1) pass 0 的 pack(全员) 与 clear+hist0(G 路) 合并为单相位 —— hist0 直读 priGm
+//       打包计数而不读 key, 与 pack 无交叉 RAW; 独立 pack 相位及其栅栏删除;
+//   (2) scalar 初始化与 dbg dump 折进 pass 0 的 t0 决策段 (同线程, 无额外栅栏);
+//   (3) 每趟 3 栅栏: [clear+hist] → [merge] → [t0 决策] (原 4 栅栏/趟);
+//   (4) merge 改 256 桶并行 (每桶归并 G 个切片, 墙钟 G 次读; 原 G 路×4 桶 = 4G);
+//   (5) hist/pack/emission 只扫有效区 [0, B+1); P = Npad-(B+1) 个 padding 键恒为
+//       I32_MAX, 在 merge 相位解析式计入 padByte 桶 (padIn = 选择前缀走在 I32_MAX
+//       路径上), key 数组不再写/读 padding 区; emission 越过有效区时按槽号升序
+//       补 padding 索引 [B+1, B+1+m), 与旧满扫描输出逐位一致。
+// 每趟: hist (pass 0 全量, pass>0 过滤 (v>>(shift+8))==(prefix>>(shift+8)) 两侧
+//   bit0 对齐) → merge (+padding 解析式) → t0 找第一个 cum+c >= remaining 的桶 b,
+//   更新 scalar[0]=阈值 T / scalar[1]=quota / scalar[2]=prefix / scalar[3]=完成标志。
+//   不变量 (计数含 padding): |{key < T}| + quota == fsClamp。全程 UB 无 dcci/atomic。
+// 输出: 先全部 key<T (槽号升序), 再前 quota 个 key==T (槽号升序, 有效区优先,
+//   越界部分补 padding 索引), 尾部补 0 (下游按 freeSize 裁剪)。key==T 平局取
+//   最小槽号, 与稳定排序 (pri, slot) 字典序一致; key<T 组按槽号序输出 —— 本基准
+//   pri[slot]=slot 与全排序一致, 非单调 pri 时淘汰"集合"仍正确, 仅压栈序不同。
 __aicore__ inline void OpArgtopkRow(
     uint32_t B, uint32_t Npad, uint32_t topkDim, uint32_t G,
     int32_t* priGm, uint32_t row, int32_t* freeIdxOut, int32_t freeSize,
@@ -401,60 +417,68 @@ __aicore__ inline void OpArgtopkRow(
     }
 
     bool active = (t < G);
-
-    for (uint32_t i = t; i < Npad; i += blockDim.x) {
-        if (i <= B) {
-            int32_t p = priGm[rowOff + i];
-            key[i] = (p < 0 || i == 0) ? I32_MAX : p;
-        } else {
-            key[i] = I32_MAX;
-        }
-    }
-    asc_syncthreads();
-    if (t == 0 && dbgKey != nullptr) {
-        for (uint32_t i = 0; i < Npad; ++i) dbgKey[i] = key[i];
-    }
-    asc_syncthreads();
-    
-    if (t == 0) { scalar[0] = 0; scalar[1] = (int32_t)fsClamp; scalar[2] = 0; scalar[3] = 0; }
-    asc_syncthreads();
+    const uint32_t validN = B + 1u;         // 有效区 [0, B], 含 slot 0
+    const uint32_t padN = Npad - validN;    // padding 区 [B+1, Npad), 键恒为 I32_MAX
 
     for (uint32_t pass = 0; pass < 4; ++pass) {
         uint32_t shift = (3u - pass) * 8u;
+        // ---- (a) pass 0: pack(全员) + clear+hist0(G 路, 直读 priGm) 单相位 ----
+        //   hist0 不读 key → 与 pack 无交叉 RAW; pass>0: clear+hist(G 路, 读 key 过滤)。
+        if (pass == 0u) {
+            for (uint32_t i = t; i < validN; i += blockDim.x) {
+                int32_t p = priGm[rowOff + i];
+                key[i] = (p < 0 || i == 0) ? I32_MAX : p;
+            }
+        }
         if (active) {
             int32_t* myHist = hist + t * 256u;
             for (uint32_t b = 0; b < 256; ++b) myHist[b] = 0;
-        }
-        asc_syncthreads();
-
-        if (active) {
-            int32_t* myHist = hist + t * 256u;
-            uint32_t prefix = (uint32_t)scalar[2];
-            for (uint32_t i = t; i < Npad; i += ARGTOPK_GROUP_THREADS) {
-                uint32_t v = (uint32_t)key[i];
-                if (pass == 0u) {
-                    myHist[(v >> shift) & 0xFFu] += 1;
-                } else if ((v >> (shift + 8u)) == (prefix >> (shift + 8u))) {
-                    // 候选过滤: v 的已收敛高字节 == prefix 的同高字节. prefix 是完整 32 位
-                    //   路径 (b0<<24|b1<<16|...), 两侧都右移到 bit0 对齐后再比较.
-                    myHist[(v >> shift) & 0xFFu] += 1;
+            if (pass == 0u) {
+                for (uint32_t i = t; i < validN; i += G) {
+                    int32_t p = priGm[rowOff + i];
+                    uint32_t v = (uint32_t)((p < 0 || i == 0) ? I32_MAX : p);
+                    myHist[(v >> 24) & 0xFFu] += 1;
+                }
+            } else {
+                uint32_t prefix = (uint32_t)scalar[2];
+                for (uint32_t i = t; i < validN; i += G) {
+                    uint32_t v = (uint32_t)key[i];
+                    if ((v >> (shift + 8u)) == (prefix >> (shift + 8u))) {
+                        // 候选过滤: v 与 prefix 的已收敛高字节两侧右移到 bit0 对齐比较。
+                        myHist[(v >> shift) & 0xFFu] += 1;
+                    }
                 }
             }
         }
-
         asc_syncthreads();
-        if (active) {
-            for (uint32_t b = t; b < 256; b += ARGTOPK_GROUP_THREADS) {
+        // ---- (b) merge: 256 桶并行 (每桶归并 G 个切片); padding 解析式计入 ----
+        {
+            uint32_t padByte = (0x7FFFFFFFu >> shift) & 0xFFu;
+            bool padIn;
+            if (pass == 0u) {
+                padIn = true;   // pass 0 无前缀; shift+8=32 会 UB, 特判。
+            } else {
+                uint32_t prefix = (uint32_t)scalar[2];
+                padIn = ((0x7FFFFFFFu >> (shift + 8u)) == (prefix >> (shift + 8u)));
+            }
+            for (uint32_t b = t; b < 256; b += blockDim.x) {
                 int32_t s = 0;
                 for (uint32_t th = 0; th < G; ++th) s += hist[th * 256u + b];
+                if (padIn && b == padByte) s += (int32_t)padN;
                 globalCnt[b] = s;
             }
         }
         asc_syncthreads();
-
+        // ---- (c) t0: pass 0 先初始化 scalar + dbg dump, 再做桶决策 ----
         if (t == 0) {
-            if (pass == 0 && dbgCount != nullptr) {
-                for (uint32_t b = 0; b < 256; ++b) dbgCount[b] = (uint32_t)globalCnt[b];
+            if (pass == 0u) {
+                scalar[0] = 0; scalar[1] = (int32_t)fsClamp; scalar[2] = 0; scalar[3] = 0;
+                if (dbgKey != nullptr) {
+                    for (uint32_t i = 0; i < validN; ++i) dbgKey[i] = key[i];
+                }
+                if (dbgCount != nullptr) {
+                    for (uint32_t b = 0; b < 256; ++b) dbgCount[b] = (uint32_t)globalCnt[b];
+                }
             }
             uint32_t remaining = (uint32_t)scalar[1];
             uint32_t cum = 0u;
@@ -473,37 +497,38 @@ __aicore__ inline void OpArgtopkRow(
         }
         asc_syncthreads();
         if (scalar[3] != 0) break;
-        
     }
     
     uint32_t T = (uint32_t)scalar[0];
     uint32_t quota = (uint32_t)scalar[1];
 
-    // [P1 2026-10-13] emission 并行化: 原实现 t0 串行两遍 Npad 扫描 + 串行补零,
-    //   单线程无法隐藏访存延迟 (full_cache 场景 ArgtopkAllRows 实测 ~2.1M 周期,
-    //   其中直方图 4 趟仅占几万)。现全员按连续切片统计 (nLt | nEq<<16) 打包块扫描
-    //   得各线程写入基址, 再并行写 freeIdxOut 与补零。
+    // [P1+B] emission 并行化 + 只扫有效区: 全员连续切片统计 (nLt | nEq<<16) 打包块
+    //   扫描得各线程写入基址后并行写 freeIdxOut 与补零。
     //   ⚠ 线程切片必须连续 (lo = t*chunk) 而非 grid-stride: 保证跨线程输出仍按
     //   全局槽号升序 —— 先全部 key<T (槽号升序), 再前 quota 个 key==T (槽号升序),
-    //   与原 t0 串行语义逐位一致 (grid-stride 切片会得到"线程主序", 顺序就错了)。
+    //   与原语义逐位一致 (grid-stride 切片会得到"线程主序", 顺序就错了)。
+    //   选择越过有效区 (T == I32_MAX 且配额耗尽有效 ==T 键) 时, 剩余 m 个按槽号
+    //   升序补 padding 索引 [B+1, B+1+m) —— padding 键恒为 I32_MAX 且位于全部有效
+    //   索引之后, 与旧满扫描的 ==T 组输出顺序逐位一致。
     {
         int32_t* warpTotals = hist;        // hist 在 4 趟选择后已死, 复用作扫描 scratch
         int32_t* warpBases  = hist + 32;
         int32_t* control    = hist + 64;
-        uint32_t chunk = (Npad + blockDim.x - 1u) / blockDim.x;
+        uint32_t chunk = (validN + blockDim.x - 1u) / blockDim.x;
         uint32_t lo = t * chunk;
-        uint32_t hi = (lo + chunk > Npad || lo > Npad) ? Npad : (lo + chunk);
+        uint32_t hi = (lo >= validN || lo + chunk > validN) ? validN : (lo + chunk);
         uint32_t nLt = 0u, nEq = 0u;
         for (uint32_t i = lo; i < hi; ++i) {
             uint32_t v = (uint32_t)key[i];
             if (v < T) ++nLt;
             else if (v == T) ++nEq;
         }
-        // 字段上界: nLt/nEq 块内总和 ≤ Npad=8192 < 2^16, 16bit 字段无跨字段进位。
+        // 字段上界: nLt/nEq 块内总和 ≤ validN < 2^16, 16bit 字段无跨字段进位。
         int32_t excl = PackedBlockScan((int32_t)(nLt | (nEq << 16)), warpTotals, warpBases, control);
         uint32_t wLt = (uint32_t)excl & 0xFFFFu;            // 本线程之前所有切片的 key<T 总数
         uint32_t wEq = (uint32_t)excl >> 16;                // 本线程之前所有切片的 key==T 总数
-        uint32_t totalLt = (uint32_t)control[0] & 0xFFFFu;  // 全块 key<T 总数 (= fsClamp - quota)
+        uint32_t totalLt = (uint32_t)control[0] & 0xFFFFu;  // 有效区 key<T 总数
+        uint32_t totalEq = (uint32_t)control[0] >> 16;      // 有效区 key==T 总数
         for (uint32_t i = lo; i < hi; ++i) {
             uint32_t v = (uint32_t)key[i];
             if (v < T) {
@@ -514,7 +539,14 @@ __aicore__ inline void OpArgtopkRow(
                 ++wEq;
             }
         }
-        // 尾部补零 [fsClamp, topkDim) (选择不变量: totalLt + quota == fsClamp)。
+        // padding 补齐: m = fsClamp - totalLt - min(quota, totalEq) (不变量保证 ≥0 且 ≤ padN)。
+        uint32_t validEq = (quota < totalEq) ? quota : totalEq;
+        uint32_t used = totalLt + validEq;
+        uint32_t m = (fsClamp > used) ? (fsClamp - used) : 0u;
+        for (uint32_t k = t; k < m; k += blockDim.x) {
+            freeIdxOut[row * topkDim + used + k] = (int32_t)(validN + k);
+        }
+        // 尾部补零 [fsClamp, topkDim) (选择不变量: totalLt + quota == fsClamp, 计数含 padding)。
         for (uint32_t i = fsClamp + t; i < topkDim; i += blockDim.x) {
             freeIdxOut[row * topkDim + i] = 0;
         }
@@ -928,15 +960,17 @@ public:
         PerfBegin(); OpFifoInc(R, rowsPerCore, tailRows, fifoGm_); PerfEnd();
         PerfBegin(); SyncGrid(); PerfEnd(); // pri 行内写 → step3 argtopk 行内读 (行内跨线程 RAW)
 
-        // ---- Step 3: free ----
-        // [P4] OpFreeSize 已折进 Step1 t0 (fs 与 numMisses 同点写入, 经 Step1 尾 dcci 可见);
-        //   FreeRelease→FreePush 无 RAW (后者只读 freeIdx/avail/fs), FreePush→AllocPop
-        //   无 RAW (AllocPop 直读 freeIdx + 老栈, 不读 push 新段), 两个 SyncGrid 已删;
-        //   OpFreeAvailAdd/OpAllocAvailSub 合并进 Step5 尾 OpFifoAvailUpdate。
-        PerfBegin(); ArgtopkAllRows(); PerfEnd();   // radix select (原 [Step2] GM histogram 已在 UB)
-        PerfBegin(); SyncGrid(); PerfEnd();         // freeIdx 行内跨线程 RAW → OpFreeRelease
-        PerfBegin(); OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxGm_, freeSizeGm_, priGm_, dthGm_, htdGm_); PerfEnd();
-        PerfBegin(); OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxGm_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
+        // ---- Step 3: free (无淘汰行时整段跳过) ----
+        // [C1 2026-10-13] t0 在 Step1 写入"本核任一行 fs>0"标志 (UB 槽 64, 经 Step1
+        //   尾 SyncGrid 可见)。全 0 时 Argtopk/FreeRelease/FreePush 对状态零影响:
+        //   freeIdx 无任何读者 (fs=0 时 OpAllocPop 恒走老栈路径 readIdx<avail),
+        //   FreeRelease/FreePush 的 j<fs 循环体不执行, avail += 0。四步保持打点
+        //   (记录 ≈0 周期, 步数/步名不变), 条件对全块统一, 栅栏无发散。
+        bool needFree = (argtopkKeyUb_[64] != 0);
+        PerfBegin(); if (needFree) ArgtopkAllRows(); PerfEnd();   // radix select
+        PerfBegin(); if (needFree) SyncGrid(); PerfEnd();         // freeIdx 行内跨线程 RAW → OpFreeRelease
+        PerfBegin(); if (needFree) OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxGm_, freeSizeGm_, priGm_, dthGm_, htdGm_); PerfEnd();
+        PerfBegin(); if (needFree) OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxGm_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
 
         // ---- Step 4: alloc pop ----
         PerfBegin(); OpAllocPop(R, topkDim, freeStackSize, rowsPerCore, tailRows,
