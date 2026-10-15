@@ -94,6 +94,18 @@ void EchoNpu(const at::Tensor& pos, const at::Tensor& spl, const at::Tensor& res
   std::memcpy(tilingCpu.data_ptr(), &tiling, sizeof(tiling));
   at::Tensor tilingDev = tilingCpu.to(pos.device(), false);
   auto stream = c10_npu::getCurrentNPUStream().stream(false);
+  // [消融 2026-10-15] blockDim 按 topkDim 自适应: ceil(topk/4) 取整到 32, 夹在
+  //   [64, ECHO_LRU_THREAD_NUM]。topk=2048 → 512 (消融实测全场景甜点: 栅栏成本/
+  //   到达散布的收益大于 gather 轮数翻倍的代价, warm -15~18%, full -14%); topk=4096
+  //   → 1024 (保证 OpMissCumsum 4 元素并行门 4*blockDim >= topk, 生产 topk 范围内
+  //   串行回退路径不可达)。消融数据见 results/ablation-*（t512 全场景最优, t256
+  //   的 7-9× 为串行 MissCumsum 混杂因素而非线程数本身）。手动 ECHO_LRU_THREADS
+  //   覆盖上限时, topk > 4*上限 仍会回退串行 (该 knob 仅用于消融, 正式构建默认 1024)。
+  const uint32_t topkDim = tiling.topkDim;                    // = pos.size(1), Check 已校验
+  uint32_t launchThreads = (topkDim + 3u) / 4u;               // ceil(topk/4)
+  launchThreads = (launchThreads + 31u) & ~31u;               // 取整到 32 (warp)
+  if (launchThreads < 64u) launchThreads = 64u;               // 覆盖 G=64 路直方图
+  if (launchThreads > ascend_kernel::ECHO_LRU_THREAD_NUM) launchThreads = ascend_kernel::ECHO_LRU_THREAD_NUM;
   // Own tensors and tiling until an asynchronously scheduled callback completes.
   auto launch = [=]() -> int {
     launch_echo_lru(htd.data_ptr<int32_t>(), dth.data_ptr<int32_t>(), pri.data_ptr<int32_t>(),
@@ -101,7 +113,8 @@ void EchoNpu(const at::Tensor& pos, const at::Tensor& spl, const at::Tensor& res
                     pos.data_ptr<int32_t>(), spl.data_ptr<int32_t>(), resetMask.data_ptr<uint8_t>(),
                     curSlots.data_ptr<int32_t>(), missHostPos.data_ptr<int32_t>(),
                     missAllocFlat.data_ptr<int32_t>(), missMask.data_ptr<uint8_t>(),
-                    workspace.data_ptr(), tilingDev.data_ptr(), blocks, reinterpret_cast<void*>(stream));
+                    workspace.data_ptr(), tilingDev.data_ptr(), blocks, launchThreads,
+                    reinterpret_cast<void*>(stream));
     return 0;
   };
   at_npu::native::OpCommand::RunOpApi("EchoLru", launch);

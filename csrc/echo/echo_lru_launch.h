@@ -2,12 +2,15 @@
 #include <cstdint>
 #include "echo_lru_tiling.h"
 
-// Pure SIMT: four launch arguments, with statically allocated 128 KiB UB.
+// blockDim 由 plugin 按 tiling.topkDim 自适应传入 (ceil(topk/4) 取整到 32, 夹在
+// [64, ECHO_LRU_THREAD_NUM]): topk=2048 → 512 (消融实测全面甜点), topk=4096 → 1024
+// (保证 OpMissCumsum 4 元素并行门 4*blockDim >= topk). kernel 内部全部 blockDim.x
+// 自适应, __launch_bounds__(ECHO_LRU_THREAD_NUM) 是上限, 允许以更少线程启动.
 void launch_echo_lru(int32_t* htd, int32_t* dth, int32_t* pri, int32_t* freeSlots,
                      int32_t* avail, int32_t* fifo, int32_t* pos, int32_t* spl,
                      uint8_t* resetMask, int32_t* curSlots, int32_t* missHostPos,
                      int32_t* missAllocFlat, uint8_t* missMask, void* workspace,
-                     void* tiling, uint32_t blockNum, void* stream);
+                     void* tiling, uint32_t blockNum, uint32_t blockDim, void* stream);
 
 // GM workspace 布局 (与 EchoLruKernel::Init 逐项一致):
 //   [0, base)           每行: wsCumsum(B+1) + pushCount/numHits/numMisses/freeSize(4)

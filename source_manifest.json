@@ -1,5 +1,5 @@
 {
-  "manifest_revision": "ablation-2026-10-15",
+  "manifest_revision": "adaptive-blockdim-2026-10-16",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
   "echo_revision": "radix-select-skip-local-2026-10-15",
@@ -60,20 +60,20 @@
     },
     {
       "path": "csrc/echo/echo_lru_launch.cpp",
-      "sha256": "d756bef4275a821dc8d698a720dec334e292129f955f94ad22d0f27d41735f12",
-      "bytes": 747,
+      "sha256": "b1064f4d7bcb9bd73d04d1d9eea6c758f3f9ab5c359872e25667a2b5c81fa27d",
+      "bytes": 740,
       "role": "Echo pure SIMT launch"
     },
     {
       "path": "csrc/echo/echo_lru_launch.h",
-      "sha256": "469552914abf062adab59fb52d66ac120b0ae650028823c17d8010dcf270329b",
-      "bytes": 1500,
+      "sha256": "1c641ffe837efe5007f5f439644494746e9ddd3e6bcc594d5b1d9afce7d562cd",
+      "bytes": 1820,
       "role": "Echo workspace 公式与启动声明"
     },
     {
       "path": "csrc/echo/echo_lru_plugin.cpp",
-      "sha256": "6acf435695bfe04a8e48b27a8daa169184b50e1de055422cfa72286cd9bedcb0",
-      "bytes": 7554,
+      "sha256": "016b26cfb0d1e438e168c84a25cf5ce03909fda5a08efd1d91ed687bd15b37ee",
+      "bytes": 8751,
       "role": "Echo torch.ops plugin"
     },
     {
@@ -148,7 +148,8 @@
       "[B+C1+C2] Argtopk 重构 + 无淘汰跳过 + 末行栅栏（full_cache 509K → 309K）",
       "[方向1] Argtopk 自适应跳趟（fifo 前导零字节，放不下回退全趟；待服务器验证）",
       "[方向2] 决策本地化（栅栏 3→2/趟，scalar 无读者；待服务器验证）",
-      "[消融基础设施] ECHO_LRU_THREADS 编译期可配（kernel/plugin 同值注入，static_assert 约束 [64,1024]×32）；OpMissCumsum 增 4 元素/线程路径（512 线程 × 4 = 2048，双控制槽链式扫描）；compare.py/profile_kernel.py 增 --blocks 覆盖。注：4 元素路径 rank(p1)=t0+e1 （规格笔误 t01+e1 由实现侧以 checks golden 纠正）"
+      "[消融基础设施] ECHO_LRU_THREADS 编译期可配（kernel/plugin 同值注入，static_assert 约束 [64,1024]×32）；OpMissCumsum 增 4 元素/线程路径（512 线程 × 4 = 2048，双控制槽链式扫描）；compare.py/profile_kernel.py 增 --blocks 覆盖。注：4 元素路径 rank(p1)=t0+e1 （规格笔误 t01+e1 由实现侧以 checks golden 纠正）",
+      "[自适应 blockDim] plugin 按 topkDim 计算 launch 线程数 clamp(ceil(topk/4)→32 倍数, 64, ECHO_LRU_THREAD_NUM): topk=2048→512（消融实测全场景甜点: warm 0.73-0.78×、full 1.48×、cold 1.24× vs SIMT）、topk=4096→1024（扫描门恒满足, 生产 topk 范围内串行 MissCumsum 不可达）。消融结论: t256 的 7-9× 为串行 MissCumsum 混杂因素（~550μs t0 串行 GM 循环）而非线程数本身; blocks 减半单调变差; rows 64/128（每核 2/4 行）Echo warm 优势消失（1.07-1.25×）——行间串行是 batch>核数 形态的结构性软肋"
     ],
     "transcription_fixes": [
       "scalar[0]==0 误用比较符及 scalar[2] 未初始化；直方图候选过滤 prefix 位对齐错误",
@@ -157,7 +158,7 @@
       "tiling 恢复 ARGTOPK_GM_NPAD_MAX；launch workspace 公式重写；plugin 填 argtopkGroupThreads"
     ],
     "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出；padding 索引仅在越过有效区时按序补齐",
-    "verification": "CPU: checks 171 项通过（新增 300/512 档走 4 元素路径）；bisheng 三配置（默认/512 覆盖/打点）编译通过。kernel 级 P50: warm 0.91-0.95×、cold 1.38×、full 1.75×（162.16μs）。"
+    "verification": "CPU: checks 171 项通过; 自适应公式 9 组边界用例验证; bisheng 默认/打点编译通过。kernel 级 P50 (自适应前 1024 线程): warm 0.93/0.89×、cold 1.36×、full 1.73×; 消融 t512: warm 0.78/0.73×、cold 1.24×、full 1.48×（待自适应版上板复核）"
   },
   "note": "echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
 }
