@@ -1,5 +1,5 @@
 {
-  "manifest_revision": "adaptive-blockdim-2026-10-16",
+  "manifest_revision": "scan-gate-fix-2026-10-16",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
   "echo_revision": "radix-select-skip-local-2026-10-15",
@@ -54,8 +54,8 @@
     },
     {
       "path": "csrc/echo/echo_lru_kernel.h",
-      "sha256": "12d3ec95ca5dc075cfcdd080a2a9bada6c068dda80d2b89e5b2d32cf4e2c6daf",
-      "bytes": 68489,
+      "sha256": "0af6bdda851e00dd082eb392e7a34e82594d4a9ef4d322bf72c571ae16420c20",
+      "bytes": 68742,
       "role": "Echo 设备计算：radix select（跳趟+本地决策）+ warp 协作 + 4元素扫描路径"
     },
     {
@@ -108,8 +108,8 @@
     },
     {
       "path": "docs/echo_lru_deep_dive.md",
-      "sha256": "7bdae5b281e2567fe614dd183b1d60ae2cc171b7024ff38810a493035d220a0c",
-      "bytes": 78323,
+      "sha256": "bc5f9befad434dcbbbe0eef5ae2e2c0428628320422a46e461fac8bb363deb7d",
+      "bytes": 83972,
       "role": "深入解读文档（随迭代同步更新）"
     },
     {
@@ -149,7 +149,7 @@
       "[方向1] Argtopk 自适应跳趟（fifo 前导零字节，放不下回退全趟；待服务器验证）",
       "[方向2] 决策本地化（栅栏 3→2/趟，scalar 无读者；待服务器验证）",
       "[消融基础设施] ECHO_LRU_THREADS 编译期可配（kernel/plugin 同值注入，static_assert 约束 [64,1024]×32）；OpMissCumsum 增 4 元素/线程路径（512 线程 × 4 = 2048，双控制槽链式扫描）；compare.py/profile_kernel.py 增 --blocks 覆盖。注：4 元素路径 rank(p1)=t0+e1 （规格笔误 t01+e1 由实现侧以 checks golden 纠正）",
-      "[自适应 blockDim] plugin 按 topkDim 计算 launch 线程数 clamp(ceil(topk/4)→32 倍数, 64, ECHO_LRU_THREAD_NUM): topk=2048→512（消融实测全场景甜点: warm 0.73-0.78×、full 1.48×、cold 1.24× vs SIMT）、topk=4096→1024（扫描门恒满足, 生产 topk 范围内串行 MissCumsum 不可达）。消融结论: t256 的 7-9× 为串行 MissCumsum 混杂因素（~550μs t0 串行 GM 循环）而非线程数本身; blocks 减半单调变差; rows 64/128（每核 2/4 行）Echo warm 优势消失（1.07-1.25×）——行间串行是 batch>核数 形态的结构性软肋"
+      "[自适应 blockDim] plugin 按 topkDim 计算 launch 线程数 clamp(ceil(topk/4)→32 倍数, 64, ECHO_LRU_THREAD_NUM): topk=2048→512（消融实测全场景甜点: warm 0.73-0.78×、full 1.48×、cold 1.24× vs SIMT）; 同时删除 OpMissCumsum 门中 Hillis-Steele 时代遗留的 UB 侧条件（2/4*topkDim≤8192）——warp 扫描版 scratch 固定 66 槽、打包安全由每 tile 计数≤Bm≤1024<2^12 保证, topk=4096 在自适应 1024 线程下恒并行（该遗留门曾使 topk>2048 误掉 t0 串行, 由文档子代理审校发现）"
     ],
     "transcription_fixes": [
       "scalar[0]==0 误用比较符及 scalar[2] 未初始化；直方图候选过滤 prefix 位对齐错误",

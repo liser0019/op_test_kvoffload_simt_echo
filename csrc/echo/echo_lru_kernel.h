@@ -727,13 +727,16 @@ __aicore__ inline void OpAllocPriority(
 //   Hillis-Steele: 原 11 轮 × 1024 线程块栅栏 (~20K 周期, cold/warm 耗时相同 →
 //   barrier bound 而非 work bound), 现 warp shuffle 一级 + t0 扫 warp total 二级,
 //   3 次栅栏/行。每线程 2 元素打包进一个 int32: 低 12bit = p0 miss, 高 12bit 起
-//   = p1 miss (总数 ≤ topkDim ≤ 2048 < 2^12, 无跨字段进位)。p0 位 = 线程号,
-//   p1 位 = 线程号 + Bm, 均为连续映射 → 排名可由打包前缀直接拼出:
-//   rank(p0=t) = E0(t); rank(p1=t+Bm) = TotalMiss0 + E1(t)。
-// 2 元素门不满足而 4 元素门满足 (topkDim ≤ 4*blockDim 且 4*topkDim ≤ 8192) 时走
-//   每线程 4 元素两次链式扫描 ([消融 2026-10-15] 512 线程下 topk=2048 仍可并行,
-//   见分支内注释); 4 元素门也不满足 (topkDim > 4*blockDim 或 4*topkDim > 8192)
-//   时回退 t0 串行累加。
+//   = p1 miss。p0 位 = 线程号, p1 位 = 线程号 + Bm, 均为连续映射 → 排名可由
+//   打包前缀直接拼出: rank(p0=t) = E0(t); rank(p1=t+Bm) = TotalMiss0 + E1(t)。
+//   字段打包安全由 "每 tile 计数 ≤ Bm ≤ 1024 < 2^12" 保证 (与 topkDim 无关);
+//   扫描 scratch 固定 66 槽 (warpTotals/warpBases/ctrlA/ctrlB), 亦与 topkDim
+//   无关 —— 旧版的 "2*topkDim/4*topkDim ≤ 8192" 门是 Hillis-Steele 时代
+//   bufA/bufB 缓冲 (大小 2*topkDim) 的遗留约束, warp 扫描版已不需要, 已删
+//   (否则 topk=4096 时 4 元素门被 UB 侧误拦, 掉 t0 串行)。
+// 路径选择 (线程侧条件唯一): topkDim ≤ 2*blockDim → 2 元素; ≤ 4*blockDim →
+//   4 元素 ([消融 2026-10-15] 512 线程 × 4 = 2048 生产尺寸, 见分支内注释);
+//   否则回退 t0 串行累加 (plugin 自适应 blockDim 下, topk ≤ 4096 恒并行)。
 // 语义与串行版逐字段一致: wsMissRank = miss 的 exclusive 前缀秩,
 // missPos = miss ? pos : 0。
 __aicore__ inline void OpMissCumsum(
@@ -746,7 +749,7 @@ __aicore__ inline void OpMissCumsum(
     uint32_t t = threadIdx.x;
     const uint32_t Bm = blockDim.x;
 
-    if (topkDim <= 2u * Bm && 2u * topkDim <= ARGTOPK_UB_NPAD_MAX) {
+    if (topkDim <= 2u * Bm) {
         int32_t* warpTotals = scanUb;
         int32_t* warpBases  = scanUb + 32;
         int32_t* control    = scanUb + 64;
@@ -781,7 +784,7 @@ __aicore__ inline void OpMissCumsum(
             }
         }
         return;
-    } else if (topkDim <= 4u * Bm && 4u * topkDim <= ARGTOPK_UB_NPAD_MAX) {
+    } else if (topkDim <= 4u * Bm) {
         // [消融 2026-10-15] 每线程 4 元素路径, 服务于 512 线程消融 (512×4=2048,
         //   topk=2048 时 2 元素并行门 512×2=1024 不够, P3 收益会归零)。每线程认领
         //   4 个连续映射位置 p0=t, p1=t+Bm, p2=t+2Bm, p3=t+3Bm; 位置序
