@@ -6,188 +6,20 @@
 
 工程基线来自 `kv_plan_single_op_test` 的 `main`。SIMT 是对照基线，保留原样；`csrc/echo/` 在基线之上集成了作者 2026-10-13 的新版优化（人工誊抄，已逐处校对修正，见 `source_manifest.json`），并保留 `checks/check_echo_kernel_host.py` 做 CPU 回归。不包含旧 AIV 或跳过排序的 Echo 实验实现。
 
-### 本次 Echo 更新（2026-10-13 手抄版 + P0-P4/B 性能优化）
-
-- `OpArgtopkRow` 从 4-pass LSD 全量基数排序改为 **4 趟 MSB-first 基数选择（radix select）**：key 打包与 per-thread 直方图（`ARGTOPK_GROUP_THREADS=64` 路纯写切片）全在单大 `__ubuf__` 数组内，t0 逐字节收敛阈值 `T` 与配额 `quota`，最后按阈值筛出 `freeSize` 个槽；不再有 GM ping-pong / scatter，workspace 每核只用调试 dump 段。
-- `OpMissCumsum` 改为 **两级 warp 扫描**（每线程 2 元素，`topkDim<=2*blockDim` 且 `2*topkDim<=8192` 时启用，生产尺寸 2048 命中），否则回退 t0 串行。
-- **[P0] OpHitMiss 去 atomic**：原每线程一次 `asc_atomic_add` 打同一 GM 地址（warm 场景 ~1024 次/行 × ~9K 周期 → 该步实测 ~9.4M 周期），改 `asc_reduce_add` warp 归约 + t0 汇总直接写 `numMisses`（2 次栅栏/行）；`OpNumMisses` 子步删除，`numHitsGm` 槽位保留但不再读写。
-- **[P1] Argtopk emission 并行化**：原 t0 串行两遍 Npad 扫描 + 串行补零（full_cache 场景该步实测 ~2.1M 周期），改全员连续切片统计 `(nLt|nEq<<16)` 打包块扫描得写入基址后并行写 + 并行补零；连续切片保证输出仍按全局槽号升序，与原语义逐位一致。
-- **[P2] OpFinalSlots 删除**：miss 的最终槽位就是本轮分配的 `aslot`，由 `OpSetUpdate` 顺手写回 `curSlots`（hit 位 Step1 已正确），省去全量 topk 重新 gather htd 与尾步栅栏。
-- **[P4] 栅栏削减**：OpFreeSize 折进 Step1 的 t0 汇总段（fs 与 numMisses 同点写出）；OpAllocPop 改直读 `freeIdx` + 老栈（新压入段满足 `free[avail+k]==freeIdx[k]`，弹出与旧栈语义逐值等价，且不再依赖 FreePush 的写入）；`OpFreeAvailAdd`/`OpAllocAvailSub` 合并为 Step5 尾 `OpFifoAvailUpdate` 一次 `avail += fs - nm`（终值与旧两步序列恒等）；删除 FreeRelease→FreePush、FreePush→AllocPop 两个无 RAW 的 SyncGrid 与 Step5 尾无读者的 SyncGrid；`PackedBlockScan` 去掉保护性第 3 栅栏（下一轮 barrier1/barrier2 已保证 scratch 读先于写，注释含顺序论证）。步骤数 40→31（非 spec 32→23）。
-- **[B] Argtopk 重构**（full_cache 该步 ~410K 周期，占 80%）：pass 0 的 pack 与 clear+hist0 合并为单相位（hist0 直读 priGm，不读 key，无交叉 RAW）；scalar 初始化与 dbg dump 折进 pass 0 的 t0 决策段；每趟栅栏 4→3；merge 改 256 桶并行（墙钟 G 次读）；hist/pack/emission 只扫有效区 `[0, B+1)`，`Npad-(B+1)` 个 padding 键（恒为 I32_MAX）在 merge 相位解析式计入，emission 越过有效区时按槽号升序补 padding 索引——与旧满扫描输出逐位一致。
-- **[C1] 无淘汰整段跳过**：Step1 的 t0 在 UB 写"本核任一行 fs>0"标志，全 0 时 Argtopk/SyncGrid/FreeRelease/FreePush 四步整体跳过（freeIdx 无读者、循环体不执行、对状态零影响；步数/步名不变，跳过时记录 ≈0 周期）。
-- **[C2] OpHitMiss 末行栅栏**：warpScratch 复用保护栅栏仅在还有下一行时执行。
-- **[P3] OpMissCumsum 去 Hillis-Steele**：原 11 轮 1024 线程块栅栏（~20K 周期，barrier bound），改 warp shuffle 一级 + t0 扫 warp total 二级（3 次栅栏/行），p0/p0+blockDim 连续映射使排名可由打包前缀直接拼出。
-- 新增 **ECHO_PERF_STEP 分步打点**：`Process` 内 23 个非 spec 步（spec 路径 31 步）由 `PerfBegin/PerfEnd` 记录 t0 的 `clock()` 周期，写入 workspace 尾部 `stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx]`；`ECHO_PERF_STEP=ON bash build.sh` 构建到 `build_perf/`，`echo_perf_step.py` 读取并统计（打点构建仅用于诊断，正式对比仍用普通构建 + `compare.py`）。
-- 淘汰语义：`key==T` 平局取最小槽号，与稳定排序的 `(pri, slot)` 字典序一致；`key<T` 组按槽号升序输出 —— 本基准初始 `pri[slot]=slot`（见 `make_echo_initial`），与全排序结果一致。若未来输入存在非单调 pri，淘汰“集合”仍正确，仅 free 栈压栈顺序与全排序版不同。
-- 算子接口、SIMT 基线、benchmark 的输入、参考算法、状态恢复与计时边界均保留（workspace 布局未动）。
-
-手抄校对修正的抄写错误（详见 git 提交记录）：`scalar[0] == 0` 误用比较符及 `scalar[2]` 未初始化、直方图候选过滤 `prefix` 位对齐错误、`NNpad` 未定义、`PerEnd()` 拼写、Step0 后 SyncGrid 缺 `PerfEnd`、`PerfEnd` 缺 `__aicore__` 双下划线、`argtopkScalarUb_,,` 双逗号、`argtopkKeyPriUb_` 旧成员名、`OpMissCumsum` 内 `uint32_t threadIdx.x;` 非法声明与 `Bm`/`t` 未定义、并行扫描 `miss1` 误写 `miss0`、`perfLast_` 截断为 32 位、tiling 丢失 `ARGTOPK_GM_NPAD_MAX`、误加 `cooperative_groups.h` include、plugin 未填 `argtopkGroupThreads`。`checks/check_echo_kernel_host.py` 已重写为选择/扫描语义（现 171 项，含跳趟/回退/4 元素扫描自一致性）。
-
-```text
-kvoffload_simt_echo/
-├── compare.py                    # 共同输入 → CPU 参考 → 设备调用 → 校验/计时（正式对比）
-├── echo_perf_step.py             # ECHO_PERF_STEP 构建的分步耗时统计（诊断用）
-├── build.sh                      # CMake 配置与编译；ECHO_PERF_STEP=ON 或 --perf-step 构建打点版
-├── CMakeLists.txt                # 显式编译两个 kernel + 两个 plugin；ECHO_PERF_STEP 选项
-├── csrc/
-│   ├── simt/                     # 对照基线（保留原样，勿改）
-│   │   ├── sparse_kv_plan_kernel.cpp   # SIMT 八阶段计算、kernel 外壳和 launch
-│   │   ├── sparse_kv_plan_launch.h     # tiling 构造、workspace 公式、启动声明
-│   │   ├── sparse_kv_plan_config.h     # 2048 线程、warp、UB 常量
-│   │   └── sparse_kv_plan_plugin.cpp   # torch.ops 校验、tiling 上传、异步下发
-│   └── echo/
-│       ├── echo_lru_kernel.h           # Echo 全部设备计算、radix select、分步打点
-│       ├── echo_lru_launch.cpp         # pure SIMT 四参数 launch
-│       ├── echo_lru_launch.h           # workspace 公式、启动声明
-│       ├── echo_lru_tiling.h           # tiling、1024 线程、UB/分步常量
-│       └── echo_lru_plugin.cpp         # torch.ops 校验、tiling 上传、异步下发
-├── source_manifest.json          # 以当前状态为初始状态的文件清单与哈希
-├── checks/check_echo_kernel_host.py  # 可选：直接提取新版函数做 CPU 并行回归
-└── README.md
-```
-
-## 1. 先从哪里读
-
-建议先读 `main()` 的循环，再回头看函数实现：
-
-| 代码部分 | 函数 | 需要看懂的问题 |
-|---|---|---|
-| 第 1 节 | `make_case` | 命中率怎样构造？warm 为什么不会 reset？ |
-| 第 1 节 | `make_echo_initial` | 同一份历史怎样转换成 Echo 的槽位和时间戳？ |
-| 第 2 节 | `reference_simt` / `reference_echo` | 两种算法各自应该输出什么？ |
-| 第 2 节 | `check_common_semantics` | 槽号不同的两种实现怎样检查共同语义？ |
-| 第 3 节 | `prepare_npu` / `restore_state` | 哪些张量只读？哪些会被改写？如何恢复？ |
-| 第 3 节 | `invoke` | 实际传给两个注册算子的参数是什么？ |
-| 第 4 节 | `measure_one` | Event 放在哪里？时间单位是什么？ |
-| 第 5 节 | `main` | 审计、预热、测量、最终检查如何串起来？ |
-
-没有通用 Runner 类、异步 Python 回调、动态算法列表或其他测试文件依赖。`invoke` 中的参数顺序直接对应两个本地 C++ plugin 的 `TORCH_LIBRARY` schema。完整的调用链是：
-
-```text
-compare.py / invoke
-  → torch.ops.sparse_kv_plan_op.sparse_kv_plan 或 echo_lru
-  → 对应 plugin 的 NPU 实现：检查张量、构造 tiling、上传 tiling
-  → RunOpApi 按原 main 的方式下发，lambda 按值捕获张量
-  → launch_sparse_kv_plan 或 launch_echo_lru
-  → 本目录 kernel 执行并原地更新状态、输出
-```
-
-可按第 9 节继续读两版算子源码。
-
-## 2. 运行条件与命令
-
-先下载工程（GitCode 仓库地址以实际托管为准）：
+### NPU：线程数 / blockNum / batch 消融（ablation.sh 一键）
 
 ```bash
-git clone <仓库地址> kvoffload_simt_echo
-cd kvoffload_simt_echo
+bash ablation.sh                    # 全矩阵: 线程 1024/768/512/256 + blocks 16/8 + rows 64/128
+bash ablation.sh --active 50        # 加大采样
+bash ablation.sh --phase threads    # 只跑线程相（threads | blocks | rows | all）
+bash ablation.sh --threads 1024,512 # 只跑指定线程配置
+bash ablation.sh --skip-build       # 复用已有构建产物
+bash ablation.sh --device 0
 ```
 
-以下命令均在工程根目录运行。
+脚本自动完成：逐配置构建（`--threads=N`，产物在 `build_t{N}/`，默认 1024 在 `build/`）→ 每配置跑一遍 kernel 级 profile（4 场景 × simt/echo，采集前后均过 golden）→ 汇总为 `results/ablation-<时间戳>/report.md`（逐配置分组的 P50 对比表）。预计 30–40 分钟（4 构建 + 8 profile）。
 
-### 无 NPU：阅读和检查输入/参考语义
-
-只需要 Python 和 NumPy：
-
-```bash
-python3 compare.py --cpu-check
-```
-
-这个模式按生产尺寸构造四个场景，检查两份参考的 miss 数、查询映射和历史淘汰集合。它不加载 torch / torch_npu / 扩展，不输出 NPU 性能数字。
-
-阅读时可把尺寸缩小，便于在调试器中查看数组：
-
-```bash
-python3 compare.py --cpu-check --rows 2 --topk 4 --capacity 8 --max-token 64
-```
-
-### NPU：直接构建本目录
-
-在服务器下载本仓库，或复制整个工程目录。在匹配的 torch / torch_npu 环境中，加载实际 CANN 安装的 `set_env.sh`，直接构建本目录；无需原仓库、wheel 或 pip 安装：
-
-```bash
-# 路径按服务器 CANN 实际安装位置调整。
-source /usr/local/Ascend/cann-9.1.0/set_env.sh
-bash build.sh --soc=ascend950
-```
-
-构建产物是 `build/libsimt_vs_echo_ops.so`。脚本默认加载这个文件，并直接调用其中注册的两个算子：
-
-```bash
-unset ASCEND_LAUNCH_BLOCKING
-
-# 先逐样本审计，验证每次调用的结果。这里的延迟只作诊断。
-python3 -X faulthandler compare.py \
-  --device 1 \
-  --warmup 2 --repeat 4 --verify-each-sample \
-  --json results/audit.json
-
-# 审计通过后，同尺寸正式测量。
-python3 -X faulthandler compare.py \
-  --device 1 \
-  --warmup 10 --repeat 50 --json results/benchmark.json
-```
-
-`--device` 是逻辑卡号，按服务器实际可见设备选择。默认使用卡 1。
-
-程序通过 `torch.ops.load_library()` 加载本目录共享库，不导入原仓库的 `sparse_kv_plan_op` 包，不回退到环境中已安装的扩展。程序打印实际库路径，JSON 记录共享库 SHA256、源码提取基线提交、`echo_revision` 和当前 Echo kernel 源码 SHA256；源码标记不能证明共享库已重新编译，也不能替代编译产物的验证。确需选择其他构建产物时，可传 `--library /绝对路径/libsimt_vs_echo_ops.so`。
-
-`build.sh` 使用激活环境里的 `python3`，并明确传给 CMake。需要换解释器时设置 `PYTHON=/绝对路径/python3`；并行编译数量用 `JOBS=4`。CANN / 编译器 / runtime 路径可分别用 `ASCEND_CANN_PACKAGE_HOME`、`BISHENG_CXX`、`ASCENDC_RUNTIME_LIBRARY` 覆盖。
-
-只看先前讨论的 75% 命中场景：
-
-```bash
-python3 compare.py --device 1 --scenario warm_75pct --warmup 10 --repeat 50
-```
-
-### NPU：Echo 分步耗时（ECHO_PERF_STEP）
-
-诊断 Echo kernel 每一步的耗时分布。先用打点宏构建（产物在 `build_perf/`，与普通构建 `build/` 互不覆盖），再运行统计脚本：
-
-```bash
-source /usr/local/Ascend/cann-9.1.0/set_env.sh
-ECHO_PERF_STEP=ON bash build.sh --soc=ascend950   # 等价: bash build.sh --perf-step
-python3 echo_perf_step.py --device 1 --warmup 5 --repeat 20
-```
-
-`echo_perf_step.py` 直接 import `compare.py` 的输入构造、参考实现、状态恢复与调用方式（同尺寸、同 seed、同场景），因此分步耗时的各步之和可与 `compare.py` 的 Event 总耗时互相印证。每次调用前用负哨兵填充 workspace，读回每核每步的 `clock()` 周期（非 spec 路径 23 步，步名见 `ECHO_PERF_STEP_NAMES`），按“最慢核”跨轮取中位数，并用 Event 总耗时标定周期频率。测量前后均与 `reference_echo` 全量比对；若加载的不是打点构建，脚本会因哨兵未被覆盖而直接报错。
-
-打点构建改变了 kernel 代码形态，其总耗时不用于正式结论；正式性能对比始终使用普通构建 + `compare.py`。
-
-### NPU：kernel 级精确耗时（profiler）
-
-Event 计时包含 tiling H2D 与 host 下发的固定开销（两路各 ~百 μs），只适合看比值。要拿 kernel 纯耗时，用 `torch_npu.profiler` 抓目标 kernel 的 `kernel_details.csv`（测试数据仍与 `compare.py` 完全一致，采集前后均与 golden 全量比对）：
-
-```bash
-bash profile_kernel.sh                          # 全部四个场景
-bash profile_kernel.sh --scenario warm_75pct    # 单场景
-bash profile_kernel.sh --active 50              # 加大采样
-```
-
-采集目录在 `/dev/shm/kvprof.XXXXXX`（trace 文本量大，避免写磁盘；`KV_PROFILE_ROOT` 可覆盖），汇总写入 `traces/run-*/summary.json`：两路 kernel 的 P50/P95/min/max、原始样本与 `echo_over_simt_kernel_p50`。只统计 `sparse_kv_plan_kernel` / `echo_lru_kernel`，restore 的 copy_ 等任务按名字过滤。
-
-### NPU：线程数 / blockNum / batch 消融
-
-三组消融旋钮：每核线程数（编译期常量 `ECHO_LRU_THREAD_NUM`，需独立构建目录）、Echo blockNum（运行期 `--blocks`）、rows/batch 形态（`--rows`）。建议矩阵：threads∈{1024,768,512,256} × 4 场景，再加 blocks∈{32,16,8} 与 rows∈{32,64,128}（后两组用默认 1024 线程构建）。
-
-```bash
-# 线程数消融（每次独立构建目录，互不覆盖；N != 1024 时产物在 build_t{N}/）
-bash build.sh --soc=ascend950 --threads=512
-bash profile_kernel.sh --library build_t512/libsimt_vs_echo_ops.so
-
-# blockNum / rows 消融（用默认 1024 线程构建）
-bash build.sh --soc=ascend950
-python3 compare.py --device 1 --blocks 16 --warmup 10 --repeat 50 --json results/blocks16.json
-bash profile_kernel.sh --blocks 16
-bash profile_kernel.sh --rows 64   # 每核 2 行（生产 batch>核数形态）
-```
-
-解读要点：
-
-- **256 线程时 OpMissCumsum 走 t0 串行**（并行门上限 4×线程=1024 < topk 2048），该配置的 Step6 耗时含串行回退，与 512/768/1024 线程不可直接比较，数据解读需标注；512 线程时走每线程 4 元素路径（512×4=2048 恰好覆盖 topk）。
-- `--blocks` 覆盖的是请求值：实际 `blocks = ceil(rows / ceil(rows/请求值))`，向上取整可能令实际 blocks 小于请求值（如 rows=32 请求 9 实际得 8）；尾核非空由公式自动保证，超出向量核数由 plugin CHECK 拦截。compare.py 的 results JSON 与 profile_kernel.py 的 summary JSON 均在 `blocks_override` 字段记录请求值，便于归因。
-- 线程数消融看**栅栏成本 vs 访存轮数**的权衡：线程减少使每次 `asc_syncthreads` 变便宜，但行内 grid-stride 扫列轮数变多、OpMissCumsum 并行门收紧；blocks/rows 消融看**行串行扩展性**（每核行数增加时 t0 串行子步与行循环的伸缩）。
+数据解读要点：①线程数权衡"栅栏成本 vs 访存延迟轮数"（full_cache 栅栏密集、warm 访存密集，甜点可能不同）；②**256 线程时 OpMissCumsum 走 t0 串行**（并行门上限 4×256=1024 < topk 2048），warm 场景数据带此混杂因素（报告已自动标注）；③rows 64/128 是"每核多行"的生产 batch>核数形态，看行串行的劣化斜率；④blocks 减半预计单调变差（每核串行多行），作对照。
 
 ## 3. 共同输入到底是什么
 

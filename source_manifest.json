@@ -24,9 +24,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "4359cdcf90cd7d179f738a98498e59f151e3e464a60b20031c95271185f6c1ee",
-      "bytes": 29535,
+      "sha256": "60d6e002757530839533dfce9f4a8b93ca4e104e19cdd99f235ce12717452abf",
+      "bytes": 16062,
       "role": "阅读指南、运行说明与消融实验章节"
+    },
+    {
+      "path": "ablation.sh",
+      "sha256": "b4b4bdd618b68ea9e95ee6e0e0b6d3d235f40660b924e008c5561c80437262e1",
+      "bytes": 7940,
+      "role": "消融一键脚本：线程/blocks/rows 矩阵构建+profile+汇总报告"
     },
     {
       "path": "build.sh",
@@ -102,8 +108,8 @@
     },
     {
       "path": "docs/echo_lru_deep_dive.md",
-      "sha256": "566d78108e1557339d220140bda8a0cfce2ab7405ac19b85878cca1942b011e4",
-      "bytes": 78861,
+      "sha256": "7bdae5b281e2567fe614dd183b1d60ae2cc171b7024ff38810a493035d220a0c",
+      "bytes": 78323,
       "role": "深入解读文档（随迭代同步更新）"
     },
     {

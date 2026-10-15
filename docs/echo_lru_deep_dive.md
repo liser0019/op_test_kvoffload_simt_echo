@@ -987,26 +987,10 @@ block、`std::barrier` 模拟 syncthreads、共享缓冲模拟 shfl_up/reduce_ad
 （`check_echo_kernel_host.py:28-32`）。它是 CPU 算法和索引检查，**不能**替代 NPU 编译、
 设备缓存一致性或性能验证。
 
-### 8.6 消融实验矩阵（threads / blocks / rows）
+### 8.6 线程数 / blockNum / batch 消融（ablation.sh）
 
-三组旋钮，完整命令与解读要点见 README "线程数 / blockNum / batch 消融"章节：
+一键脚本 `ablation.sh`：逐配置构建（`build.sh --threads=N` → `build_t{N}/`）→ 每配置 4 场景 kernel 级 profile（复用 profile_kernel.sh，采集前后过 golden）→ 汇总 `results/ablation-<时间戳>/report.md`。参数：`--device/--active/--threads/--blocks/--rows/--phase(threads|blocks|rows|all)/--skip-build`。矩阵默认 threads {1024,768,512,256}、blocks {16,8}、rows {64,128}；基准为 t1024（生产尺寸形态）。解读注意：t256 的 MissCumsum 走 t0 串行（4×256=1024<topk 2048）；rows64/128 的跨配置对比需注意 rows 口径；线程数甜点可能随场景（栅栏密集 vs 访存密集）不同。
 
-- **threads ∈ {1024, 768, 512, 256} × 4 场景**：每组独立构建（`bash build.sh
-  --threads=N`，产物 `build_t{N}/`），`bash profile_kernel.sh --library
-  build_t{N}/libsimt_vs_echo_ops.so` 采集。看**栅栏成本 vs 访存轮数**的权衡：线程
-  减少使每次 `asc_syncthreads` 变便宜（§7.3），但行内 grid-stride 扫列轮数变多、
-  OpMissCumsum 并行门收紧。
-- **blocks ∈ {32, 16, 8}**（默认 1024 线程构建）：`--blocks` 运行期覆盖，无需重编译。
-  看**行串行扩展性**（每核行数增加时 t0 串行子步与行循环的伸缩）。
-- **rows ∈ {32, 64, 128}**：`--rows` 变体 batch 形态（每核多行）。
-
-解读注意：**256 线程时 OpMissCumsum 走 t0 串行**（4×256=1024 < topk 2048，§5
-Step6），该配置的 Step6 含串行回退，与 512/768/1024 不可直接比较；512 线程走 4
-元素路径（512×4=2048 恰好覆盖）。`--blocks` 覆盖的是请求值，实际 blocks 可能因向上
-取整略小；`blocks_override` 记录在 compare.py 与 profile_kernel.py 两份 JSON 里便于
-归因。
-
----
 
 ## 9. 优化迭代日志
 
