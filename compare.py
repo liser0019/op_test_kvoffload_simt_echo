@@ -293,7 +293,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for key, default in [("rows", 32), ("topk", 2048), ("capacity", 4096), ("max-token", 262144),
                          ("block-size", 64), ("seed", 2026), ("device", 1), ("warmup", 10),
-                         ("repeat", 68), ("audit-repeat", 3)]:
+                         ("repeat", 72), ("audit-repeat", 3)]:
         parser.add_argument("--" + key, type=int, default=default)
     parser.add_argument("--scenario", choices=("all", *SCENARIOS), default="all")
     parser.add_argument("--implementations", nargs="+", choices=IMPLEMENTATIONS, default=list(IMPLEMENTATIONS))

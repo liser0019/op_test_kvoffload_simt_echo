@@ -80,12 +80,21 @@ class GoldenChecks(unittest.TestCase):
         for backend in ("Meta", "PrivateUse1"):
             self.assertIn("TORCH_LIBRARY_IMPL(sparse_kv_plan_op, " + backend, candidate)
 
+    def test_abcdfh_combines_only_abcd_f_h(self):
+        variant = next(v for v in c.CATALOG["variants"] if v["name"] == "abcdfh")
+        self.assertEqual(variant["points"], "ABCDFH")
+        self.assertEqual(variant["threads"], 1024)
+        self.assertEqual(variant["op_name"], "plan_abcdfh")
+        self.assertEqual(variant["kernel_name"], "sparse_kv_plan_kernel_plan_abcdfh")
+        config = (ROOT / variant["path"] / "variant_config.h").read_text()
+        self.assertIn("PLAN_OPT_MASK 175U", config)
+
     def test_only_this_round_is_built(self):
         text = (ROOT / "CMakeLists.txt").read_text()
         start = text.index("set(PLAN_VARIANTS")
         folders = text[start:text.index(")", start)].split()[1:]
         self.assertEqual(folders, [Path(v["path"]).name for v in c.CATALOG["variants"]])
-        self.assertEqual(len(c.IMPLEMENTATIONS), 17)
+        self.assertEqual(len(c.IMPLEMENTATIONS), 18)
         self.assertFalse((ROOT / "csrc/echo").exists())
         for v in c.CATALOG["variants"]:
             if v["name"] == "baseline": continue

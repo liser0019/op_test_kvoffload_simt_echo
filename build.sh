@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# CMake 配置 → 编译 BCDE fused 1024 与 16 个优化候选，不依赖原工程。
+# CMake 配置 → 编译 BCDE fused 1024 与 17 个优化候选，不依赖原工程。
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_PYTHON="${PYTHON:-python3}"

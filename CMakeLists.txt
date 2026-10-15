@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# 阅读顺序：依赖 → mixed SIMT 编译选项 → 本轮17个版本 → 合并共享库。
+# 阅读顺序：依赖 → mixed SIMT 编译选项 → 本轮18个版本 → 合并共享库。
 # 不使用算子自动发现、子目录注册宏、setup.py 或 wheel 打包。
 cmake_minimum_required(VERSION 3.16)
 project(simt_plan_variants LANGUAGES CXX)
@@ -124,7 +124,8 @@ set(PLAN_VARIANTS
     13_abcdf
     14_abcdg
     15_abcdh
-    16_abcdefgh)
+    16_abcdefgh
+    17_abcdfh)
 set(KERNEL_OBJECTS "")
 set(VARIANT_PLUGINS "")
 foreach(_variant IN LISTS PLAN_VARIANTS)

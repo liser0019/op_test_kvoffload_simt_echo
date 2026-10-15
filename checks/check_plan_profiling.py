@@ -102,7 +102,7 @@ class ProfilingChecks(unittest.TestCase):
         self.assertNotIn('--verify-each-sample', calls[1])
         for call in calls:
             self.assertEqual(call[call.index('--reference') + 1], 'baseline')
-        self.assertEqual(calls[1][calls[1].index('--repeat') + 1], '68')
+        self.assertEqual(calls[1][calls[1].index('--repeat') + 1], '72')
 
     def test_runner_invalid_device(self):
         result, calls = self.runner('invalid')

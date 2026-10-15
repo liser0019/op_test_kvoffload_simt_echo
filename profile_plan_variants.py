@@ -107,7 +107,7 @@ def main():
     parser.add_argument("--shuffle-lru", action="store_true")
     parser.add_argument("--reference", default="baseline")
     parser.add_argument("--warmup", type=int, default=13)
-    parser.add_argument("--repeat", type=int, default=26,
+    parser.add_argument("--repeat", type=int, default=72,
                         help="Recorded calls per implementation, excluding profiler warm-up")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

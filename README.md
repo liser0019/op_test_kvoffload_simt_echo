@@ -1,12 +1,13 @@
 # BCDE + fused + 1024：Plan 微优化对照
 
 分支：`feat/simt-plan-micro-variants`，从 `feat/peer-simt-comparison@a282f5d` 创建。
-本分支只保留已选定的 BCDE + fused + 1024 基线和本轮 16 个候选，共 17 路；
+本分支只保留已选定的 BCDE + fused + 1024 基线和本轮 17 个候选，共 18 路；
 原有 Echo、旧 SIMT 和其他历史候选在原分支中保留。
 
 基线是 `baseline`，注册名仍为 `combo_bcde_fused_1024`。计算文件的 SHA256 保持
 `1114df2886bcd89986ec3efb57e94e638ddbc4975939c394b5bc44a18b199542`。
-候选尚未经过真实 CANN 编译、NPU 正确性或性能验证，不能把源码减少的指令数直接当作加速比。
+候选的实机结果以服务器测试为准；本地 CPU 检查不能替代 CANN 编译和 NPU 验证，
+也不能把源码减少的指令数直接当作加速比。
 
 ## 本轮优化字母
 
@@ -52,8 +53,36 @@ B 取消对其他线程 missSlots 写入的回读，两个依赖都消失后才�
 | `abcdg` | `ABCDG` | ABCD + reset 同步合并 |
 | `abcdh` | `ABCDH` | ABCD + tile 同步削减 |
 | `abcdefgh` | `ABCDEFGH` | 全部八项组合；收益需实测 |
+| `abcdfh` | `ABCDFH` | ABCD + 二级 Scan 特化 + tile 同步削减，不启用 E/G |
 
 E 的行上下文由每个 SIMT 线程在本行开始时准备一次，不需要 Host 读设备数据。
+
+### F 与 ABCDFH
+
+Scan 分两级：先在每个 warp 内计算前缀和，再由 warp 0 扫描所有 warp 的计数，
+得到各组起点。例如计数 `[3, 2, 4]` 对应起点 `[0, 3, 5]`，总数为 9。
+1024 线程只有 32 个 warp，这些计数恰好由一个 warp 处理。
+F 让 lane31 直接发布总数，省去通用实现的总数回传 shuffle 和跨组 carry 累加，
+并为扫描循环增加展开提示；Scan 内两道必要的 block 屏障保持不变。
+
+F 按编译期线程数选择路径，不按 batch、TopK 或 capacity 特化。
+完整 warp 配置下，512 线程的 16 个计数补零到 32 项也可使用；
+2048 线程有 64 个 warp，会自动保留通用 Scan。
+不同形状的 tile 数和 Scan 次数不同，因此收益需要分别测量。
+
+ABCDFH 的掩码为 `175U`，只叠加 ABCD、F、H，不包含 E/G。
+F 精简 Scan 内部指令，H 减少中间 tile 的尾部同步；组合没有增加 UB 或 GM 空间，
+也没有修改 MTP 的可见长度与后缀失效规则。新组合仍需服务器独立验证，不能把两版收益相加。
+
+重建后可集中比较基线、已测试较好的两版及新组合：
+
+```bash
+python3 compare.py --device 1 --implementations baseline abcdh abcdf abcdfh \
+    --audit-edges --warmup 2 --repeat 3 --verify-each-sample
+python3 profile_plan_variants.py --device 1 --scenario all \
+    --implementations baseline abcdh abcdf abcdfh --reference baseline \
+    --warmup 8 --repeat 60 --output /dev/shm/abcdfh_comparison
+```
 
 公共文件不是运行时 dispatcher。每个版本单独编译为独立的 object、kernel、VF、launch 和 torch.ops。
 共享源码、版本选择、Host 头文件的哈希写入 manifest 和共享库；加载时核对，避免拿旧库测试新源码。
@@ -110,7 +139,7 @@ PYTHON=python3 bash run_plan_suite.sh 1
 ```
 
 末尾1是逻辑卡号。脚本先做MTP等边界审计和四场景逐调用正确性审计，
-通过后采集四个场景的真实kernel耗时，默认每版68次，构成17路执行位置的四轮轮转。
+通过后采集四个场景的真实kernel耗时，默认每版72次，构成18路执行位置的四轮轮转。
 库为 `build/libsimt_plan_variants_ops.so`，只包含本轮版本。
 
 ```bash

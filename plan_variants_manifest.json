@@ -323,6 +323,24 @@
         "symbol_aliases.h": "3511e66ff96165c8f2e17923236b5353728a334c4afe9e9281dc910c4a6cd0c7",
         "variant_config.h": "ffea0aff7164ffc70cd15198c6839aa035bb3be8dcddadd0629e67214e60b0cb"
       }
+    },
+    {
+      "name": "abcdfh",
+      "op_name": "plan_abcdfh",
+      "kernel_name": "sparse_kv_plan_kernel_plan_abcdfh",
+      "path": "csrc/plan_variants/17_abcdfh",
+      "points": "ABCDFH",
+      "description": "ABCD + Scan 总数特化 + tile 同步削减",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "file_sha256": {
+        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+        "plugin.cpp": "daa0d211d4cb80c3f74150e4554f5d4fe19e4c5e670e6593bdc69a028b3880bb",
+        "symbol_aliases.h": "838b577aa2cf93f8c6332aa8c18a7f16a051345501f3649ce015c25aba328b95",
+        "variant_config.h": "01af6f79f0f76395adfa47d7178add879fed5c1179a8286e06b25223254e3f9a"
+      }
     }
   ],
   "shared_file_sha256": {
