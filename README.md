@@ -167,6 +167,28 @@ bash profile_kernel.sh --active 50              # 加大采样
 
 采集目录在 `/dev/shm/kvprof.XXXXXX`（trace 文本量大，避免写磁盘；`KV_PROFILE_ROOT` 可覆盖），汇总写入 `traces/run-*/summary.json`：两路 kernel 的 P50/P95/min/max、原始样本与 `echo_over_simt_kernel_p50`。只统计 `sparse_kv_plan_kernel` / `echo_lru_kernel`，restore 的 copy_ 等任务按名字过滤。
 
+### NPU：线程数 / blockNum / batch 消融
+
+三组消融旋钮：每核线程数（编译期常量 `ECHO_LRU_THREAD_NUM`，需独立构建目录）、Echo blockNum（运行期 `--blocks`）、rows/batch 形态（`--rows`）。建议矩阵：threads∈{1024,768,512,256} × 4 场景，再加 blocks∈{32,16,8} 与 rows∈{32,64,128}（后两组用默认 1024 线程构建）。
+
+```bash
+# 线程数消融（每次独立构建目录，互不覆盖；N != 1024 时产物在 build_t{N}/）
+bash build.sh --soc=ascend950 --threads=512
+bash profile_kernel.sh --library build_t512/libsimt_vs_echo_ops.so
+
+# blockNum / rows 消融（用默认 1024 线程构建）
+bash build.sh --soc=ascend950
+python3 compare.py --device 1 --blocks 16 --warmup 10 --repeat 50 --json results/blocks16.json
+bash profile_kernel.sh --blocks 16
+bash profile_kernel.sh --rows 64   # 每核 2 行（生产 batch>核数形态）
+```
+
+解读要点：
+
+- **256 线程时 OpMissCumsum 走 t0 串行**（并行门上限 4×线程=1024 < topk 2048），该配置的 Step6 耗时含串行回退，与 512/768/1024 线程不可直接比较，数据解读需标注；512 线程时走每线程 4 元素路径（512×4=2048 恰好覆盖 topk）。
+- `--blocks` 覆盖的是请求值：实际 `blocks = ceil(rows / ceil(rows/请求值))`，向上取整可能令实际 blocks 小于请求值（如 rows=32 请求 9 实际得 8）；尾核非空由公式自动保证，超出向量核数由 plugin CHECK 拦截。compare.py 的 results JSON 与 profile_kernel.py 的 summary JSON 均在 `blocks_override` 字段记录请求值，便于归因。
+- 线程数消融看**栅栏成本 vs 访存轮数**的权衡：线程减少使每次 `asc_syncthreads` 变便宜，但行内 grid-stride 扫列轮数变多、OpMissCumsum 并行门收紧；blocks/rows 消融看**行串行扩展性**（每核行数增加时 t0 串行子步与行循环的伸缩）。
+
 ## 3. 共同输入到底是什么
 
 默认尺寸：`rows=32, topk=2048, capacity=4096, max_token=262144`。

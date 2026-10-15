@@ -1,80 +1,56 @@
 {
-  "manifest_revision": "dir12-doc-2026-10-15",
+  "manifest_revision": "ablation-2026-10-15",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
   "echo_revision": "radix-select-skip-local-2026-10-15",
   "files": [
     {
-      "path": "build.sh",
-      "sha256": "6bbc278c98b7da45ab971630ce2c70f9ce7019984424d833306f8355cbaa97ff",
-      "bytes": 2272,
-      "role": "构建入口：普通构建到 build/，ECHO_PERF_STEP=ON/--perf-step 打点构建到 build_perf/"
+      "path": ".gitattributes",
+      "sha256": "a4d46fbdab08305b4c723d9d3623e82a95a3b6495454ff0f63ff09cb4b668003",
+      "bytes": 282,
+      "role": "强制 LF 行尾"
     },
     {
-      "path": "profile_kernel.sh",
-      "sha256": "bb386e41ce672d81773f1d416f3baa8964aa3e1a4b08bf752117ca854ebc052f",
-      "bytes": 1030,
-      "role": "kernel 级 profile 采集包装：/dev/shm 采集目录 + 环境清理 + 日志"
-    },
-    {
-      "path": "profile_kernel.py",
-      "sha256": "ba5ae048446769d54a1ade996b0b8dc7487ccb63ef2d0fa51941335394e686bd",
-      "bytes": 10984,
-      "role": "kernel 级精确耗时：torch_npu.profiler 抓目标 kernel P50/P95/min/max"
+      "path": ".gitignore",
+      "sha256": "fb35b5d4da247adf7cd294468e3dda49fb54608f7a24e3a49bca73d2112e8d85",
+      "bytes": 81,
+      "role": "忽略构建产物/结果/缓存"
     },
     {
       "path": "CMakeLists.txt",
-      "sha256": "d9d9f6def344725f007ed9e0ec28883e885f25bd1631459807fe4ca484ae9888",
-      "bytes": 7691,
+      "sha256": "c108103b574deee24b9d115ac4af940f2a2a66a0cce2fcca201f63c0edb99b87",
+      "bytes": 8657,
       "role": "顶层编译配置：bisheng 编译 kernel、g++ 编译 plugin；ECHO_PERF_STEP 选项"
     },
     {
-      "path": "compare.py",
-      "sha256": "cd37393c7ca548c5f8eb1a10b86668b48487eb8b267c5631d704f7882dc98e60",
-      "bytes": 28037,
-      "role": "正式性能对比与正确性校验入口（SIMT vs Echo）"
+      "path": "README.md",
+      "sha256": "e4f207ab45b309bcb4d283809c9e77197d641f567a9e3370f74a7c8afbe641d5",
+      "bytes": 29520,
+      "role": "阅读指南、运行说明与消融实验章节"
     },
     {
-      "path": "echo_perf_step.py",
-      "sha256": "d576826011daaaedb3fafe56825bd497481c146462af3286d187512bd17bd767",
-      "bytes": 13256,
-      "role": "ECHO_PERF_STEP 构建的分步耗时统计（诊断用）"
+      "path": "build.sh",
+      "sha256": "f14951624e3477fab11dfb0e9ba49141134b9c32f97d9c7ec0b9d808723259b0",
+      "bytes": 3571,
+      "role": "构建入口：--threads=N（消融）独立 build_t{N} 目录；ECHO_PERF_STEP 打点构建"
     },
     {
       "path": "checks/check_echo_kernel_host.py",
-      "sha256": "e76874216176448a73843ccf49dcdadca4ef11c99f94faba7501f5fbdcc827f0",
-      "bytes": 16489,
-      "role": "CPU 并行回归：169 项（含跳趟/回退自一致性），ASan/UBSan"
+      "sha256": "7c8e8fa20ba3d173a7c4fa4f8d8e16ad19a150e191857e0ed0f7e411d859e504",
+      "bytes": 16802,
+      "role": "CPU 并行回归：171 项（含跳趟/回退/4元素扫描），ASan/UBSan"
     },
     {
-      "path": "csrc/simt/sparse_kv_plan_kernel.cpp",
-      "sha256": "44aaa1be11cb6b06c573ed23811306c74c02be338db6318bd4b8567006dace13",
-      "bytes": 25910,
-      "role": "SIMT 对照基线 kernel（逐字保留，勿改）"
-    },
-    {
-      "path": "csrc/simt/sparse_kv_plan_launch.h",
-      "sha256": "1b2bc56c4a0035b0eb545aefac667a74b9d56d097046cd6b3be744ba4f031efa",
-      "bytes": 5145,
-      "role": "SIMT 对照基线 launch/tiling 构造（逐字保留，勿改）"
-    },
-    {
-      "path": "csrc/simt/sparse_kv_plan_config.h",
-      "sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
-      "bytes": 1514,
-      "role": "SIMT 对照基线常量（逐字保留，勿改）"
-    },
-    {
-      "path": "csrc/simt/sparse_kv_plan_plugin.cpp",
-      "sha256": "4da3cb003530637eaaa064bd94bd0dde44c28c253ec0db705420b07b88c3b236",
-      "bytes": 12570,
-      "role": "SIMT 对照基线 plugin（逐字保留，勿改）"
+      "path": "compare.py",
+      "sha256": "089b0f3afccf3a6c8fb4a7c2b4b56cb943752df1c4ee2f43f23c00d3ba961db2",
+      "bytes": 28863,
+      "role": "正式性能对比与正确性校验入口（SIMT vs Echo）；--blocks 消融覆盖"
     },
     {
       "path": "csrc/echo/echo_lru_kernel.h",
-      "sha256": "4f008e83394ba61cf0809f988db232f720dc3ce28093856459a1ad25df548c52",
-      "bytes": 63139,
-      "role": "Echo 设备计算：radix select（跳趟+本地决策）+ warp 协作 + 分步打点"
+      "sha256": "12d3ec95ca5dc075cfcdd080a2a9bada6c068dda80d2b89e5b2d32cf4e2c6daf",
+      "bytes": 68489,
+      "role": "Echo 设备计算：radix select（跳趟+本地决策）+ warp 协作 + 4元素扫描路径"
     },
     {
       "path": "csrc/echo/echo_lru_launch.cpp",
@@ -89,16 +65,40 @@
       "role": "Echo workspace 公式与启动声明"
     },
     {
-      "path": "csrc/echo/echo_lru_tiling.h",
-      "sha256": "f9f777a8fe4cbe8da5e40ea1b894a27d0f5061bd30999f47be4e322bda61d94f",
-      "bytes": 4540,
-      "role": "Echo tiling 与 UB/分步常量"
-    },
-    {
       "path": "csrc/echo/echo_lru_plugin.cpp",
       "sha256": "6acf435695bfe04a8e48b27a8daa169184b50e1de055422cfa72286cd9bedcb0",
       "bytes": 7554,
       "role": "Echo torch.ops plugin"
+    },
+    {
+      "path": "csrc/echo/echo_lru_tiling.h",
+      "sha256": "622b103bfb93af0f8c424fd78e2f21a997602b678829fb5d24e39584313baea2",
+      "bytes": 5481,
+      "role": "Echo tiling/UB/分步常量；线程数可经 ECHO_LRU_THREAD_NUM_OVERRIDE 覆盖"
+    },
+    {
+      "path": "csrc/simt/sparse_kv_plan_config.h",
+      "sha256": "6cc7566688348a7ea2aee55a29c656b6e6418fd462bd57320e98298e80ad4f73",
+      "bytes": 1514,
+      "role": "SIMT 对照基线常量（逐字保留，勿改）"
+    },
+    {
+      "path": "csrc/simt/sparse_kv_plan_kernel.cpp",
+      "sha256": "44aaa1be11cb6b06c573ed23811306c74c02be338db6318bd4b8567006dace13",
+      "bytes": 25910,
+      "role": "SIMT 对照基线 kernel（逐字保留，勿改）"
+    },
+    {
+      "path": "csrc/simt/sparse_kv_plan_launch.h",
+      "sha256": "1b2bc56c4a0035b0eb545aefac667a74b9d56d097046cd6b3be744ba4f031efa",
+      "bytes": 5145,
+      "role": "SIMT 对照基线 launch/tiling 构造（逐字保留，勿改）"
+    },
+    {
+      "path": "csrc/simt/sparse_kv_plan_plugin.cpp",
+      "sha256": "4da3cb003530637eaaa064bd94bd0dde44c28c253ec0db705420b07b88c3b236",
+      "bytes": 12570,
+      "role": "SIMT 对照基线 plugin（逐字保留，勿改）"
     },
     {
       "path": "docs/echo_lru_deep_dive.md",
@@ -107,22 +107,22 @@
       "role": "深入解读文档（随迭代同步更新）"
     },
     {
-      "path": "README.md",
-      "sha256": "7aa895e924f73dfd9d8cb73cc0d0fda4fdd0885997dd888398c26d7bf6ec298d",
-      "bytes": 27614,
-      "role": "阅读指南与运行说明"
+      "path": "echo_perf_step.py",
+      "sha256": "d576826011daaaedb3fafe56825bd497481c146462af3286d187512bd17bd767",
+      "bytes": 13256,
+      "role": "ECHO_PERF_STEP 构建的分步耗时统计（诊断用）"
     },
     {
-      "path": ".gitignore",
-      "sha256": "872fd170c9cf04baaf1f14737e6cebb430ce42824d504e584abea6bb6e5c0e89",
-      "bytes": 56,
-      "role": "忽略构建产物/结果/缓存"
+      "path": "profile_kernel.py",
+      "sha256": "3aec05dbd6736ef6be54eae5e0fabb99471b212c27c8b01e001adced29dc234d",
+      "bytes": 11285,
+      "role": "kernel 级精确耗时（profiler）；--blocks 透传"
     },
     {
-      "path": ".gitattributes",
-      "sha256": "a4d46fbdab08305b4c723d9d3623e82a95a3b6495454ff0f63ff09cb4b668003",
-      "bytes": 282,
-      "role": "强制 LF 行尾"
+      "path": "profile_kernel.sh",
+      "sha256": "bb386e41ce672d81773f1d416f3baa8964aa3e1a4b08bf752117ca854ebc052f",
+      "bytes": 1030,
+      "role": "kernel 级 profile 采集包装：/dev/shm 采集目录 + 环境清理 + 日志"
     }
   ],
   "echo_update": {
@@ -141,7 +141,8 @@
       "[P4] 栅栏削减（步骤 40→31）",
       "[B+C1+C2] Argtopk 重构 + 无淘汰跳过 + 末行栅栏（full_cache 509K → 309K）",
       "[方向1] Argtopk 自适应跳趟（fifo 前导零字节，放不下回退全趟；待服务器验证）",
-      "[方向2] 决策本地化（栅栏 3→2/趟，scalar 无读者；待服务器验证）"
+      "[方向2] 决策本地化（栅栏 3→2/趟，scalar 无读者；待服务器验证）",
+      "[消融基础设施] ECHO_LRU_THREADS 编译期可配（kernel/plugin 同值注入，static_assert 约束 [64,1024]×32）；OpMissCumsum 增 4 元素/线程路径（512 线程 × 4 = 2048，双控制槽链式扫描）；compare.py/profile_kernel.py 增 --blocks 覆盖。注：4 元素路径 rank(p1)=t0+e1 （规格笔误 t01+e1 由实现侧以 checks golden 纠正）"
     ],
     "transcription_fixes": [
       "scalar[0]==0 误用比较符及 scalar[2] 未初始化；直方图候选过滤 prefix 位对齐错误",
@@ -150,7 +151,7 @@
       "tiling 恢复 ARGTOPK_GM_NPAD_MAX；launch workspace 公式重写；plugin 填 argtopkGroupThreads"
     ],
     "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出；padding 索引仅在越过有效区时按序补齐",
-    "verification": "CPU: checks 169 项 ASan/UBSan 通过（4 个 fifo 变体，跳趟/回退输出与全趟 golden 逐位一致）；bisheng 两配置编译通过（含编译器坑规避）；kernel 级 P50: warm 0.93-0.96×、cold 1.39×、full 2.27×（方向1+2 待测）。"
+    "verification": "CPU: checks 171 项通过（新增 300/512 档走 4 元素路径）；bisheng 三配置（默认/512 覆盖/打点）编译通过。kernel 级 P50: warm 0.91-0.95×、cold 1.38×、full 1.75×（162.16μs）。"
   },
   "note": "echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
 }

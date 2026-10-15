@@ -2,6 +2,8 @@ __pycache__/
 results/
 build/
 build_perf/
+build_t*/
+build_perf_t*/
 *.so
 *.o
 *.log

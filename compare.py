@@ -239,7 +239,7 @@ def check_common_semantics(case, simt, echo):
 # =============================================================================
 # 3. 分配 NPU 张量：初始快照与工作状态分开，避免 copy_ 的源被 kernel 改写
 # =============================================================================
-def prepare_npu(torch, case, echo_initial, device):
+def prepare_npu(torch, case, echo_initial, device, blocks_override=None):
     def upload(array):
         return torch.from_numpy(np.ascontiguousarray(array)).to(device)
 
@@ -271,9 +271,16 @@ def prepare_npu(torch, case, echo_initial, device):
 
     # Echo 一核处理连续几行；尾核必须非空，不能简单使用 min(rows, cores)。
     cores = torch.ops.sparse_kv_plan_op.echo_lru_core_count()
-    budget = min(rows, cores)
-    rows_per_core = (rows + budget - 1) // budget
-    blocks = (rows + rows_per_core - 1) // rows_per_core
+    if blocks_override is None:
+        budget = min(rows, cores)
+        rows_per_core = (rows + budget - 1) // budget
+        blocks = (rows + rows_per_core - 1) // rows_per_core
+    else:
+        # 消融实验覆盖 blockNum：只校验 1..rows（超过核数由 plugin 侧 CHECK 拦截）。
+        if not (1 <= blocks_override <= rows):
+            raise ValueError(f"blocks_override 必须在 1..rows（当前 rows={rows}）内: {blocks_override}")
+        rows_per_core = (rows + blocks_override - 1) // blocks_override
+        blocks = (rows + rows_per_core - 1) // rows_per_core  # 向上取整可能小于请求值，正常
     npad = 1 << capacity.bit_length()  # next_pow2(capacity+1)，4096→8192。
     base = rows * (capacity + 1 + 4 + 3 * topk)
     # 有意按旧版 kernel 的上界公式分配（含 GM ping-pong/直方图占位段）。
@@ -370,6 +377,8 @@ def main():
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--device", type=int, default=1, help="逻辑 NPU 卡号")
     parser.add_argument("--scenario", choices=("all", *SCENARIOS), default="all")
+    parser.add_argument("--blocks", type=int, default=None,
+                        help="覆盖 Echo blockNum（默认 min(rows,cores)）；1..rows，尾核非空由公式自动保证")
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repeat", type=int, default=50)
     parser.add_argument("--audit-repeat", type=int, default=3, help="计时前重复正确性审计次数")
@@ -426,6 +435,7 @@ def main():
                 (Path(__file__).resolve().parent / "csrc/echo/echo_lru_kernel.h").read_bytes()).hexdigest(),
             "timing": "Event: public torch.ops stream interval including tiling H2D and host submission gaps; restore/validation excluded. Host: record+invoke+record+synchronize.",
             "shape": {k: getattr(args, k) for k in ("rows", "topk", "capacity", "max_token")},
+            "blocks_override": args.blocks,  # None=默认 min(rows,cores)；消融时记录便于归因
             "seed": args.seed, "warmup": args.warmup, "repeat": args.repeat,
             "audit_repeat": args.audit_repeat, "verify_each_sample": args.verify_each_sample,
         }
@@ -445,7 +455,7 @@ def main():
             print("  CPU 参考与共同语义检查通过（未运行 NPU）", flush=True)
             continue
 
-        inputs, initial, states = prepare_npu(torch, case, echo_initial, device)
+        inputs, initial, states = prepare_npu(torch, case, echo_initial, device, args.blocks)
 
         # A. 重复审计：持久状态恢复；输出及 scratch 污染，排除“读到旧答案”的假通过。
         for iteration in range(args.audit_repeat):

@@ -137,6 +137,8 @@ def main():
     parser.add_argument("--capacity", type=int, default=4096)
     parser.add_argument("--max-token", type=int, default=262144)
     parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--blocks", type=int, default=None,
+                        help="覆盖 Echo blockNum（默认 min(rows,cores)）；1..rows，尾核非空由公式自动保证")
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--active", type=int, default=20)
     parser.add_argument("--library", type=Path,
@@ -171,6 +173,7 @@ def main():
         "device": torch.npu.get_device_name(args.device),
         "library": str(library),
         "shape": {k: getattr(args, k) for k in ("rows", "topk", "capacity", "max_token")},
+        "blocks_override": args.blocks,  # None=默认 min(rows,cores)；消融时记录便于归因
         "seed": args.seed, "warmup": args.warmup, "active": args.active,
         "scenarios": {},
     }
@@ -184,7 +187,7 @@ def main():
             "simt": bench.reference_simt(case),
             "echo": bench.reference_echo(case, echo_initial),
         }
-        inputs, initial, states = bench.prepare_npu(torch, case, echo_initial, device)
+        inputs, initial, states = bench.prepare_npu(torch, case, echo_initial, device, args.blocks)
 
         # 采集之前先检查两版结果（防带病采集）。
         for name in ("simt", "echo"):

@@ -209,14 +209,18 @@ try{
         require(atomicCalls==0,"[P0] OpHitMiss must not use atomics");
         ++checks;
     }
-    // ---- 3) OpMissCumsum: 并行扫描 (topkDim<=2*blockDim) 与串行回退 ----
-    for(uint32_t topk:{4u,64u,129u,256u,2048u}){
+    // ---- 3) OpMissCumsum: 并行扫描与串行回退 ----
+    // blockDim=128: topk ≤ 256 (且 2*topk ≤ 8192) 走 2 元素并行路径;
+    //   300/512 走 4 元素两次链式扫描路径 (topk ≤ 4*blockDim=512 且 4*topk ≤ 8192);
+    //   2048 走 t0 串行回退。golden (串行参考) 逻辑不变。
+    for(uint32_t topk:{4u,64u,129u,256u,300u,512u,2048u}){
         constexpr uint32_t R=3;
         uint32_t eff=topk>7?topk-3:topk;   // 尾部留 inactive 区
         std::mt19937 rng(topk*7+1);
         std::vector<int32_t> cur(R*topk),pos(R*topk),rank(R*topk,-777),mpos(R*topk,-777);
         for(uint32_t i=0;i<R*topk;++i){cur[i]=(rng()%3==0)?I32_MAX:static_cast<int32_t>(rng()%4097);pos[i]=static_cast<int32_t>(rng()%9000);}
-        std::vector<int32_t> scan(std::max<uint32_t>(2*topk+16,80),-777);  // [P3] 只需 warp scratch(65)+哨兵余量
+        // [P3] 只需 warp scratch (warpTotals[32]+warpBases[32]+ctrlA/ctrlB 两个控制槽 = 66) + 哨兵余量
+        std::vector<int32_t> scan(std::max<uint32_t>(2*topk+16,80),-777);
         launch([&]{OpMissCumsum(R,topk,eff,R,R,cur.data(),pos.data(),rank.data(),mpos.data(),scan.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t serial=0;

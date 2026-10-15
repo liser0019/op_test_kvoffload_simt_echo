@@ -97,12 +97,20 @@ message(STATUS "torch lib: ${TORCH_LIB_DIR}; torch_npu: ${TORCH_NPU_DIR}")
 # kernel 在 workspace 尾部写每核分步 clock() 周期（EchoWorkspaceElements 同步扩容），
 # 供 echo_perf_step.py 读取；会改变计时特性，正式性能对比（compare.py）请保持 OFF。
 option(ECHO_PERF_STEP "Instrument echo_lru per-step cycles into workspace" OFF)
+# Echo 每核线程数（消融实验用，32 的倍数，[64,1024]）。
+# ⚠ kernel（下方 ECHO_FLAGS）与 plugin（下方 target_compile_definitions）两处必须注入
+# 同一个 ECHO_LRU_THREAD_NUM_OVERRIDE 值：plugin 用 ECHO_LRU_THREAD_NUM 做
+# <<<blockNum, ECHO_LRU_THREAD_NUM>>> 的 blockDim，两处不同值会导致
+# kernel __launch_bounds__ 与实际启动线程数静默错位。
+set(ECHO_LRU_THREADS "1024" CACHE STRING "Echo 每核线程数（消融实验用，32 的倍数，[64,1024]）")
 set(SIMT_FLAGS
     --cce-auto-sync=off -Wno-deprecated-declarations
     -mllvm -cce-vf-remove-membar=false
     -mllvm -cce-aicore-hoist-movemask=false
     -mllvm -cce-aicore-dcci-before-kernel-end=false)
 set(ECHO_FLAGS --enable-simt -Wno-deprecated-declarations)
+# 与 plugin 侧 target_compile_definitions 的 ECHO_LRU_THREAD_NUM_OVERRIDE 必须同值（见上）。
+list(APPEND ECHO_FLAGS -DECHO_LRU_THREAD_NUM_OVERRIDE=${ECHO_LRU_THREADS})
 if(ECHO_PERF_STEP)
     list(APPEND ECHO_FLAGS -DECHO_PERF_STEP)
 endif()
@@ -157,5 +165,8 @@ target_link_libraries(simt_vs_echo_ops PRIVATE
 if(ECHO_PERF_STEP)
     target_compile_definitions(simt_vs_echo_ops PRIVATE ECHO_PERF_STEP)
 endif()
+# 与 ECHO_FLAGS 里 kernel 侧的 -DECHO_LRU_THREAD_NUM_OVERRIDE 必须同值：
+# plugin 用 ECHO_LRU_THREAD_NUM 做 <<<>>> 的 blockDim（echo_lru_launch.cpp）。
+target_compile_definitions(simt_vs_echo_ops PRIVATE ECHO_LRU_THREAD_NUM_OVERRIDE=${ECHO_LRU_THREADS})
 set_target_properties(simt_vs_echo_ops PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

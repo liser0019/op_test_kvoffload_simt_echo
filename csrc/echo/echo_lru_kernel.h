@@ -730,7 +730,10 @@ __aicore__ inline void OpAllocPriority(
 //   = p1 miss (总数 ≤ topkDim ≤ 2048 < 2^12, 无跨字段进位)。p0 位 = 线程号,
 //   p1 位 = 线程号 + Bm, 均为连续映射 → 排名可由打包前缀直接拼出:
 //   rank(p0=t) = E0(t); rank(p1=t+Bm) = TotalMiss0 + E1(t)。
-// 条件不满足 (topkDim > 2*blockDim 或 2*topkDim > 8192) 时回退 t0 串行累加。
+// 2 元素门不满足而 4 元素门满足 (topkDim ≤ 4*blockDim 且 4*topkDim ≤ 8192) 时走
+//   每线程 4 元素两次链式扫描 ([消融 2026-10-15] 512 线程下 topk=2048 仍可并行,
+//   见分支内注释); 4 元素门也不满足 (topkDim > 4*blockDim 或 4*topkDim > 8192)
+//   时回退 t0 串行累加。
 // 语义与串行版逐字段一致: wsMissRank = miss 的 exclusive 前缀秩,
 // missPos = miss ? pos : 0。
 __aicore__ inline void OpMissCumsum(
@@ -775,6 +778,92 @@ __aicore__ inline void OpMissCumsum(
             }
             if (p1 < topkDim) {
                 wsMissRankGm[rowOff + p1] = ind1 ? (total0 + e1) : 0;
+            }
+        }
+        return;
+    } else if (topkDim <= 4u * Bm && 4u * topkDim <= ARGTOPK_UB_NPAD_MAX) {
+        // [消融 2026-10-15] 每线程 4 元素路径, 服务于 512 线程消融 (512×4=2048,
+        //   topk=2048 时 2 元素并行门 512×2=1024 不够, P3 收益会归零)。每线程认领
+        //   4 个连续映射位置 p0=t, p1=t+Bm, p2=t+2Bm, p3=t+3Bm; 位置序
+        //   [0,Bm)=p0s, [Bm,2Bm)=p1s, [2Bm,3Bm)=p2s, [3Bm,4Bm)=p3s。
+        //   两次链式扫描 (12bit 字段安全: 各 tile 的 miss 总数 ≤ topkDim ≤ 2048
+        //   < 4096, 打包加法无跨字段进位): excl1 = scan(ind0 | ind1<<12) 覆盖
+        //   [0,2Bm), excl2 = scan(ind2 | ind3<<12) 覆盖 [2Bm,4Bm)。
+        //   ⚠ 两个控制槽: PackedBlockScan 会把全块 grand total 写入传入 control 的
+        //   control[0], 第二次扫描会覆盖第一次的总数 → ctrlA=scanUb+64 (scan1 用),
+        //   ctrlB=scanUb+65 (scan2 用)。warpTotals=scanUb / warpBases=scanUb+32
+        //   两次共享, 顺序安全: scan2 的写与 scan1 的读被 scan1 的 B2 / scan2 的
+        //   B1 隔开 (论证同 PackedBlockScan 注释 (a)/(b): 线程 X 在 scan1 返回前对
+        //   warpBases 的读先于 scan2 t0 在 B1' 之后的写; scan1 t0 在 B2 之前对
+        //   warpTotals 的读先于 scan2 lane31 在 B2 释放之后的写)。
+        //   rank 拼装 (p1 在 tile1 段内, 前缀 = tile0 总数 + 段内偏移; p2/p3 在
+        //   后续 tile 段内, 前缀 = 前面所有 tile 的完整总数 + 段内偏移, 即
+        //   p3 的前缀 = 前两个 tile 的总数 + 第三个 tile 的 p2 总数 + 段内偏移):
+        //     rank(p0=t)     = e0
+        //     rank(p1=t+Bm)  = t0 + e1
+        //     rank(p2=t+2Bm) = t01 + e2
+        //     rank(p3=t+3Bm) = t01 + t2 + e3
+        //   其中 t0 = [0,Bm) 的 miss 总数 (ctrlA 低 12bit), t01 = [0,2Bm) 的 miss
+        //   总数 (ctrlA 两字段和), t2 = [2Bm,3Bm) 的 miss 总数 (ctrlB 低 12bit)。
+        //   ⚠ rank(p1) 不能写 t01+e1: p1 位于 tile1 段内而非段后, 那样会把
+        //   tile1 自己的总数也计入 (多加 total1), rank 偏大。
+        int32_t* warpTotals = scanUb;
+        int32_t* warpBases  = scanUb + 32;
+        int32_t* ctrlA      = scanUb + 64;
+        int32_t* ctrlB      = scanUb + 65;
+        for (uint32_t r = 0; r < rowCount; ++r) {
+            uint32_t row = startRow + r;
+            if (row >= R) break;
+            uint32_t rowOff = row * topkDim;
+            uint32_t p0 = t;
+            uint32_t p1 = t + Bm;
+            uint32_t p2 = t + 2u * Bm;
+            uint32_t p3 = t + 3u * Bm;
+
+            int32_t ind0 = 0;
+            if (p0 < topkDim) {
+                bool miss0 = (p0 < effTopk) && (curSlotsGm[rowOff + p0] == I32_MAX);
+                missPosGm[rowOff + p0] = miss0 ? posGm[rowOff + p0] : 0;
+                ind0 = miss0 ? 1 : 0;
+            }
+            int32_t ind1 = 0;
+            if (p1 < topkDim) {
+                bool miss1 = (p1 < effTopk) && (curSlotsGm[rowOff + p1] == I32_MAX);
+                missPosGm[rowOff + p1] = miss1 ? posGm[rowOff + p1] : 0;
+                ind1 = miss1 ? 1 : 0;
+            }
+            int32_t ind2 = 0;
+            if (p2 < topkDim) {
+                bool miss2 = (p2 < effTopk) && (curSlotsGm[rowOff + p2] == I32_MAX);
+                missPosGm[rowOff + p2] = miss2 ? posGm[rowOff + p2] : 0;
+                ind2 = miss2 ? 1 : 0;
+            }
+            int32_t ind3 = 0;
+            if (p3 < topkDim) {
+                bool miss3 = (p3 < effTopk) && (curSlotsGm[rowOff + p3] == I32_MAX);
+                missPosGm[rowOff + p3] = miss3 ? posGm[rowOff + p3] : 0;
+                ind3 = miss3 ? 1 : 0;
+            }
+            // 两次链式扫描: scan1 打包 [0,2Bm) 的 miss 标志, scan2 打包 [2Bm,4Bm)。
+            int32_t excl1 = PackedBlockScan(ind0 | (ind1 << 12), warpTotals, warpBases, ctrlA);
+            int32_t excl2 = PackedBlockScan(ind2 | (ind3 << 12), warpTotals, warpBases, ctrlB);
+            uint32_t e0 = (uint32_t)excl1 & 0xFFFu,  e1 = (uint32_t)excl1 >> 12;
+            uint32_t e2 = (uint32_t)excl2 & 0xFFFu,  e3 = (uint32_t)excl2 >> 12;
+            uint32_t t0  = (uint32_t)ctrlA[0] & 0xFFFu;                                  // [0,Bm) 的 miss 总数
+            uint32_t t01 = t0 + ((uint32_t)ctrlA[0] >> 12);                              // [0,2Bm) 的 miss 总数
+            uint32_t t2  = (uint32_t)ctrlB[0] & 0xFFFu;                                  // [2Bm,3Bm) 的 miss 总数
+            // rank(p0)=e0;  rank(p1)=t0+e1;  rank(p2)=t01+e2;  rank(p3)=t01+t2+e3
+            if (p0 < topkDim) {
+                wsMissRankGm[rowOff + p0] = ind0 ? (int32_t)e0 : 0;
+            }
+            if (p1 < topkDim) {
+                wsMissRankGm[rowOff + p1] = ind1 ? (int32_t)(t0 + e1) : 0;
+            }
+            if (p2 < topkDim) {
+                wsMissRankGm[rowOff + p2] = ind2 ? (int32_t)(t01 + e2) : 0;
+            }
+            if (p3 < topkDim) {
+                wsMissRankGm[rowOff + p3] = ind3 ? (int32_t)(t01 + t2 + e3) : 0;
             }
         }
         return;

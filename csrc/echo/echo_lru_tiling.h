@@ -17,9 +17,21 @@ namespace ascend_kernel {
 
 // 纯 SIMT 每核启动线程数. __launch_bounds__ 与 host <<<grid, block, dynUB, stream>>>
 // 的 block 维同源. kernel 内部全部 blockDim.x 自适应, 改此值即改每核线程数.
-// [性能对比] 设 1024 (与对照算子同规模). 旧值 512 注释保留便于回退:
-// constexpr uint32_t ECHO_LRU_THREAD_NUM = 512;
+// [线程数消融] 可用 CMake 缓存变量 ECHO_LRU_THREADS 覆盖 (build.sh --threads=N 或
+//   环境变量 ECHO_LRU_THREADS), CMake 经 -DECHO_LRU_THREAD_NUM_OVERRIDE=N 同时注入
+//   kernel 与 plugin 两处 (必须同值: plugin 用该常量做 <<<>>> 的 blockDim).
+//   约束: 32 的倍数 (warp 大小, 见下方 static_assert)、>= 64 (覆盖
+//   ARGTOPK_GROUP_THREADS 的并行直方图切片)、<= 1024 (AIV launch 上限).
+//   用法: bash build.sh --threads=512 → 产物在 build_t512/ (默认 1024 在 build/).
+//   [性能对比] 默认设 1024 (与对照算子同规模); 消融矩阵见 README "线程数 / blockNum / batch 消融".
+#ifdef ECHO_LRU_THREAD_NUM_OVERRIDE
+constexpr uint32_t ECHO_LRU_THREAD_NUM = ECHO_LRU_THREAD_NUM_OVERRIDE;
+#else
 constexpr uint32_t ECHO_LRU_THREAD_NUM = 1024;
+#endif
+static_assert(ECHO_LRU_THREAD_NUM % 32u == 0u, "ECHO_LRU_THREAD_NUM must be a multiple of warp size 32");
+static_assert(ECHO_LRU_THREAD_NUM >= 64u, "ECHO_LRU_THREAD_NUM must cover ARGTOPK_GROUP_THREADS");
+static_assert(ECHO_LRU_THREAD_NUM <= 1024u, "ECHO_LRU_THREAD_NUM exceeds AIV launch bounds");
 
 // ---- argtopk 缓冲上界 (host/device 共享) ----
 // [Perf 2026-10-13] OpArgtopkRow 改为 4 趟 MSB-first 基数选择 (radix select):
