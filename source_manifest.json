@@ -1,8 +1,8 @@
 {
-  "manifest_revision": "profile-2026-10-15",
+  "manifest_revision": "dir12-doc-2026-10-15",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
-  "echo_revision": "radix-select-warp-coop-2026-10-15-b",
+  "echo_revision": "radix-select-skip-local-2026-10-15",
   "files": [
     {
       "path": "build.sh",
@@ -30,21 +30,21 @@
     },
     {
       "path": "compare.py",
-      "sha256": "ba1714e8cf94fa538d037a5662f5e544c12d2fbfddf0314262f1e188fface319",
-      "bytes": 28012,
+      "sha256": "cd37393c7ca548c5f8eb1a10b86668b48487eb8b267c5631d704f7882dc98e60",
+      "bytes": 28037,
       "role": "正式性能对比与正确性校验入口（SIMT vs Echo）"
     },
     {
       "path": "echo_perf_step.py",
-      "sha256": "3c1d264038e86914beee3ae19d73b933992fda5be82672d26d8912d7bc7c4062",
-      "bytes": 13235,
+      "sha256": "d576826011daaaedb3fafe56825bd497481c146462af3286d187512bd17bd767",
+      "bytes": 13256,
       "role": "ECHO_PERF_STEP 构建的分步耗时统计（诊断用）"
     },
     {
       "path": "checks/check_echo_kernel_host.py",
-      "sha256": "ba706fed3b54f0615c1517d9b3186e865ed90f03d4fe27869ca35a78b395177a",
-      "bytes": 15395,
-      "role": "CPU 并行回归：warp 辅助 + 五个 Op 函数提取，ASan/UBSan"
+      "sha256": "e76874216176448a73843ccf49dcdadca4ef11c99f94faba7501f5fbdcc827f0",
+      "bytes": 16489,
+      "role": "CPU 并行回归：169 项（含跳趟/回退自一致性），ASan/UBSan"
     },
     {
       "path": "csrc/simt/sparse_kv_plan_kernel.cpp",
@@ -72,9 +72,9 @@
     },
     {
       "path": "csrc/echo/echo_lru_kernel.h",
-      "sha256": "64333e84bf2bbf61078dd978faebc97bd71c778b6ef408a093450be9633485cb",
-      "bytes": 59542,
-      "role": "Echo 设备计算：radix select + warp 协作（P0-P4/B/C1/C2）+ 分步打点"
+      "sha256": "4f008e83394ba61cf0809f988db232f720dc3ce28093856459a1ad25df548c52",
+      "bytes": 63139,
+      "role": "Echo 设备计算：radix select（跳趟+本地决策）+ warp 协作 + 分步打点"
     },
     {
       "path": "csrc/echo/echo_lru_launch.cpp",
@@ -101,9 +101,15 @@
       "role": "Echo torch.ops plugin"
     },
     {
+      "path": "docs/echo_lru_deep_dive.md",
+      "sha256": "f9bc8a37a027acfa4724db427587f520c723f4cf08a187b466459b168554bf8a",
+      "bytes": 70391,
+      "role": "深入解读文档（随迭代同步更新）"
+    },
+    {
       "path": "README.md",
-      "sha256": "924f5c6ece5cbdf795ada290b5559aa00c2d5760855925b26e40b94d0d74bc8d",
-      "bytes": 27543,
+      "sha256": "7aa895e924f73dfd9d8cb73cc0d0fda4fdd0885997dd888398c26d7bf6ec298d",
+      "bytes": 27614,
       "role": "阅读指南与运行说明"
     },
     {
@@ -132,10 +138,10 @@
       "[P1] Argtopk emission 并行化（full_cache 2.1M → 398K）",
       "[P2] OpFinalSlots 删除（miss 槽位由 OpSetUpdate 写回）",
       "[P3] OpMissCumsum 去 Hillis-Steele（20K → ~9K）",
-      "[P4] 栅栏削减：OpFreeSize 折进 Step1；OpAllocPop 直读 freeIdx+老栈；avail 折叠更新；删 3 个无 RAW SyncGrid；PackedBlockScan 去尾栅栏（步骤 40→31）",
-      "[B] Argtopk 重构（full_cache 410K → 待验证）：pass0 pack 与 hist0 单相位（hist0 直读 priGm）；scalar init/dbg 折进 t0 决策段；每趟 4→3 栅栏（共 23→16）；merge 256 桶并行；全部扫描只走 [0,B+1)，padding 解析式计入直方图 + emission 补齐",
-      "[C1] 无淘汰行整段跳过淘汰流水线（UB 标志，warm/cold 四步 ≈0 周期）",
-      "[C2] OpHitMiss 末行省 warpScratch 复用栅栏"
+      "[P4] 栅栏削减（步骤 40→31）",
+      "[B+C1+C2] Argtopk 重构 + 无淘汰跳过 + 末行栅栏（full_cache 509K → 309K）",
+      "[方向1] Argtopk 自适应跳趟（fifo 前导零字节，放不下回退全趟；待服务器验证）",
+      "[方向2] 决策本地化（栅栏 3→2/趟，scalar 无读者；待服务器验证）"
     ],
     "transcription_fixes": [
       "scalar[0]==0 误用比较符及 scalar[2] 未初始化；直方图候选过滤 prefix 位对齐错误",
@@ -144,7 +150,7 @@
       "tiling 恢复 ARGTOPK_GM_NPAD_MAX；launch workspace 公式重写；plugin 填 argtopkGroupThreads"
     ],
     "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出；padding 索引仅在越过有效区时按序补齐",
-    "verification": "CPU: checks 49 项 ASan/UBSan 通过；g++ mock-SIMT 全头语法检查通过；bisheng dav-3510 实际编译普通/打点 kernel 通过。NPU 审计通过；Event 口径 Echo/SIMT 全场景 0.91-1.03×；kernel 级精确对比用 profile_kernel.sh（profiler kernel_details.csv）。"
+    "verification": "CPU: checks 169 项 ASan/UBSan 通过（4 个 fifo 变体，跳趟/回退输出与全趟 golden 逐位一致）；bisheng 两配置编译通过（含编译器坑规避）；kernel 级 P50: warm 0.93-0.96×、cold 1.39×、full 2.27×（方向1+2 待测）。"
   },
   "note": "echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
 }

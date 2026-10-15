@@ -277,7 +277,7 @@ def prepare_npu(torch, case, echo_initial, device):
     npad = 1 << capacity.bit_length()  # next_pow2(capacity+1)，4096→8192。
     base = rows * (capacity + 1 + 4 + 3 * topk)
     # 有意按旧版 kernel 的上界公式分配（含 GM ping-pong/直方图占位段）。
-    # 新版 radix-select kernel 每核只用 256+8192（ECHO_PERF_STEP 构建再加 44）个元素，
+    # 新版 radix-select kernel 每核只用 256+8192（ECHO_PERF_STEP 构建再加 31（ECHO_PERF_NUM_STEPS））个元素，
     # 本公式严格大于两种布局的 plugin 侧 required，因此同一份测试可同时跑普通/打点两种构建。
     elements = ((base + 1) & ~1) + blocks * (4 * npad + 64 * 256 + 64 * 256 + 256 + 8192)
     if elements > I32_MAX:

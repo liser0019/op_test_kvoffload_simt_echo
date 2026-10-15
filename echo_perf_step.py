@@ -202,7 +202,7 @@ def main():
         check_npu_result("echo", state, expected, f"{scenario}/after-measurement")
 
         # 统计：每步取“最慢核”（max over blocks）的跨轮中位数；用 Event 总耗时标定频率。
-        step_max = np.array([s["step_max_cycles"] for s in samples], dtype=np.float64)  # [repeat, 36]
+        step_max = np.array([s["step_max_cycles"] for s in samples], dtype=np.float64)  # [repeat, ECHO_PERF_NONSPEC_STEPS]
         event_us = np.array([s["event_us"] for s in samples])
         median_cycles = np.median(step_max, axis=0)
         total_cycles = step_max.sum(axis=1)
