@@ -374,29 +374,34 @@ __aicore__ inline void OpFifoAvailUpdate(
 // ---- Step 3: free (argtopk select + release + push) ----
 // [P4 2026-10-13] OpFreeSize (独立 t0 步 + SyncGrid) 已折进 OpHitMiss 的 t0 汇总段。
 
-// per-row 基数选择 (radix select, 4 趟 MSB-first, 全定长, 无递归, 无动态分配).
+// per-row 基数选择 (radix select, MSB-first 逐字节收敛, 全定长, 无递归, 无动态分配).
 // 目标: 从打包 key 中选出 pri 最小的 freeSize 个槽 (平局按槽号升序), 写 freeIdxOut.
 //   key[i] = (i==0 || i>B || pri<0) ? I32_MAX : pri  → 全非负, 无效/填充沉底.
-// [B 2026-10-13] 栅栏与工作量重构 (重构前 full_cache 实测 ~410K 周期):
-//   (1) pass 0 的 pack(全员) 与 clear+hist0(G 路) 合并为单相位 —— hist0 直读 priGm
-//       打包计数而不读 key, 与 pack 无交叉 RAW; 独立 pack 相位及其栅栏删除;
-//   (2) scalar 初始化与 dbg dump 折进 pass 0 的 t0 决策段 (同线程, 无额外栅栏);
-//   (3) 每趟 3 栅栏: [clear+hist] → [merge] → [t0 决策] (原 4 栅栏/趟);
-//   (4) merge 改 256 桶并行 (每桶归并 G 个切片, 墙钟 G 次读; 原 G 路×4 桶 = 4G);
-//   (5) hist/pack/emission 只扫有效区 [0, B+1); P = Npad-(B+1) 个 padding 键恒为
+// [B 2026-10-15] 栅栏与工作量重构 (重构前 full_cache 实测 ~410K 周期 → 199K):
+//   (1) 首趟单相位: pack(全员) 与 clear+hist(G 路, 直读 priGm) 无交叉 RAW;
+//   (2) merge 改 256 桶并行 (每桶归并 G 个切片, 墙钟 G 次读);
+//   (3) hist/pack/emission 只扫有效区 [0, B+1); P = Npad-(B+1) 个 padding 键恒为
 //       I32_MAX, 在 merge 相位解析式计入 padByte 桶 (padIn = 选择前缀走在 I32_MAX
-//       路径上), key 数组不再写/读 padding 区; emission 越过有效区时按槽号升序
-//       补 padding 索引 [B+1, B+1+m), 与旧满扫描输出逐位一致。
-// 每趟: hist (pass 0 全量, pass>0 过滤 (v>>(shift+8))==(prefix>>(shift+8)) 两侧
-//   bit0 对齐) → merge (+padding 解析式) → t0 找第一个 cum+c >= remaining 的桶 b,
-//   更新 scalar[0]=阈值 T / scalar[1]=quota / scalar[2]=prefix / scalar[3]=完成标志。
-//   不变量 (计数含 padding): |{key < T}| + quota == fsClamp。全程 UB 无 dcci/atomic。
+//       路径上); emission 越过有效区时按槽号升序补 padding 索引, 逐位一致。
+// [方向1 2026-10-15] 自适应跳趟: pri ≤ fifo 恒成立 (t0 写 pri 的唯一来源是 fifo),
+//   fifo 的前导零字节数 z ∈ {0,1,2,3} → 跳过 pass 0..z-1, 从 byte(3-z) 起跑
+//   (快路径前缀 prefix=0: 高字节全 0 的键; I32_MAX 键 byte3=0x7F 被候选过滤天然
+//   排除)。健壮性不依赖启发式成立: 若选择在 prefix=0 候选内放不下 (b 扫到 256,
+//   即 fsClamp 超出小键总数), 回退 pass 0 完整重跑一次 —— 任何输入下输出与
+//   全趟版逐位一致。基准 fifo=4097 → 跳 2 趟。
+// [方向2 2026-10-15] 决策本地化: 桶决策是 globalCnt 的确定性函数, 全员各自重算
+//   b/prefix/remaining (本数据 break 在前几个桶, 每线程 ≤4 次 UB 读), 取代 t0
+//   串行决策 + scalar 广播 → 每趟 3→2 栅栏 ([clear+hist]→B1→[merge]→B2→[本地决策]
+//   →下一趟)。scalar 不再有读者 (emission 直接用寄存器 T/quota), 栅栏间无任何
+//   跨线程写。快路径+全趟合计: 基准只跑 2 趟 × 2 栅栏 + emission 扫描 2 + 尾 2
+//   = 8 次栅栏 (B 前为 16)。
+// 不变量 (计数含 padding): |{key < T}| + quota == fsClamp; remaining' ≥ 1 恒成立
+//   (b-loop 在 cum+c ≥ remaining 时 break, cum < remaining)。
 // 输出: 先全部 key<T (槽号升序), 再前 quota 个 key==T (槽号升序, 有效区优先,
 //   越界部分补 padding 索引), 尾部补 0 (下游按 freeSize 裁剪)。key==T 平局取
-//   最小槽号, 与稳定排序 (pri, slot) 字典序一致; key<T 组按槽号序输出 —— 本基准
-//   pri[slot]=slot 与全排序一致, 非单调 pri 时淘汰"集合"仍正确, 仅压栈序不同。
+//   最小槽号, 与稳定排序 (pri, slot) 字典序一致。
 __aicore__ inline void OpArgtopkRow(
-    uint32_t B, uint32_t Npad, uint32_t topkDim, uint32_t G,
+    uint32_t B, uint32_t Npad, uint32_t topkDim, uint32_t G, uint32_t fifoVal,
     int32_t* priGm, uint32_t row, int32_t* freeIdxOut, int32_t freeSize,
     int32_t* key,
     int32_t* hist,
@@ -420,87 +425,120 @@ __aicore__ inline void OpArgtopkRow(
     const uint32_t validN = B + 1u;         // 有效区 [0, B], 含 slot 0
     const uint32_t padN = Npad - validN;    // padding 区 [B+1, Npad), 键恒为 I32_MAX
 
-    for (uint32_t pass = 0; pass < 4; ++pass) {
-        uint32_t shift = (3u - pass) * 8u;
-        // ---- (a) pass 0: pack(全员) + clear+hist0(G 路, 直读 priGm) 单相位 ----
-        //   hist0 不读 key → 与 pack 无交叉 RAW; pass>0: clear+hist(G 路, 读 key 过滤)。
-        if (pass == 0u) {
-            for (uint32_t i = t; i < validN; i += blockDim.x) {
-                int32_t p = priGm[rowOff + i];
-                key[i] = (p < 0 || i == 0) ? I32_MAX : p;
-            }
-        }
-        if (active) {
-            int32_t* myHist = hist + t * 256u;
-            for (uint32_t b = 0; b < 256; ++b) myHist[b] = 0;
-            if (pass == 0u) {
-                for (uint32_t i = t; i < validN; i += G) {
-                    int32_t p = priGm[rowOff + i];
-                    uint32_t v = (uint32_t)((p < 0 || i == 0) ? I32_MAX : p);
-                    myHist[(v >> 24) & 0xFFu] += 1;
-                }
-            } else {
-                uint32_t prefix = (uint32_t)scalar[2];
-                for (uint32_t i = t; i < validN; i += G) {
-                    uint32_t v = (uint32_t)key[i];
-                    if ((v >> (shift + 8u)) == (prefix >> (shift + 8u))) {
-                        // 候选过滤: v 与 prefix 的已收敛高字节两侧右移到 bit0 对齐比较。
-                        myHist[(v >> shift) & 0xFFu] += 1;
+    // [方向1] fifo 前导零字节数 z → 起跑趟 startPass = z (跳过 pass 0..z-1, 至少跑 byte0)。
+    //   fifo=4097 (0x1001): byte3/byte2 为 0 → z=2。fifo=0 → 全部 pri 无效, z=3
+    //   (候选空 → 必然回退, 仅浪费一趟, 结果仍正确)。
+    uint32_t startPass = 3u;
+    if ((fifoVal >> 24) != 0u) startPass = 0u;
+    else if ((fifoVal >> 16) != 0u) startPass = 1u;
+    else if ((fifoVal >> 8) != 0u) startPass = 2u;
+
+    uint32_t T = 0u, quota = 0u;            // 选择结果 (emission 用; 全员寄存器)
+    {
+        uint32_t pass = startPass;
+        uint32_t remaining = fsClamp;
+        uint32_t prefix = 0u;
+        bool firstIter = true;              // 首迭代: pack + 直读 priGm
+        // 外层 attempt: 0 = 快路径 (startPass 起跑), 1 = [方向1] 回退全趟。
+        //   ⚠ 不用 while(true)+continue: 数据依赖 continue 跨越栅栏结构,
+        //   bisheng 前端收敛分析会段错误; 有界 for + 迭代边界 break 与旧版
+        //   scalar[3] break 同构, 已验证可编译。
+        for (uint32_t attempt = 0; attempt < 2u; ++attempt) {
+            for (; pass < 4u; ++pass) {
+                uint32_t shift = (3u - pass) * 8u;
+                bool const first = firstIter;
+                firstIter = false;
+                // ---- (a) 首迭代: pack(全员) + clear+hist(G 路, 直读 priGm, 不读 key,
+                //      与 pack 无交叉 RAW); 后续趟: clear+hist(G 路, 读 key)。
+                //      过滤用 if/else 分支而不是 pass==0 短路 —— pass 0 时
+                //      (v >> 32) 是文本可见 UB, SIMT 后端可能投机求值。----
+                if (first) {
+                    for (uint32_t i = t; i < validN; i += blockDim.x) {
+                        int32_t p = priGm[rowOff + i];
+                        key[i] = (p < 0 || i == 0) ? I32_MAX : p;
                     }
                 }
-            }
-        }
-        asc_syncthreads();
-        // ---- (b) merge: 256 桶并行 (每桶归并 G 个切片); padding 解析式计入 ----
-        {
-            uint32_t padByte = (0x7FFFFFFFu >> shift) & 0xFFu;
-            bool padIn;
-            if (pass == 0u) {
-                padIn = true;   // pass 0 无前缀; shift+8=32 会 UB, 特判。
-            } else {
-                uint32_t prefix = (uint32_t)scalar[2];
-                padIn = ((0x7FFFFFFFu >> (shift + 8u)) == (prefix >> (shift + 8u)));
-            }
-            for (uint32_t b = t; b < 256; b += blockDim.x) {
-                int32_t s = 0;
-                for (uint32_t th = 0; th < G; ++th) s += hist[th * 256u + b];
-                if (padIn && b == padByte) s += (int32_t)padN;
-                globalCnt[b] = s;
-            }
-        }
-        asc_syncthreads();
-        // ---- (c) t0: pass 0 先初始化 scalar + dbg dump, 再做桶决策 ----
-        if (t == 0) {
-            if (pass == 0u) {
-                scalar[0] = 0; scalar[1] = (int32_t)fsClamp; scalar[2] = 0; scalar[3] = 0;
-                if (dbgKey != nullptr) {
-                    for (uint32_t i = 0; i < validN; ++i) dbgKey[i] = key[i];
+                if (active) {
+                    int32_t* myHist = hist + t * 256u;
+                    for (uint32_t b = 0; b < 256; ++b) myHist[b] = 0;
+                    if (first) {
+                        // 首趟: pass==startPass。pass==0 无过滤; startPass>0 时按
+                        //   prefix=0 过滤被跳过的高字节 (I32_MAX 键 byte3=0x7F 被排除)。
+                        for (uint32_t i = t; i < validN; i += G) {
+                            int32_t p = priGm[rowOff + i];
+                            uint32_t v = (uint32_t)((p < 0 || i == 0) ? I32_MAX : p);
+                            if (pass == 0u) {
+                                myHist[(v >> shift) & 0xFFu] += 1;
+                            } else if ((v >> (shift + 8u)) == 0u) {
+                                myHist[(v >> shift) & 0xFFu] += 1;
+                            }
+                        }
+                    } else {
+                        for (uint32_t i = t; i < validN; i += G) {
+                            uint32_t v = (uint32_t)key[i];
+                            if (pass == 0u) {
+                                myHist[(v >> shift) & 0xFFu] += 1;   // 回退重跑的 pass 0
+                            } else if ((v >> (shift + 8u)) == (prefix >> (shift + 8u))) {
+                                myHist[(v >> shift) & 0xFFu] += 1;
+                            }
+                        }
+                    }
                 }
-                if (dbgCount != nullptr) {
-                    for (uint32_t b = 0; b < 256; ++b) dbgCount[b] = (uint32_t)globalCnt[b];
+                asc_syncthreads();          // B1: hist 切片写 → merge 读
+                // ---- (b) merge: 256 桶并行 (每桶归并 G 个切片); padding 解析式计入 ----
+                {
+                    uint32_t padByte = (0x7FFFFFFFu >> shift) & 0xFFu;
+                    bool padIn;
+                    if (pass == 0u) {
+                        padIn = true;       // pass 0 无前缀; (x>>32) 文本 UB, 分支规避
+                    } else {
+                        padIn = ((0x7FFFFFFFu >> (shift + 8u)) == (prefix >> (shift + 8u)));
+                    }
+                    for (uint32_t b = t; b < 256; b += blockDim.x) {
+                        int32_t s = 0;
+                        for (uint32_t th = 0; th < G; ++th) s += hist[th * 256u + b];
+                        if (padIn && b == padByte) s += (int32_t)padN;
+                        globalCnt[b] = s;
+                    }
+                }
+                asc_syncthreads();          // B2: merge 写 globalCnt → 决策读
+                // ---- (c) dbg dump (t0, 首迭代) + 全员本地决策 (无 t0 串行、无 scalar
+                //      广播、无第 3 栅栏; 决策是 globalCnt 的确定性函数 → 各线程结果
+                //      一致, 下一趟 (a) 只写自有切片/读稳定 key, 与本段读无竞争;
+                //      globalCnt 复用由下一趟 B1 保护)。----
+                if (t == 0 && first) {
+                    if (dbgKey != nullptr) {
+                        for (uint32_t i = 0; i < validN; ++i) dbgKey[i] = key[i];
+                    }
+                    // startPass>0 时为首趟 (带 prefix=0 过滤) 直方图, 语义随起跑趟变化,
+                    //   仅供诊断; 全趟路径 (startPass==0) 与旧版 pass0 全量语义一致。
+                    if (dbgCount != nullptr) {
+                        for (uint32_t b = 0; b < 256; ++b) dbgCount[b] = (uint32_t)globalCnt[b];
+                    }
+                }
+                {
+                    uint32_t cum = 0u, b = 0u;
+                    for (; b < 256u; ++b) {
+                        uint32_t c = (uint32_t)globalCnt[b];
+                        if (cum + c >= remaining) break;
+                        cum += c;
+                    }
+                    if (b >= 256u) break;   // 快路径放不下 → 外层 attempt 回退 (见下)
+                    prefix |= (b << shift);
+                    remaining -= cum;
+                    T = prefix;             // remaining' ≥ 1 恒成立 (b-loop break 语义)
+                    quota = remaining;
                 }
             }
-            uint32_t remaining = (uint32_t)scalar[1];
-            uint32_t cum = 0u;
-            uint32_t b = 0u;
-            for (; b < 256; ++b) {
-                uint32_t c = (uint32_t)globalCnt[b];
-                if (cum + c >= remaining) break;
-                cum += c;
-            }
-
-            uint32_t prefix = (uint32_t)scalar[2];
-            scalar[0] = (int32_t)(prefix | (b << shift));
-            scalar[1] = (int32_t)(remaining - cum);
-            scalar[2] = (int32_t)(prefix | (b << shift));
-            scalar[3] = (remaining - cum == 0u) ? 1 : 0;
+            if (pass >= 4u) break;          // pass 3 正常跑完, 选择完成
+            // [方向1] 快路径放不下 (剩余配额超出 prefix=0 候选总数): 回退 pass 0
+            //   完整重跑一次。key 已打包 (firstIter 已为 false, 不重 pack); 全趟
+            //   候选 ≥ fsClamp (fsClamp ≤ topkDim ≤ Npad = 全部键数), 必然收敛。
+            pass = 0u;
+            remaining = fsClamp;
+            prefix = 0u;
         }
-        asc_syncthreads();
-        if (scalar[3] != 0) break;
     }
-    
-    uint32_t T = (uint32_t)scalar[0];
-    uint32_t quota = (uint32_t)scalar[1];
 
     // [P1+B] emission 并行化 + 只扫有效区: 全员连续切片统计 (nLt | nEq<<16) 打包块
     //   扫描得各线程写入基址后并行写 freeIdxOut 与补零。
@@ -556,6 +594,7 @@ __aicore__ inline void OpArgtopkRow(
     asc_syncthreads();
     (void)segLocal;  // 预留分段 scatter 缓冲, 基数选择路径未使用
     (void)segBase;   // 同上
+    (void)scalar;    // [方向2] 决策本地化后无读者, 槽位保留防 UB 布局漂移
 }
 
 
@@ -1062,8 +1101,9 @@ private:
             uint32_t row = startRow + r;
             if (row >= R) break;
             int32_t freeSize = freeSizeGm_[row];   // 取前 freeSize 个 (不再固定 kEff)
+            uint32_t fifoVal = (uint32_t)fifoGm_[row];   // [方向1] 跳趟启发式 (同地址 GM 广播读)
             bool dbg = (tiling_.argtopkDebugRow == row);
-            OpArgtopkRow(B, Npad, topkDim, G, priGm_, row, freeIdxGm_, freeSize,
+            OpArgtopkRow(B, Npad, topkDim, G, fifoVal, priGm_, row, freeIdxGm_, freeSize,
                          argtopkKeyUb_, argtopkHistUb_, argtopkGlobalCntUb_,
                          argtopkSegLocalUb_, argtopkSegBaseUb_, argtopkScalarUb_,
                          dbg ? dbgCount : nullptr,

@@ -95,10 +95,14 @@ harness=r'''
 int main(){
 try{
     int checks=0;
-    // ---- 1) OpArgtopkRow: 4 趟基数选择 ----
+    // ---- 1) OpArgtopkRow: 逐字节基数选择 (含 [方向1] 自适应跳趟与回退) ----
+    // fifo 变体: 0x40000000 → z=0 全趟 (含 dbg 全量直方图 golden);
+    //   4097 → z=2 跳 2 趟; 65536 → z=1; 100 → z=3 只跑 byte0。
+    //   跳趟/回退路径的输出 golden 与全趟完全一致 (选择结果与起跑趟无关)。
     for(uint32_t B:{1u,8u,31u,63u,64u,127u,128u,255u,256u,4096u}){
         uint32_t n=1;while(n<B+1)n*=2;
         for(uint32_t pattern=0;pattern<4;++pattern){
+         for(uint32_t fifoVal:{0x40000000u,4097u,65536u,100u}){
             std::mt19937 rng(B*13+pattern);
             std::vector<int32_t> pri(B+1);
             for(auto& p:pri){
@@ -121,7 +125,12 @@ try{
             std::vector<uint32_t> dbgCount(256,0x7fffffff);
             int32_t *key=ub.data(),*hist=ub.data()+n,*globalCnt=hist+G*256u;
             int32_t *segLocal=globalCnt+256u,*segBase=segLocal+G*2u,*scalar=segBase+G*2u;
-            launch([&]{OpArgtopkRow(B,n,B,G,pri.data(),0,out.data(),freeSize,
+            // 跳趟路径 (fifoVal 小) 的 dbgCount 是首趟过滤直方图, 语义随起跑趟变化 → 不验证;
+            //   全趟路径 (z=0) 保持旧版 pass0 全量 golden。dbgKey 与起跑趟无关, 恒验证。
+            uint32_t startPass=3u;
+            if((fifoVal>>24)!=0u)startPass=0u;else if((fifoVal>>16)!=0u)startPass=1u;else if((fifoVal>>8)!=0u)startPass=2u;
+            bool const fullPass=(startPass==0u);
+            launch([&]{OpArgtopkRow(B,n,B,G,fifoVal,pri.data(),0,out.data(),freeSize,
                 key,hist,globalCnt,segLocal,segBase,scalar,
                 dbgCount.data(),dbgKey.data());});
             if(fsClamp==0u){
@@ -159,11 +168,16 @@ try{
             for(uint32_t i=footprint;i<ub.size();++i)require(ub[i]==-777,"UB overrun past footprint");
             for(uint32_t i=0;i<=B;++i)require(dbgKey[i]==packed[i],"debug packed key mismatch");
             for(uint32_t i=B+1;i<n;++i)require(dbgKey[i]==-777,"dbgKey padding region untouched");
-            // dbgCount golden 含 padding (merge 解析式计入): 用完整打包键直方图。
-            std::vector<uint32_t> expectedHist(256,0);
-            for(uint32_t i=0;i<n;++i)++expectedHist[(static_cast<uint32_t>(packed[i])>>24)&255u];
-            require(dbgCount==expectedHist,"debug high-byte histogram mismatch");
+            // [方向1] dbgCount 仅在全趟路径 (startPass==0) 验证: golden 为完整打包键的
+            //   高字节直方图 (含 padding, 由 merge 解析式计入)。跳趟路径首趟带
+            //   prefix=0 过滤, 直方图语义不同, 不做断言 (输出 golden 已覆盖正确性)。
+            if(fullPass){
+                std::vector<uint32_t> expectedHist(256,0);
+                for(uint32_t i=0;i<n;++i)++expectedHist[(static_cast<uint32_t>(packed[i])>>24)&255u];
+                require(dbgCount==expectedHist,"debug high-byte histogram mismatch");
+            }
             ++checks;
+         }
         }
     }
     // ---- 2) OpHitMiss: warp 归约计数 (含 [P4] 折叠的 freeSize), 无 atomic ----
