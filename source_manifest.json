@@ -24,8 +24,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "e4f207ab45b309bcb4d283809c9e77197d641f567a9e3370f74a7c8afbe641d5",
-      "bytes": 29520,
+      "sha256": "4359cdcf90cd7d179f738a98498e59f151e3e464a60b20031c95271185f6c1ee",
+      "bytes": 29535,
       "role": "阅读指南、运行说明与消融实验章节"
     },
     {
@@ -102,8 +102,8 @@
     },
     {
       "path": "docs/echo_lru_deep_dive.md",
-      "sha256": "f9bc8a37a027acfa4724db427587f520c723f4cf08a187b466459b168554bf8a",
-      "bytes": 70391,
+      "sha256": "566d78108e1557339d220140bda8a0cfce2ab7405ac19b85878cca1942b011e4",
+      "bytes": 78861,
       "role": "深入解读文档（随迭代同步更新）"
     },
     {

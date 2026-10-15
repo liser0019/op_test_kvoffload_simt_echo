@@ -22,7 +22,7 @@
 - 淘汰语义：`key==T` 平局取最小槽号，与稳定排序的 `(pri, slot)` 字典序一致；`key<T` 组按槽号升序输出 —— 本基准初始 `pri[slot]=slot`（见 `make_echo_initial`），与全排序结果一致。若未来输入存在非单调 pri，淘汰“集合”仍正确，仅 free 栈压栈顺序与全排序版不同。
 - 算子接口、SIMT 基线、benchmark 的输入、参考算法、状态恢复与计时边界均保留（workspace 布局未动）。
 
-手抄校对修正的抄写错误（详见 git 提交记录）：`scalar[0] == 0` 误用比较符及 `scalar[2]` 未初始化、直方图候选过滤 `prefix` 位对齐错误、`NNpad` 未定义、`PerEnd()` 拼写、Step0 后 SyncGrid 缺 `PerfEnd`、`PerfEnd` 缺 `__aicore__` 双下划线、`argtopkScalarUb_,,` 双逗号、`argtopkKeyPriUb_` 旧成员名、`OpMissCumsum` 内 `uint32_t threadIdx.x;` 非法声明与 `Bm`/`t` 未定义、并行扫描 `miss1` 误写 `miss0`、`perfLast_` 截断为 32 位、tiling 丢失 `ARGTOPK_GM_NPAD_MAX`、误加 `cooperative_groups.h` include、plugin 未填 `argtopkGroupThreads`。`checks/check_echo_kernel_host.py` 已重写为选择/扫描语义（现 169 项，含跳趟/回退自一致性）。
+手抄校对修正的抄写错误（详见 git 提交记录）：`scalar[0] == 0` 误用比较符及 `scalar[2]` 未初始化、直方图候选过滤 `prefix` 位对齐错误、`NNpad` 未定义、`PerEnd()` 拼写、Step0 后 SyncGrid 缺 `PerfEnd`、`PerfEnd` 缺 `__aicore__` 双下划线、`argtopkScalarUb_,,` 双逗号、`argtopkKeyPriUb_` 旧成员名、`OpMissCumsum` 内 `uint32_t threadIdx.x;` 非法声明与 `Bm`/`t` 未定义、并行扫描 `miss1` 误写 `miss0`、`perfLast_` 截断为 32 位、tiling 丢失 `ARGTOPK_GM_NPAD_MAX`、误加 `cooperative_groups.h` include、plugin 未填 `argtopkGroupThreads`。`checks/check_echo_kernel_host.py` 已重写为选择/扫描语义（现 171 项，含跳趟/回退/4 元素扫描自一致性）。
 
 ```text
 kvoffload_simt_echo/
@@ -317,7 +317,7 @@ JSON 包含两路的 Event 和 Host 的 P50/P95/min/max、原始样本、执行�
 - 故障注入：故意破坏最后一个正式样本的输出，计时后检查正确报错，没有写出结果 JSON。
 - 补齐独立工程后，再次核对 9 个源码文件的来源和哈希；用新的共享库装载入口重跑上述 64 次 CPU 模拟及故障注入，均通过。
 - `build.sh` 的 shell 语法与参数帮助通过；使用临时依赖占位目录完成 CMake 配置/生成检查，确认仅包含两个 plugin、两个 kernel object、对应编译选项及 runtime 链接。占位目录用于检查构建规则，**没有实际编译 CANN kernel 或生成可运行的 NPU 共享库**。
-- 2026-10-13 手抄版校对：修正上述抄写错误后，`checks/check_echo_kernel_host.py`（现为 169 项，ASan/UBSan）通过；`echo_lru_kernel.h` 在 mock SIMT 头下以 g++ 完成全文件语法检查（开/关 `ECHO_PERF_STEP` 两种配置）；`EchoWorkspaceElements` 公式与 kernel `Init` 布局数值核对一致；`Process` 的打点与 `ECHO_PERF_STEP_NAMES` 逐一对应；P0-P4 后 `bash build.sh` 的 bisheng 实际编译（普通/打点两配置）与 CPU 回归均通过。NPU 正确性与性能仍需服务器验证。
+- 2026-10-13 手抄版校对：修正上述抄写错误后，`checks/check_echo_kernel_host.py`（现为 171 项，ASan/UBSan）通过；`echo_lru_kernel.h` 在 mock SIMT 头下以 g++ 完成全文件语法检查（开/关 `ECHO_PERF_STEP` 两种配置）；`EchoWorkspaceElements` 公式与 kernel `Init` 布局数值核对一致；`Process` 的打点与 `ECHO_PERF_STEP_NAMES` 逐一对应；P0-P4 后 `bash build.sh` 的 bisheng 实际编译（普通/打点两配置）与 CPU 回归均通过。NPU 正确性与性能仍需服务器验证。
 
 上述 CPU 模拟不产生可用的性能数字。服务器应先运行第 2 节的逐样本短跑审计，再运行正式测量。
 
@@ -329,7 +329,7 @@ JSON 包含两路的 Event 和 Host 的 P50/P95/min/max、原始样本、执行�
 python3 checks/check_echo_kernel_host.py
 ```
 
-脚本直接提取当前头文件里的 `PackedBlockScan`、`OpHitMiss`、`OpArgtopkRow`、`OpMissCumsum`、`OpAllocPop` 和 `OpFifoAvailUpdate`，用 128 个 CPU 线程、同步屏障、warp 原语模拟（shfl_up/reduce_add）执行，并启用 AddressSanitizer/UBSan。169 项检查覆盖 capacity 1～4096、随机/平局/无效时间戳、基数选择的阈值与配额、选择集合与稳定排序 golden 的交叉验证、并行 emission 输出顺序、调试直方图（高字节）、释放输出、`freeSize=0` 提前返回、UB 越界哨兵、warp 归约 miss 计数（且断言零 atomic）、折叠 freeSize、直读 freeIdx 的弹栈与旧栈 golden 逐值等价、avail 折叠终值恒等，以及并行/串行两路 miss 前缀和。它不参与正式性能测试，也不能替代 NPU 编译、设备缓存一致性或性能验证。本次手抄校对后本地运行通过。
+脚本直接提取当前头文件里的 `PackedBlockScan`、`OpHitMiss`、`OpArgtopkRow`、`OpMissCumsum`、`OpAllocPop` 和 `OpFifoAvailUpdate`，用 128 个 CPU 线程、同步屏障、warp 原语模拟（shfl_up/reduce_add）执行，并启用 AddressSanitizer/UBSan。171 项检查覆盖 capacity 1～4096、随机/平局/无效时间戳、基数选择的阈值与配额、选择集合与稳定排序 golden 的交叉验证、并行 emission 输出顺序、调试直方图（高字节）、释放输出、`freeSize=0` 提前返回、UB 越界哨兵、warp 归约 miss 计数（且断言零 atomic）、折叠 freeSize、直读 freeIdx 的弹栈与旧栈 golden 逐值等价、avail 折叠终值恒等，以及并行/串行两路 miss 前缀和。它不参与正式性能测试，也不能替代 NPU 编译、设备缓存一致性或性能验证。本次手抄校对后本地运行通过。
 
 ## 9. 算子源码怎么读
 
