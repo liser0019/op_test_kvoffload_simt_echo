@@ -1256,3 +1256,4 @@ README 或代码注释时参考：
 4. **代码注释引用的 `GRID_GROUP_PITFALLS.md`、`probe_grid_sync/`、`probe_ub_size`、
    `golden.py`、`gen_data.py`、`echo-lru-argtopk-debug-status` 等上游工程产物不在本仓**，
    相关结论只能以注释转述为准（§3.1、§7.5、§5 spec 段）。
+| 2026-10-16 | 8856e2a | 删除扫描门遗留 UB 条件（topk=4096 恒并行），Step6/§3.2 同步 |
