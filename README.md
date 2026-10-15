@@ -155,6 +155,18 @@ python3 echo_perf_step.py --device 1 --warmup 5 --repeat 20
 
 打点构建改变了 kernel 代码形态，其总耗时不用于正式结论；正式性能对比始终使用普通构建 + `compare.py`。
 
+### NPU：kernel 级精确耗时（profiler）
+
+Event 计时包含 tiling H2D 与 host 下发的固定开销（两路各 ~百 μs），只适合看比值。要拿 kernel 纯耗时，用 `torch_npu.profiler` 抓目标 kernel 的 `kernel_details.csv`（测试数据仍与 `compare.py` 完全一致，采集前后均与 golden 全量比对）：
+
+```bash
+bash profile_kernel.sh                          # 全部四个场景
+bash profile_kernel.sh --scenario warm_75pct    # 单场景
+bash profile_kernel.sh --active 50              # 加大采样
+```
+
+采集目录在 `/dev/shm/kvprof.XXXXXX`（trace 文本量大，避免写磁盘；`KV_PROFILE_ROOT` 可覆盖），汇总写入 `traces/run-*/summary.json`：两路 kernel 的 P50/P95/min/max、原始样本与 `echo_over_simt_kernel_p50`。只统计 `sparse_kv_plan_kernel` / `echo_lru_kernel`，restore 的 copy_ 等任务按名字过滤。
+
 ## 3. 共同输入到底是什么
 
 默认尺寸：`rows=32, topk=2048, capacity=4096, max_token=262144`。

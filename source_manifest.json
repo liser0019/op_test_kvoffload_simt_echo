@@ -1,5 +1,5 @@
 {
-  "manifest_revision": "b-2026-10-15",
+  "manifest_revision": "profile-2026-10-15",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
   "echo_revision": "radix-select-warp-coop-2026-10-15-b",
@@ -9,6 +9,18 @@
       "sha256": "6bbc278c98b7da45ab971630ce2c70f9ce7019984424d833306f8355cbaa97ff",
       "bytes": 2272,
       "role": "构建入口：普通构建到 build/，ECHO_PERF_STEP=ON/--perf-step 打点构建到 build_perf/"
+    },
+    {
+      "path": "profile_kernel.sh",
+      "sha256": "bb386e41ce672d81773f1d416f3baa8964aa3e1a4b08bf752117ca854ebc052f",
+      "bytes": 1030,
+      "role": "kernel 级 profile 采集包装：/dev/shm 采集目录 + 环境清理 + 日志"
+    },
+    {
+      "path": "profile_kernel.py",
+      "sha256": "ba5ae048446769d54a1ade996b0b8dc7487ccb63ef2d0fa51941335394e686bd",
+      "bytes": 10984,
+      "role": "kernel 级精确耗时：torch_npu.profiler 抓目标 kernel P50/P95/min/max"
     },
     {
       "path": "CMakeLists.txt",
@@ -90,8 +102,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "3a02b45389274d125d9f1b2bd294f7d4fde713d905f1c2136b731fc8c6b7aa6b",
-      "bytes": 26651,
+      "sha256": "924f5c6ece5cbdf795ada290b5559aa00c2d5760855925b26e40b94d0d74bc8d",
+      "bytes": 27543,
       "role": "阅读指南与运行说明"
     },
     {
@@ -132,7 +144,7 @@
       "tiling 恢复 ARGTOPK_GM_NPAD_MAX；launch workspace 公式重写；plugin 填 argtopkGroupThreads"
     ],
     "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出；padding 索引仅在越过有效区时按序补齐",
-    "verification": "CPU: checks 49 项 ASan/UBSan 通过（key/dbgKey 只写有效区+padding 哨兵、padding 解析式直方图 golden、淘汰标志断言）；g++ mock-SIMT 全头语法检查（开/关 ECHO_PERF_STEP）通过；bisheng dav-3510 实际编译普通/打点 kernel 通过；23 步打点顺序逐一核对。NPU 正确性与性能待服务器验证。"
+    "verification": "CPU: checks 49 项 ASan/UBSan 通过；g++ mock-SIMT 全头语法检查通过；bisheng dav-3510 实际编译普通/打点 kernel 通过。NPU 审计通过；Event 口径 Echo/SIMT 全场景 0.91-1.03×；kernel 级精确对比用 profile_kernel.sh（profiler kernel_details.csv）。"
   },
   "note": "echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
 }
