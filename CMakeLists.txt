@@ -155,7 +155,32 @@ execute_process(COMMAND "${Python3_EXECUTABLE}"
 if(NOT _info_result EQUAL 0)
     message(FATAL_ERROR "Plan source identity check failed")
 endif()
-add_library(simt_plan_variants_ops SHARED ${VARIANT_PLUGINS} "${PLAN_INFO_CPP}" ${KERNEL_OBJECTS})
+# Archive Plan only: compile the original AIV source; no address/copy operators.
+# Native AIV keeps SDK default synchronization/cache policy; SIMT-specific
+# membar/DCache disabling flags above apply only to the SIMT variants.
+set(MEMFABRIC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc/memfabric_plan")
+set(MEMFABRIC_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernel_memfabric_lru_plan.o")
+add_custom_command(OUTPUT "${MEMFABRIC_OBJECT}"
+    COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+            ${KERNEL_OPT_FLAGS} -Wno-deprecated-declarations ${KERNEL_INCLUDE_ARGS}
+            -c "${MEMFABRIC_DIR}/upstream/acc_offload_lru_compact.cpp" -o "${MEMFABRIC_OBJECT}"
+    DEPENDS "${MEMFABRIC_DIR}/upstream/acc_offload_lru_compact.cpp"
+            "${MEMFABRIC_DIR}/upstream/acc_offload_lru_compact.h"
+    COMMENT "bisheng compile original MemFabric LRU Plan" VERBATIM)
+set_source_files_properties("${MEMFABRIC_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+set(MEMFABRIC_INFO_CPP "${CMAKE_CURRENT_BINARY_DIR}/memfabric_build_info.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/memfabric_plan_manifest.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/checks/memfabric_build_info.py" "${MEMFABRIC_DIR}/plugin.cpp"
+    "${MEMFABRIC_DIR}/upstream/acc_offload_lru_compact.cpp"
+    "${MEMFABRIC_DIR}/upstream/acc_offload_lru_compact.h")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/checks/memfabric_build_info.py"
+    --output "${MEMFABRIC_INFO_CPP}" RESULT_VARIABLE _memfabric_info_result)
+if(NOT _memfabric_info_result EQUAL 0)
+    message(FATAL_ERROR "MemFabric source identity check failed")
+endif()
+add_library(simt_plan_variants_ops SHARED ${VARIANT_PLUGINS} "${PLAN_INFO_CPP}" ${KERNEL_OBJECTS}
+    "${MEMFABRIC_DIR}/plugin.cpp" "${MEMFABRIC_INFO_CPP}" "${MEMFABRIC_OBJECT}")
 separate_arguments(TORCH_CXX_FLAGS_LIST NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 target_compile_options(simt_plan_variants_ops PRIVATE ${TORCH_CXX_FLAGS_LIST})
 target_include_directories(simt_plan_variants_ops SYSTEM PRIVATE

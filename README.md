@@ -1,5 +1,18 @@
 # BCDE + fused + 1024：Plan 微优化对照
 
+## 本分支新增：ABCDF 与压缩包原版 MemFabric Plan
+
+分支 `feat/abcdf-memfabric-plan-profile` 基于 `9cc99d5`，保留 ABCDF 计算源码，接入压缩包内的原版 LRU compact Plan；不包含地址生成或 KV payload 搬运。以现有 `torch_npu.profiler` 的 `kernel_details.csv` 为计时依据。
+
+详见 [ABCDF 与 MemFabric 原版 Plan 对比](ABCDF与MemFabric原版Plan对比.md)。
+
+```bash
+bash build.sh --soc=ascend950
+bash run_abcdf_memfabric.sh 1
+```
+
+运行前加载匹配的 CANN/torch_npu 环境；卡号按实际调整。本机仅做 CPU/静态验证，未取得 NPU 性能数据。
+
 分支：`feat/simt-plan-micro-variants`，从 `feat/peer-simt-comparison@a282f5d` 创建。
 本分支只保留已选定的 BCDE + fused + 1024 基线和本轮 17 个候选，共 18 路；
 原有 Echo、旧 SIMT 和其他历史候选在原分支中保留。

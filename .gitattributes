@@ -1,0 +1,2 @@
+# Preserve exact bytes of the user-provided upstream snapshot.
+csrc/memfabric_plan/upstream/* whitespace=-blank-at-eof

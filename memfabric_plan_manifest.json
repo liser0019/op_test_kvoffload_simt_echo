@@ -1,0 +1,19 @@
+{
+  "archive_name": "memfabric-hybrid_kvoffload-release_kv_miss-src-acc_offload-csrc-operators.zip",
+  "archive_sha256": "050d36f607a6fdf364210ddd4bd35262f8140b41d56dc16af84dafe24ef9f7b5",
+  "files": {
+    "csrc/memfabric_plan/upstream/acc_offload_lru_compact.cpp": {
+      "archive_member": "memfabric-hybrid_kvoffload-release_kv_miss-src-acc_offload-csrc-operators/src/acc_offload/csrc/operators/acc_offload_lru_compact.cpp",
+      "sha256": "637d457a64e264fe02605e173c2df814e50101f76beed15b8da02838cf0bf98a"
+    },
+    "csrc/memfabric_plan/upstream/acc_offload_lru_compact.h": {
+      "archive_member": "memfabric-hybrid_kvoffload-release_kv_miss-src-acc_offload-csrc-operators/src/acc_offload/csrc/operators/acc_offload_lru_compact.h",
+      "sha256": "38aabd531b908fff5443c616cc67d1a0c9b7db862bf041ab8a072c324a705445"
+    }
+  },
+  "kernel_name": "OffloadLruCompactOps",
+  "op_name": "memfabric_lru_plan",
+  "blocks": 8,
+  "scope": "LRU compact Plan only; address generation and sparse copy excluded",
+  "import": "Both upstream files are byte-identical. No algorithm or launch edits."
+}

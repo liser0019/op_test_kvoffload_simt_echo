@@ -93,6 +93,8 @@ def git_value(project, *args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", type=Path, default=Path.cwd())
+    parser.add_argument("--comparison-module", choices=("compare.py", "compare_memfabric_plan.py"),
+                        default="compare.py", help="Input/state adapter; profiler and CSV checks are shared")
     parser.add_argument("--library", type=Path)
     parser.add_argument("--device", type=int, default=1)
     parser.add_argument("--rows", type=int, default=32)
@@ -105,7 +107,7 @@ def main():
                         choices=("all", "cold_reset", "warm_75pct", "warm_all_hit", "full_cache_75pct"))
     parser.add_argument("--implementations", nargs="+")
     parser.add_argument("--shuffle-lru", action="store_true")
-    parser.add_argument("--reference", default="baseline")
+    parser.add_argument("--reference")
     parser.add_argument("--warmup", type=int, default=13)
     parser.add_argument("--repeat", type=int, default=72,
                         help="Recorded calls per implementation, excluding profiler warm-up")
@@ -115,7 +117,7 @@ def main():
             and args.block_size > 0 and args.warmup >= 0 and args.repeat > 0):
         parser.error("Invalid shape, warmup or repeat")
     project = args.project.resolve()
-    source = project / "compare.py"
+    source = project / args.comparison_module
     if not source.is_file():
         parser.error(f"Missing {source}; run beside compare.py or pass --project")
     if not (project / "plan_variants_manifest.json").is_file():
@@ -125,6 +127,7 @@ def main():
     comparison = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(comparison)
     names = tuple(args.implementations or comparison.IMPLEMENTATIONS)
+    args.reference = args.reference or getattr(comparison, "DEFAULT_PROFILE_REFERENCE", "baseline")
     if len(set(names)) != len(names) or any(name not in comparison.IMPLEMENTATIONS for name in names):
         parser.error("Unknown or duplicate implementations")
     if not hasattr(comparison, "VARIANTS"):
@@ -159,6 +162,7 @@ def main():
         plan_build = json.loads(torch.ops.sparse_kv_plan_op.plan_variants_info())
         if plan_build != catalog_identity():
             parser.error("Library Plan identity is stale; rebuild this branch")
+    extra_build = comparison.validate_build(torch) if hasattr(comparison, "validate_build") else None
     device = torch.device(f"npu:{args.device}")
     profiler = torch_npu.profiler
     config = profiler._ExperimentalConfig(profiler_level=profiler.ProfilerLevel.Level0,
@@ -174,6 +178,7 @@ def main():
                 "project_branch": git_value(project, "branch", "--show-current"),
                 "project_status": git_value(project, "status", "--short"),
                 "plan_build": plan_build, "kernel_entries": entries,
+                "comparison_module": args.comparison_module, "extra_build": extra_build,
                 "library_sha256": hashlib.sha256(library.read_bytes()).hexdigest(),
                 "compare_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "device": args.device, "device_name": torch.npu.get_device_name(args.device),
