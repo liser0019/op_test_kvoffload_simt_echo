@@ -373,7 +373,11 @@ __aicore__ inline void OpFifoAvailUpdate(
 // 目标: 从打包 key 中选出 pri 最小的 freeSize 个槽 (平局按槽号升序), 写 freeIdxOut.
 //   key[i] = (i==0 || i>B || pri<0) ? I32_MAX : pri  → 全非负, 无效/填充沉底.
 // [B 2026-10-15] 栅栏与工作量重构 (重构前 full_cache 实测 ~410K 周期 → 199K):
-//   (1) 首趟单相位: pack(全员) 与 clear+hist(G 路, 直读 priGm) 无交叉 RAW;
+//   (1) [P-E 反向 P-D] pack 前置为独立全员相位 + B0 栅栏: pack(全员, 写 key) 与
+//       hist(G 路, 读 key) 有跨线程 RAW, 需 1 栅栏隔开 (round-2 曾按 "hist 直读
+//       priGm 无 RAW" 合并成单相位、round-3 [P-D] 更把 pack 融进 hist 首趟, 但那
+//       把 GM 读留在 G=64 路串行依赖链上、MLP 只有 64 —— 用 1 个 B0 换 GM 读
+//       全块 blockDim 路并行, 详见函数内 [P-E] 注释);
 //   (2) merge 改 256 桶并行 (每桶归并 G 个切片, 墙钟 G 次读);
 //   (3) hist/pack/emission 只扫有效区 [0, B+1); P = Npad-(B+1) 个 padding 键恒为
 //       I32_MAX, 在 merge 相位解析式计入 padByte 桶 (padIn = 选择前缀走在 I32_MAX
@@ -388,8 +392,9 @@ __aicore__ inline void OpFifoAvailUpdate(
 //   b/prefix/remaining (本数据 break 在前几个桶, 每线程 ≤4 次 UB 读), 取代 t0
 //   串行决策 + scalar 广播 → 每趟 3→2 栅栏 ([clear+hist]→B1→[merge]→B2→[本地决策]
 //   →下一趟)。scalar 不再有读者 (emission 直接用寄存器 T/quota), 栅栏间无任何
-//   跨线程写。快路径+全趟合计: 基准只跑 2 趟 × 2 栅栏 + emission 扫描 2 + 尾 2
-//   = 8 次栅栏 (B 前为 16)。
+//   跨线程写。快路径+全趟合计 ([P-E] 后): B0 1 + 基准 2 趟 × 2 栅栏 + emission
+//   扫描 1 (PackedBlockScan 内) + 尾 2 = 8 次栅栏/行 (B 前为 16; Scan-v2+[P-C]
+//   后曾为 7, [P-E] 的 B0 +1)。
 // 不变量 (计数含 padding): |{key < T}| + quota == fsClamp; remaining' ≥ 1 恒成立
 //   (b-loop 在 cum+c ≥ remaining 时 break, cum < remaining)。
 // 输出: 先全部 key<T (槽号升序), 再前 quota 个 key==T (槽号升序, 有效区优先,
@@ -421,6 +426,19 @@ __aicore__ inline void OpArgtopkRow(
     const uint32_t validN = B + 1u;         // 有效区 [0, B], 含 slot 0
     const uint32_t padN = Npad - validN;    // padding 区 [B+1, Npad), 键恒为 I32_MAX
 
+    // [P-E 反向 P-D] 全员 pack：GM 读从 G=64 路（每线程 64 次串行依赖、MLP=64）
+    //   挪到全块 blockDim 路（每线程 ≤ceil(validN/blockDim.x) 次、完全协同、高 MLP）；
+    //   此后 hist 各趟一律读 key[]（UB），pass1 的 GM 依赖链消除。
+    //   必须放在 fsClamp==0 早退之后（checks 断言早退时输出/UB/dbg 全不写）。
+    //   priGm 的上一个写者是 Step1 OpHitMiss（protect），可见性由 Step1 尾 SyncGrid
+    //   （Process）保证；上一行 emission 对 key 的读已由其尾部两栅栏排空（行间
+    //   复用同一 key UB 区，§9.13 教训：key 无行索引）。
+    for (uint32_t i = t; i < validN; i += blockDim.x) {
+        int32_t p = priGm[rowOff + i];
+        key[i] = (int32_t)((p < 0 || i == 0) ? I32_MAX : p);
+    }
+    asc_syncthreads();   // B0: pack 写 key（全员）→ hist 读 key（G 路）跨线程 RAW
+
     // [方向1] fifo 前导零字节数 z → 起跑趟 startPass = z (跳过 pass 0..z-1, 至少跑 byte0)。
     //   fifo=4097 (0x1001): byte3/byte2 为 0 → z=2。fifo=0 → 全部 pri 无效, z=3
     //   (候选空 → 必然回退, 仅浪费一趟, 结果仍正确)。
@@ -434,7 +452,7 @@ __aicore__ inline void OpArgtopkRow(
         uint32_t pass = startPass;
         uint32_t remaining = fsClamp;
         uint32_t prefix = 0u;
-        bool firstIter = true;              // 首迭代: pack + 直读 priGm
+        bool firstIter = true;              // 首迭代: 首趟 hist 需 clear + dbg dump 条件
         // 外层 attempt: 0 = 快路径 (startPass 起跑), 1 = [方向1] 回退全趟。
         //   ⚠ 不用 while(true)+continue: 数据依赖 continue 跨越栅栏结构,
         //   bisheng 前端收敛分析会段错误; 有界 for + 迭代边界 break 与旧版
@@ -444,10 +462,10 @@ __aicore__ inline void OpArgtopkRow(
                 uint32_t shift = (3u - pass) * 8u;
                 bool const first = firstIter;
                 firstIter = false;
-                // ---- (a) 首迭代: [P-D] pack 融合 + clear(仅首次, 覆盖 UB 初始垃圾)
-                //      + hist(G 路, 直读 priGm, 顺手写 key —— stride=G 循环覆盖全部
-                //      [0,validN), 独立的全员 pack 循环已删除); 后续趟: hist(G 路,
-                //      读 key; 不 clear —— [P-B] 上一趟 merge 已破坏性清零)。
+                // ---- (a) hist(G 路; [P-E 反向 P-D] 首迭代与后续趟一律读 key ——
+                //      pack 已全员化并前置到 B0 之前, pass1 的 GM 依赖读链消除)。
+                //      clear 仅首次 (覆盖 UB 初始垃圾); 后续趟不 clear ——
+                //      [P-B] 上一趟 merge 已破坏性清零。
                 //      过滤用 if/else 分支而不是 pass==0 短路 —— pass 0 时
                 //      (v >> 32) 是文本可见 UB, SIMT 后端可能投机求值。----
                 if (active) {
@@ -457,9 +475,7 @@ __aicore__ inline void OpArgtopkRow(
                         // 首趟: pass==startPass。pass==0 无过滤; startPass>0 时按
                         //   prefix=0 过滤被跳过的高字节 (I32_MAX 键 byte3=0x7F 被排除)。
                         for (uint32_t i = t; i < validN; i += G) {
-                            int32_t p = priGm[rowOff + i];
-                            uint32_t v = (uint32_t)((p < 0 || i == 0) ? I32_MAX : p);
-                            key[i] = (int32_t)v;
+                            uint32_t v = (uint32_t)key[i];
                             if (pass == 0u) {
                                 myHist[(v >> shift) & 0xFFu] += 1;
                             } else if ((v >> (shift + 8u)) == 0u) {
@@ -531,7 +547,8 @@ __aicore__ inline void OpArgtopkRow(
             }
             if (pass >= 4u) break;          // pass 3 正常跑完, 选择完成
             // [方向1] 快路径放不下 (剩余配额超出 prefix=0 候选总数): 回退 pass 0
-            //   完整重跑一次。key 已打包 (firstIter 已为 false, 不重 pack); 全趟
+            //   完整重跑一次。key 已由前置 pack 一次性打包 ([P-E] 选择循环内不写
+            //   key; firstIter 已为 false 亦不重 clear —— merge 已破坏性清零); 全趟
             //   候选 ≥ fsClamp (fsClamp ≤ topkDim ≤ Npad = 全部键数), 必然收敛。
             pass = 0u;
             remaining = fsClamp;
@@ -1066,15 +1083,38 @@ public:
         uint32_t tailRows = tiling_.tailRows;
 
         // [P0] numHitsGm 已无读者, 不再清零 (槽位保留防布局漂移); pushCount 供 spec 路径。
-        OpFillZero(R, rowsPerCore, tailRows, pushCountGm_);
-        SyncGrid();
+        // [白付清理] 非 spec 时 pushCount 无任何读者 (唯一读者 OpSpecAvailAdd 在
+        //   Step0.5 的 spec 门内) → 此处 SyncGrid 唯一能保护的 RAW (t0 写 pushCount
+        //   → spec 读者) 不存在, OpFillZero + SyncGrid 整段跳过 (prologue, 本就
+        //   不占打点槽)。Step1 的输入 (htd/avail/fifo) 均为跨调用持久态, 写者在
+        //   上一 invocation 或 host, kernel 边界保证可见 (同 P4 删尾 SyncGrid 的
+        //   论证: kernel 结束即对 host/下一次调用可见), 本 kernel 内无需 dcci。
+        if (tiling_.specEnabled) {
+            OpFillZero(R, rowsPerCore, tailRows, pushCountGm_);
+            SyncGrid();
+        }
 
         // ---- Step 0: reset ----
-        PerfBegin(); OpResetRows(R, maxModelLenP1, rowsPerCore, tailRows, resetMaskGm_, htdGm_); PerfEnd();
-        PerfBegin(); OpResetDthPri(R, B, rowsPerCore, tailRows, resetMaskGm_, dthGm_, priGm_); PerfEnd();
-        PerfBegin(); OpResetFree(R, B, freeStackSize, rowsPerCore, tailRows, resetMaskGm_, freeGm_); PerfEnd();
-        PerfBegin(); OpResetAvailFifo(R, B, rowsPerCore, tailRows, resetMaskGm_, availGm_, fifoGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();
+        // [白付清理] 本核行段无 reset 时 Step0 整段跳过: 四个 reset Op 对该核行段
+        //   全部 continue 零写 → Step0 SyncGrid 无 RAW 可保护; Step1 读的
+        //   htd/avail/fifo 是跨调用持久态 (kernel 边界可见性, 见上方 [白付清理]),
+        //   与本 kernel 内写无关。全员读同样的 resetMask 字节 → anyReset 逐线程
+        //   一致 → 栅栏无发散。行段边界由 plugin 保证 ≤ R (tailRows 恰好收口,
+        //   与各 reset Op 的 row<R break 同一不变量)。打点槽保持原位 (跳过时记录
+        //   ≈0 周期, 与 C1 needFree 的做法一致, 步数/步名/顺序不变)。
+        bool anyReset = false;
+        {
+            uint32_t startRow = blockIdx.x * rowsPerCore;
+            uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
+            for (uint32_t r = 0; r < rowCount; ++r) {
+                anyReset = anyReset || (resetMaskGm_[startRow + r] != 0);
+            }
+        }
+        PerfBegin(); if (anyReset) OpResetRows(R, maxModelLenP1, rowsPerCore, tailRows, resetMaskGm_, htdGm_); PerfEnd();
+        PerfBegin(); if (anyReset) OpResetDthPri(R, B, rowsPerCore, tailRows, resetMaskGm_, dthGm_, priGm_); PerfEnd();
+        PerfBegin(); if (anyReset) OpResetFree(R, B, freeStackSize, rowsPerCore, tailRows, resetMaskGm_, freeGm_); PerfEnd();
+        PerfBegin(); if (anyReset) OpResetAvailFifo(R, B, rowsPerCore, tailRows, resetMaskGm_, availGm_, fifoGm_); PerfEnd();
+        PerfBegin(); if (anyReset) SyncGrid(); PerfEnd();
 
         // ---- Step 0.5: invalidate speculative suffix (spec 路径; 非 spec 跳过) ----
         // specEnabled=0 (非 spec, 前缀全长 spl==maxModelLenP1) 时 Step0.5 整段 no-op, 跳过 4 个 Op 与 4 个栅栏.
