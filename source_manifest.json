@@ -1,5 +1,5 @@
 {
-  "manifest_revision": "round3-2026-10-17",
+  "manifest_revision": "p-c-index-fix-2026-10-17",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
   "echo_revision": "round3-scanv2-pbcd-protectfold-2026-10-17",
@@ -42,8 +42,8 @@
     },
     {
       "path": "checks/check_echo_kernel_host.py",
-      "sha256": "7361097a362f1519c5978348a4ebfa87ed0ea799f01593b67d05bfb1bc47e915",
-      "bytes": 19211,
+      "sha256": "00c6d214d82428b07966c2002a0c73d9ff37c3eeef10f6c792f6c926d13984fe",
+      "bytes": 19216,
       "role": "CPU 并行回归：171 项（含跳趟/回退/4元素扫描），ASan/UBSan"
     },
     {
@@ -54,8 +54,8 @@
     },
     {
       "path": "csrc/echo/echo_lru_kernel.h",
-      "sha256": "3eb46c99c2dd9c7f3f0019efd9a233bad36239525da5f7df59d332696c36c76d",
-      "bytes": 70384,
+      "sha256": "8a4ec312212968dde0eae28a39caf3916f1bdc9d4440f02b7414a07b23795b3b",
+      "bytes": 71269,
       "role": "Echo 设备计算：radix select（跳趟+本地决策）+ warp 协作 + 4元素扫描路径"
     },
     {
@@ -108,8 +108,8 @@
     },
     {
       "path": "docs/echo_lru_deep_dive.md",
-      "sha256": "7c560ba6138f333e17823350dcc23ef937d1fb2dcf1ca097fb7e710f6f8ea56c",
-      "bytes": 97042,
+      "sha256": "406b82e571fd13c2215d97717af892bb85f41f1db497099a78b774b7ca2de878",
+      "bytes": 98371,
       "role": "深入解读文档（随迭代同步更新）"
     },
     {
@@ -159,7 +159,7 @@
       "tiling 恢复 ARGTOPK_GM_NPAD_MAX；launch workspace 公式重写；plugin 填 argtopkGroupThreads"
     ],
     "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出；padding 索引仅在越过有效区时按序补齐",
-    "verification": "CPU: checks 172 项通过(含 protect pri golden、UB 路径一致性); bisheng 三配置编译通过; 步骤顺序 20+8 核对一致。上板基线(kernel 级 P50, round-2 自适应): warm 0.79/0.76×、cold 1.27×、full 1.47×; round-3 收益待测"
+    "verification": "CPU: checks 172 项通过(含 protect pri golden、UB 路径一致性); bisheng 三配置编译通过; 步骤顺序 20+8 核对一致。上板基线(kernel 级 P50, round-2 自适应): warm 0.79/0.76×、cold 1.27×、full 1.47×; round-3 收益待测; P-C 首版 UB 绝对行索引越界已修复(d461f5d, full_cache 挂死事故见 deep_dive §9.13)"
   },
   "note": "echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
 }

@@ -1301,6 +1301,14 @@ bisheng kernel 编译（launch.cpp）exit 0、plugin 头语法检查；NPU 复�
 
 ---
 
+### 9.13 事故记录：UB freeIdx 绝对行索引越界（2026-10-17，d461f5d 修复）
+
+**现象**：round-3 后 compare.py 仅在 full_cache_75pct 挂死（其余三场景正常）。
+**根因**：[P-C] freeIdx 迁 UB 时沿用 GM 的绝对行索引 `freeIdxOut[row*topkDim+w]`；GM 布局按绝对行分区合法，但 UB 缓冲是每核私有的 `rowsPerCore*topkDim`（基准 1 行=2048 元素）。block≥1 写到 `uo+row*2048`，最大 32×2048=65544 ≫ ARGTOPK_UB_ELEMS=32768 → UB 越界写 → 核挂死。cold/warm 的 fs=0 被 C1 跳过不写 freeIdx，故仅 full_cache 触发。
+**盲区**：CPU checks 单 row=0（startRow=0）时绝对==本地，无法覆盖。
+**修复**：UB 路径全部改核内本地行索引 `row-startRow`（OpArgtopkRow 的 freeIdxOut 参数语义改为"本行切片基址"，由 ArgtopkAllRows 计算传入；OpFreeRelease/OpFreePush/OpAllocPop 增加 freeIdxLocal 参数）；GM 回退路径保持绝对行。rawSlots 等其余 GM 量恒绝对行。
+**教训**：per-core 私有缓冲的行索引基准与全局共享缓冲不同，迁移数据结构时索引语义必须同步审计；单 block 测试无法暴露多 block 索引问题。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
@@ -1382,3 +1390,4 @@ README 或代码注释时参考：
    128 槽、无 warpBases/ctrl（§4.1/§5 Step5）。
 8. **kernel 头注释（echo_lru_kernel.h:17-18）**的行内跨线程 RAW 举例仍引用 OpProtect
    ——protect 已折叠进 OpHitMiss 的 hit 分支（§5 Step1），该 Op 函数已删除。
+| 2026-10-17 | d461f5d | 修复 P-C UB freeIdx 绝对行索引越界（full_cache 挂死），改核内本地行索引（详见 §9.13） |
