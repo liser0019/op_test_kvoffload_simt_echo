@@ -398,7 +398,7 @@ __aicore__ inline void OpFifoAvailUpdate(
 __aicore__ inline void OpArgtopkRow(
     uint32_t B, uint32_t Npad, uint32_t topkDim, uint32_t G, uint32_t fifoVal,
     int32_t* priGm, uint32_t row, int32_t* freeIdxOut, int32_t freeSize,
-    bool freeIdxIsGm,
+    bool freeIdxIsGm,   // freeIdxOut 指向本行切片的基址 (UB 本地行 / GM 绝对行, 由调用方算好)
     int32_t* key,
     int32_t* hist,
     int32_t* globalCnt,
@@ -571,10 +571,10 @@ __aicore__ inline void OpArgtopkRow(
         for (uint32_t i = lo; i < hi; ++i) {
             uint32_t v = (uint32_t)key[i];
             if (v < T) {
-                freeIdxOut[row * topkDim + wLt] = (int32_t)i;
+                freeIdxOut[wLt] = (int32_t)i;
                 ++wLt;
             } else if (v == T && wEq < quota) {
-                freeIdxOut[row * topkDim + totalLt + wEq] = (int32_t)i;
+                freeIdxOut[totalLt + wEq] = (int32_t)i;
                 ++wEq;
             }
         }
@@ -583,11 +583,11 @@ __aicore__ inline void OpArgtopkRow(
         uint32_t used = totalLt + validEq;
         uint32_t m = (fsClamp > used) ? (fsClamp - used) : 0u;
         for (uint32_t k = t; k < m; k += blockDim.x) {
-            freeIdxOut[row * topkDim + used + k] = (int32_t)(validN + k);
+            freeIdxOut[used + k] = (int32_t)(validN + k);
         }
         // 尾部补零 [fsClamp, topkDim) (选择不变量: totalLt + quota == fsClamp, 计数含 padding)。
         for (uint32_t i = fsClamp + t; i < topkDim; i += blockDim.x) {
-            freeIdxOut[row * topkDim + i] = 0;
+            freeIdxOut[i] = 0;
         }
         asc_syncthreads();
         // [P-C] freeIdx 在 UB 时块内 syncthreads 即可见, 免 dcci; GM 路径由函数尾
@@ -605,7 +605,7 @@ __aicore__ inline void OpArgtopkRow(
 __aicore__ inline void OpFreeRelease(
     uint32_t R, uint32_t topkDim, uint32_t B, uint32_t maxModelLenP1,
     uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* freeIdxGm, int32_t* freeSizeGm,
+    int32_t* freeIdxGm, bool freeIdxLocal, int32_t* freeSizeGm,
     int32_t* priGm, int32_t* dthGm, int32_t* htdGm) {
     uint32_t priCols = B + 1;
     uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -614,12 +614,12 @@ __aicore__ inline void OpFreeRelease(
         uint32_t row = startRow + r;
         if (row >= R) break;
         int32_t fs = freeSizeGm[row];
-        uint32_t rowOff = row * topkDim;
+        uint32_t fiOff = (freeIdxLocal ? (row - startRow) : row) * topkDim;  // [P-C] UB 本地 / GM 绝对
         uint32_t priRowOff = row * priCols;
         uint32_t htdRowOff = row * maxModelLenP1;
         for (uint32_t j = threadIdx.x; j < topkDim; j += blockDim.x) {
             if ((int32_t)j >= fs) continue;
-            int32_t slot = freeIdxGm[rowOff + j];
+            int32_t slot = freeIdxGm[fiOff + j];
             int32_t s = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
             uint32_t off = priRowOff + s;
             int32_t tok = dthGm[off];
@@ -635,7 +635,7 @@ __aicore__ inline void OpFreeRelease(
 
 __aicore__ inline void OpFreePush(
     uint32_t R, uint32_t topkDim, uint32_t freeStackSize, uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* freeIdxGm, int32_t* freeSizeGm,
+    int32_t* freeIdxGm, bool freeIdxLocal, int32_t* freeSizeGm,
     int32_t* availGm, int32_t* freeGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
@@ -644,14 +644,14 @@ __aicore__ inline void OpFreePush(
         if (row >= R) break;
         int32_t fs = freeSizeGm[row];
         int32_t avail = availGm[row];
-        uint32_t rowOff = row * topkDim;
+        uint32_t fiOff = (freeIdxLocal ? (row - startRow) : row) * topkDim;  // [P-C] UB 本地 / GM 绝对
         uint32_t freeRowOff = row * freeStackSize;
         for (uint32_t j = threadIdx.x; j < topkDim; j += blockDim.x) {
             if ((int32_t)j >= fs) continue;
             int32_t writeIdx = avail + (int32_t)j;
             if (writeIdx < 0) writeIdx = 0;
             if (writeIdx >= (int32_t)freeStackSize) writeIdx = (int32_t)freeStackSize - 1;
-            freeGm[freeRowOff + writeIdx] = freeIdxGm[rowOff + j];
+            freeGm[freeRowOff + writeIdx] = freeIdxGm[fiOff + j];
         }
     }
 }
@@ -668,7 +668,7 @@ __aicore__ inline void OpFreePush(
 __aicore__ inline void OpAllocPop(
     uint32_t R, uint32_t topkDim, uint32_t freeStackSize, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* numMissesGm, int32_t* freeSizeGm, int32_t* availGm,
-    int32_t* freeIdxGm, int32_t* freeGm, int32_t* rawSlotsGm) {
+    int32_t* freeIdxGm, bool freeIdxLocal, int32_t* freeGm, int32_t* rawSlotsGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
     for (uint32_t r = 0; r < rowCount; ++r) {
@@ -677,7 +677,8 @@ __aicore__ inline void OpAllocPop(
         int32_t nm = numMissesGm[row];
         int32_t avail = availGm[row];      // 初值 availOld (更新推迟到 Step5 尾)
         int32_t fs = freeSizeGm[row];
-        uint32_t rowOff = row * topkDim;
+        uint32_t rowOff = row * topkDim;                          // rawSlots (GM) 恒绝对行
+        uint32_t fiOff = (freeIdxLocal ? (row - startRow) : row) * topkDim;  // [P-C] UB 本地 / GM 绝对
         uint32_t freeRowOff = row * freeStackSize;
         for (uint32_t j = threadIdx.x; j < topkDim; j += blockDim.x) {
             int32_t slot;
@@ -687,7 +688,7 @@ __aicore__ inline void OpAllocPop(
                     int32_t fi = readIdx - avail;                 // ∈ [0, fs) ⊂ [0, topkDim)
                     if (fi < 0) fi = 0;
                     if (fi >= (int32_t)topkDim) fi = (int32_t)topkDim - 1;
-                    slot = freeIdxGm[rowOff + fi];
+                    slot = freeIdxGm[fiOff + fi];
                 } else {
                     if (readIdx < 0) readIdx = 0;                 // 老栈区段, 本 kernel 未写
                     if (readIdx >= (int32_t)freeStackSize) readIdx = (int32_t)freeStackSize - 1;
@@ -1106,12 +1107,12 @@ public:
         PerfBegin(); if (needFree) ArgtopkAllRows(); PerfEnd();   // radix select
         // [P-C] freeIdx RAW → OpFreeRelease: UB 路径普通栅栏即可 (免 dcci)。
         PerfBegin(); if (needFree) { if (freeIdxInUb_) asc_syncthreads(); else SyncGrid(); } PerfEnd();
-        PerfBegin(); if (needFree) OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxPtr_, freeSizeGm_, priGm_, dthGm_, htdGm_); PerfEnd();
-        PerfBegin(); if (needFree) OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxPtr_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
+        PerfBegin(); if (needFree) OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, priGm_, dthGm_, htdGm_); PerfEnd();
+        PerfBegin(); if (needFree) OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
 
         // ---- Step 3: alloc pop + fifo 第一次自增 ----
         PerfBegin(); OpAllocPop(R, topkDim, freeStackSize, rowsPerCore, tailRows,
-                     numMissesGm_, freeSizeGm_, availGm_, freeIdxPtr_, freeGm_, rawSlotsGm_); PerfEnd();
+                     numMissesGm_, freeSizeGm_, availGm_, freeIdxPtr_, freeIdxInUb_, freeGm_, rawSlotsGm_); PerfEnd();
         PerfBegin(); OpFifoInc(R, rowsPerCore, tailRows, fifoGm_); PerfEnd();  // [protect 折叠] 自 Step2 挪来: 此处之后
                                             // 才有 fifo 读者 (Step5 AllocPriority), 由尾 SyncGrid dcci 保证 +1 可见;
                                             // Argtopk (Step2) 恒读一致旧值, 见函数头注释。
@@ -1204,7 +1205,12 @@ private:
             int32_t freeSize = freeSizeGm_[row];   // 取前 freeSize 个 (不再固定 kEff)
             uint32_t fifoVal = (uint32_t)fifoGm_[row];   // [方向1] 跳趟启发式 (同地址 GM 广播读)
             bool dbg = (tiling_.argtopkDebugRow == row);
-            OpArgtopkRow(B, Npad, topkDim, G, fifoVal, priGm_, row, freeIdxPtr_, freeSize,
+            // [P-C 修正] freeIdx 行切片基址: UB 路径按核内本地行索引 (缓冲仅容纳
+            //   rowsPerCore*topkDim), GM 路径按绝对行索引 (全 R 行共享区分区)。
+            //   首版误用绝对行索引 → block≥1 越过 UB 缓冲 (32*2048 ≫ 32768) →
+            //   full_cache (唯一写 freeIdx 的场景) 核挂死。
+            int32_t* fiRow = freeIdxPtr_ + ((freeIdxInUb_ ? (row - startRow) : row) * topkDim);
+            OpArgtopkRow(B, Npad, topkDim, G, fifoVal, priGm_, row, fiRow, freeSize,
                          !freeIdxInUb_,
                          argtopkKeyUb_, argtopkHistUb_, argtopkGlobalCntUb_,
                          argtopkSegLocalUb_, argtopkSegBaseUb_, argtopkScalarUb_,

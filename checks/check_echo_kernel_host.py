@@ -281,7 +281,7 @@ try{
         for(uint32_t i=0;i<R*T;++i)freeIdx[i]=static_cast<int32_t>(rng()%(FS-1)+1);
         for(uint32_t i=0;i<R*FS;++i)free[i]=static_cast<int32_t>(rng()%1000+1);   // 老栈随机内容
         launch([&]{OpAllocPop(R,T,FS,R,R,nm.data(),fs.data(),avail.data(),
-                              freeIdx.data(),free.data(),raw.data());});
+                              freeIdx.data(),true,free.data(),raw.data());});
         for(uint32_t r=0;r<R;++r){
             // 旧版 golden: 先 push (free[avail+k]=freeIdx[k]) 再从栈尾弹 nm 个。
             std::vector<int32_t> stack(free.begin()+r*FS,free.begin()+(r+1)*FS);
