@@ -1,8 +1,8 @@
 {
-  "manifest_revision": "scan-gate-fix-2026-10-16",
+  "manifest_revision": "round3-2026-10-17",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",
-  "echo_revision": "radix-select-skip-local-2026-10-15",
+  "echo_revision": "round3-scanv2-pbcd-protectfold-2026-10-17",
   "files": [
     {
       "path": ".gitattributes",
@@ -42,8 +42,8 @@
     },
     {
       "path": "checks/check_echo_kernel_host.py",
-      "sha256": "7c8e8fa20ba3d173a7c4fa4f8d8e16ad19a150e191857e0ed0f7e411d859e504",
-      "bytes": 16802,
+      "sha256": "7361097a362f1519c5978348a4ebfa87ed0ea799f01593b67d05bfb1bc47e915",
+      "bytes": 19211,
       "role": "CPU 并行回归：171 项（含跳趟/回退/4元素扫描），ASan/UBSan"
     },
     {
@@ -54,8 +54,8 @@
     },
     {
       "path": "csrc/echo/echo_lru_kernel.h",
-      "sha256": "0af6bdda851e00dd082eb392e7a34e82594d4a9ef4d322bf72c571ae16420c20",
-      "bytes": 68742,
+      "sha256": "3eb46c99c2dd9c7f3f0019efd9a233bad36239525da5f7df59d332696c36c76d",
+      "bytes": 70384,
       "role": "Echo 设备计算：radix select（跳趟+本地决策）+ warp 协作 + 4元素扫描路径"
     },
     {
@@ -78,8 +78,8 @@
     },
     {
       "path": "csrc/echo/echo_lru_tiling.h",
-      "sha256": "622b103bfb93af0f8c424fd78e2f21a997602b678829fb5d24e39584313baea2",
-      "bytes": 5481,
+      "sha256": "3ba697f34348eeac3ffb998a0beb3c0adab61d0b3ae0d94e4d6d8a5fdec71050",
+      "bytes": 5482,
       "role": "Echo tiling/UB/分步常量；线程数可经 ECHO_LRU_THREAD_NUM_OVERRIDE 覆盖"
     },
     {
@@ -108,14 +108,14 @@
     },
     {
       "path": "docs/echo_lru_deep_dive.md",
-      "sha256": "332d6d2853b5619ecf555689c6d6a36bc33e4e156091de90c496c2d8a55932eb",
-      "bytes": 84077,
+      "sha256": "7c560ba6138f333e17823350dcc23ef937d1fb2dcf1ca097fb7e710f6f8ea56c",
+      "bytes": 97042,
       "role": "深入解读文档（随迭代同步更新）"
     },
     {
       "path": "echo_perf_step.py",
-      "sha256": "d576826011daaaedb3fafe56825bd497481c146462af3286d187512bd17bd767",
-      "bytes": 13256,
+      "sha256": "370ba151402ff75e4da2f025c8ec7ab900a523d96b35e8d66e4b09689eb2b53a",
+      "bytes": 12951,
       "role": "ECHO_PERF_STEP 构建的分步耗时统计（诊断用）"
     },
     {
@@ -149,7 +149,8 @@
       "[方向1] Argtopk 自适应跳趟（fifo 前导零字节，放不下回退全趟；待服务器验证）",
       "[方向2] 决策本地化（栅栏 3→2/趟，scalar 无读者；待服务器验证）",
       "[消融基础设施] ECHO_LRU_THREADS 编译期可配（kernel/plugin 同值注入，static_assert 约束 [64,1024]×32）；OpMissCumsum 增 4 元素/线程路径（512 线程 × 4 = 2048，双控制槽链式扫描）；compare.py/profile_kernel.py 增 --blocks 覆盖。注：4 元素路径 rank(p1)=t0+e1 （规格笔误 t01+e1 由实现侧以 checks golden 纠正）",
-      "[自适应 blockDim] plugin 按 topkDim 计算 launch 线程数 clamp(ceil(topk/4)→32 倍数, 64, ECHO_LRU_THREAD_NUM): topk=2048→512（消融实测全场景甜点: warm 0.73-0.78×、full 1.48×、cold 1.24× vs SIMT）; 同时删除 OpMissCumsum 门中 Hillis-Steele 时代遗留的 UB 侧条件（2/4*topkDim≤8192）——warp 扫描版 scratch 固定 66 槽、打包安全由每 tile 计数≤Bm≤1024<2^12 保证, topk=4096 在自适应 1024 线程下恒并行（该遗留门曾使 topk>2048 误掉 t0 串行, 由文档子代理审校发现）"
+      "[自适应 blockDim] plugin 按 topkDim 计算 launch 线程数 clamp(ceil(topk/4)→32 倍数, 64, ECHO_LRU_THREAD_NUM): topk=2048→512（消融实测全场景甜点: warm 0.73-0.78×、full 1.48×、cold 1.24× vs SIMT）; 同时删除 OpMissCumsum 门中 Hillis-Steele 时代遗留的 UB 侧条件（2/4*topkDim≤8192）——warp 扫描版 scratch 固定 66 槽、打包安全由每 tile 计数≤Bm≤1024<2^12 保证, topk=4096 在自适应 1024 线程下恒并行（该遗留门曾使 topk>2048 误掉 t0 串行, 由文档子代理审校发现）",
+      "[Round-3 六项] Scan-v2(PackedBlockScan 去 B2, 全调用点 1 栅栏/次; MissCumsum 4→2、HitMiss 2→1、emission 2→1); P-B 破坏性归并(clear 仅首迭代); P-C freeIdx 迁 UB(带门, uo+rowsPerCore*topkDim≤32768); P-D pack 融合进首趟 hist; protect 折叠进 OpHitMiss(原 Step2 整删); OpFifoInc 挪至 AllocPop 后(修正: 防 Argtopk 读不一致 fifo 致栅栏发散); FifoAvail t0/t1 拆分。步骤 23→20 (ECHO_PERF_NUM_STEPS 31→28)"
     ],
     "transcription_fixes": [
       "scalar[0]==0 误用比较符及 scalar[2] 未初始化；直方图候选过滤 prefix 位对齐错误",
@@ -158,7 +159,7 @@
       "tiling 恢复 ARGTOPK_GM_NPAD_MAX；launch workspace 公式重写；plugin 填 argtopkGroupThreads"
     ],
     "sorting_policy": "淘汰集合与 (pri, slot) 稳定排序一致；key==T 平局取最小槽号；key<T 组按槽号升序输出；padding 索引仅在越过有效区时按序补齐",
-    "verification": "CPU: checks 171 项通过; 自适应公式 9 组边界用例验证; bisheng 默认/打点编译通过。kernel 级 P50 (自适应前 1024 线程): warm 0.93/0.89×、cold 1.36×、full 1.73×; 消融 t512: warm 0.78/0.73×、cold 1.24×、full 1.48×（待自适应版上板复核）"
+    "verification": "CPU: checks 172 项通过(含 protect pri golden、UB 路径一致性); bisheng 三配置编译通过; 步骤顺序 20+8 核对一致。上板基线(kernel 级 P50, round-2 自适应): warm 0.79/0.76×、cold 1.27×、full 1.47×; round-3 收益待测"
   },
   "note": "echo_revision 供 compare.py / echo_perf_step.py 记录进结果 JSON。"
 }

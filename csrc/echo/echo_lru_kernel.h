@@ -1,7 +1,7 @@
 // Adapted from peer_code/echo_lru_kernel.asc; computational stages retained.
 // echo_lru 纯 SIMT 版本 (Path A: 按行分块) — LRU 元数据多步 kernel
-//   (Step0 reset → Step5 set_update, protect/final-slots/计数子步均已被折叠,
-//    见各 [P*] 标记; 原 Step1
+//   (Step0 reset → Step5 set_update, protect/final-slots/计数/avail 子步均已被
+//    折叠, 见各 [P*] 标记; 原 Step1
 //    已分别并入 warp 归约与 OpSetUpdate, 见 [P0]/[P2] 标记)。
 //
 // 纯 SIMT 范式 (对照 examples/03_simt_api gather_2d / grid_config):
@@ -43,16 +43,13 @@ constexpr int32_t I32_MAX = 2147483647;
 // warp 数按 blockDim.x 运行时推导 (设备 1024→32 warp; CPU 回归 128→4 warp)。
 // ===========================================================================
 
-// 打包块内独占扫描: value = 字段A | (字段B << shift), 两个字段各自的块内总和都
-//   必须小于 (1 << shift) (打包加法无跨字段进位, 由调用方保证)。返回本线程的
-//   exclusive (同打包格式); t0 另把全块 grand total (打包) 写入 control[0]。
-//   2 次栅栏: warp shuffle 一级 + t0 扫 warp total 二级。
-//   [P4] 基线的第 3 次"保护 scratch 复用"栅栏已删, 顺序论证 (所有调用方都是
-//   统一控制流的逐行循环):
-//   (a) 线程 X 读 warpBases/control (b2 之后、返回前) vs t0 下一轮写它们
-//       (b1(next) 之后): t0 须等全部线程到达 b1(next), X 的读在其到达之前 → 读先于写;
-//   (b) t0 读 warpTotals (b1~b2 之间) vs lane31 下一轮写它 (b2 之后): t0 的读
-//       在 t0 到达 b2 之前, lane31 的写在 b2 释放之后 → 读先于写。两对均安全。
+// 打包块内独占扫描 [Scan-v2]: value = 字段A | (字段B << shift), 两字段各自的
+//   块内总和都必须小于 (1 << shift) (打包加法无跨字段进位, 由调用方保证)。
+//   仅 1 次栅栏: warp shuffle 一级 + lane31 写 warpTotals → B1 → 每线程本地读
+//   warpTotals[0..warp) 算自己 warp 的 base (确定性函数, 无需 t0 广播)。
+//   返回 exclusive (同打包格式); grand total 由调用方返回后本地 Σ warpTotals
+//   得到 (缓冲在下次被同槽位复用前有效 —— 背靠背扫描用双/四缓冲错开,
+//   顺序安全性: 下一次同槽写发生在此后的 B1 之后, 而本方读在到达该 B1 之前)。
 __aicore__ inline int32_t PackedBlockScan(int32_t packedValue, int32_t* warpTotals) {
     uint32_t lane = threadIdx.x & 31u;
     uint32_t warp = threadIdx.x >> 5;
