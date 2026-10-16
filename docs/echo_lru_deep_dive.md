@@ -4,9 +4,9 @@
 >
 > **本文档随代码迭代同步更新**：每次代码合入后由维护者增量修订对应章节，并在文末"文档更新日志"表追加一行。
 >
-> 覆盖范围：commit `d461f5d`（fix(echo): index UB freeIdx by per-core local row；含
-> round-3 两批 f8b9c69+1121091）**＋ 工作区未提交的 round-4**（[P-E] 反向 P-D +
-> prologue/Step0 白付清理，§9.15，NPU 待验证）。
+> 覆盖范围：commit `3906f91`（perf(echo): round-4 — [P-E] 反向 P-D + 白付清理；含
+> round-3 两批 f8b9c69+1121091 与修复 d461f5d）+ `9b63e24`（文档同步）；round-4
+> 已上板验证（§9.15）。
 > 工程全貌与运行命令见根目录 `README.md`，本文不重复，只做深读。
 
 ---
@@ -186,7 +186,7 @@ Echo:  每步 ──> O(topk) 直查表判 hit/miss ──┬─ fs=0 ──> �
 
 由此得出各场景的胜负手：warm（无淘汰）场景 Echo 少付整个 O(C) 维护成本 → 快；
 full_cache（每步必淘汰）场景 Echo 每步多付整个 O(B) 选择成本 → 慢（§10 的 kernel 级
-数字：warm 0.73-0.78× vs full 1.48×）。**这不是实现优劣，是状态表示的代价分布不同**。
+数字：warm 0.67-0.72× vs full 1.29×）。**这不是实现优劣，是状态表示的代价分布不同**。
 
 ### 2.3 状态不可逐字段对比
 
@@ -1040,6 +1040,17 @@ probe 无法复现。跨核协同方案因此暂停（`echo_lru_kernel.h:1189-11
 - **教训（测量 ops）**：挂死/超时**先 `npu-smi` 查卡占用与残留进程**、换卡或复位，
   再归因代码——第一次 sync 就超时说明问题在设备/环境侧，与 kernel 代码无关。
 
+### 7.11 静态延迟链模型会高估依赖读成本（round-4 教训）
+
+- **现象**：round-4 [P-E] 的静态审计把 pass1 hist 的 GM 读建成 "每线程 64 次 ×
+  ~750cyc 串行依赖链"（§9.15），预期 Argtopk −30K 周期；上板实测仅 −9.1K
+  （105.5K→96.4K）。
+- **根因**：load 的**地址**（`i += G` 步进）与**加载到的数据无关**，硬件 scoreboard
+  可并行挂起多个 load——真实成本是**吞吐受限**而非延迟链，"延迟 × 次数"的建模把
+  本可重叠的访存串行化，系统性高估。
+- **教训**：对地址与数据无关的访存序列，不要按串行延迟链估算优化收益；分步实测
+  （echo_perf_step 前后对照，§8.3）是唯一可信的校准。
+
 ---
 
 ## 8. 构建与验证工作流
@@ -1174,7 +1185,7 @@ block、`std::barrier` 模拟 syncthreads、共享缓冲模拟 shfl_up/reduce_ad
 | 消融基础设施（d20fc50） | 线程数可配 + 4 元素路径 + `--blocks`/`--rows` 入口 | — | — | —（默认 1024 线程路径无变化；消融结果见 §9.10） | — |
 | 自适应 blockDim（e2ca2fd） | plugin 按 topkDim 算 launchThreads，`<<<blockNum, blockDim>>>`（§3.2） | 63.30 / 59.17 μs | 91.44 μs | 137.38 μs | kernel 级 0.78×/0.73×（warm）、1.24×（cold）、1.48×（full）＝消融 t512 数字（§9.10）；自适应构建 NPU 已复核（§9.14） |
 | round-3 两批（f8b9c69+1121091） | Scan-v2 / 破坏性归并 / freeIdx 迁 UB / pack 融合 + protect 折叠 / fifo++ 挪位 / FifoAvail 拆分（非 spec 步骤 23→20，§9.11/§9.12） | — | — | 129.29 μs / −5.9% vs t512（动机分步数据见 §9.11；上板复核见 §9.14） | — |
-| round-4（工作区未提交，§9.15） | [P-E] 反向 P-D（行首全员 pack + B0，Argtopk 栅栏 7→8）+ 白付清理 A/B（非 spec 跳过 prologue、无 reset 跳过 Step0） | 预期 ~61-63 μs（待验证） | 预期 ~90-92 μs（待验证） | 预期 ~107-110 μs（Argtopk 105.5K→~75K 周期，待验证） | — |
+| round-4（3906f91，§9.15） | [P-E] 反向 P-D（行首全员 pack + B0，Argtopk 栅栏 7→8）+ 白付清理 A/B（非 spec 跳过 prologue、无 reset 跳过 Step0） | 58.28 / 55.34 μs | 94.16 μs | 120.12 μs（Argtopk 105.5K→96.4K，实测 −9.1K 远低于静态预期 −30K） | kernel 级 0.72×/0.67×（warm）、1.25×（cold）、1.29×（full）＝上板验证（§9.15） |
 
 **kernel 级 profiler（profile_kernel.sh，P50，SIMT/Echo，方向 1+2 落地后）**：
 
@@ -1416,20 +1427,24 @@ cold/warm 跨机噪声内复现 → **Echo 数字跨机可信**，"自适应构�
 
 **两个测量疑点（open question，暂不下结论）**：
 
-1. **SIMT 分母疑似受扰**：本轮 SIMT P50 比前一台服务器慢约 2×（cold 73.55→140.86、
-   warm_75 80.61→150.28、warm_all 81.08→151.47、full 92.65→169.35 μs；旧值见 §9
-   开篇方向 1+2 表，§9.10 反推一致）而 Echo 跨机复现 → 本轮 0.66×/0.43×/0.41×/
-   0.76× 比值**暂不可作正式结论**，待同机同 session 重测 SIMT。疑似共卡干扰或设备
-   状态差异：本轮 device 1 曾被他人占满（§7.10），换卡后继续。
+1. **SIMT 分母疑似受扰——已关闭（round-4 空闲设备重测，§9.15 验证结论 3）**：本轮
+   SIMT P50 比前一台服务器慢约 2×（cold 73.55→140.86、warm_75 80.61→150.28、
+   warm_all 81.08→151.47、full 92.65→169.35 μs；旧值见 §9 开篇方向 1+2 表，
+   §9.10 反推一致）而 Echo 跨机复现 → 本轮 0.66×/0.43×/0.41×/0.76× 比值**不可作
+   正式结论**。疑似共卡干扰或设备状态差异：本轮 device 1 曾被他人占满（§7.10），
+   换卡后继续。round-4 上板（空闲设备）SIMT 回到 75-93 μs（§9.10 水平）→ 确认为
+   设备占用干扰，本轮比值作废；正式比值以 §9.15 为准（warm 0.72×/0.67×、cold
+   1.25×、full 1.29×）。
 2. **Event 口径失真**：Event P50 与 kernel P50 的差距远超历史 ~200μs 量级开销
    （§7.8；cold 641.67 vs 92.94 μs），echo_perf_step 频率标定随之失真（214/168/
    180/386 MHz vs 真实 ~1.5 GHz）→ 本轮 Event 口径与分步 μs 换算**不可用**，只看
    周期；host 侧疑似受扰。
 
-### 9.15 round-4：[P-E] 反向 P-D + prologue/Step0 白付清理（2026-10-16，工作区未提交，NPU 待验证）
+### 9.15 round-4：[P-E] 反向 P-D + prologue/Step0 白付清理（2026-10-16，commit 3906f91，已上板验证）
 
-三处改动全部不改变任何输出（checks 逐位一致）；行号按当前工作区代码。主会话已逐
-hunk 审查通过。
+三处改动全部不改变任何输出（checks 逐位一致）；行号按当前 HEAD 代码。主会话已逐
+hunk 审查通过；改动已提交（3906f91，文档同步 9b63e24）并完成上板验证（见本节末
+"上板验证"）。
 
 - **[P-E 反向 P-D]（OpArgtopkRow，`echo_lru_kernel.h:429-440`）**：在 fsClamp==0 早退
   之后、attempt 循环之前新增**全员 pack 相位 + B0 栅栏**——全块 blockDim 线程读
@@ -1457,10 +1472,13 @@ hunk 审查通过。
 **本机验证**：checks 172 项全过（输出逐位不变）；`bash build.sh` 与
 `ECHO_PERF_STEP=ON bash build.sh` 均 exit 0；28 个打点槽顺序逐一核对一致。
 
-**NPU 预期（估算口径，待上板验证）**：full_cache ArgtopkAllRows 105.5K → ~75K 周期、
+**NPU 预期（估算口径，上板前）**：full_cache ArgtopkAllRows 105.5K → ~75K 周期、
 kernel 129.29 → ~107-110 μs；warm 64.39/61.92 → ~61-63 μs；cold 92.94 → ~90-92 μs。
+（实测对照见下节：warm −9.5%/−10.6% **超出**白付清理预期、cold 噪声内持平（reset
+全 1 无白付可省）；Argtopk 实际 −9.1K 远低于静态预期 −30K，full 120.12 μs 未达
+~107-110 μs 预期即源于此——验证结论 2。）
 
-**残余风险（来自代码子代理报告、主会话认可）**：跳过的两个 dcci 点的 invalidate
+**残余风险（来自代码子代理报告、主会话认可；上板已验证为安全，见下）**：跳过的两个 dcci 点的 invalidate
 侧——若 runtime 不在 kernel launch 时 invalidate 本核 D-cache 且跨核不连贯，
 warm/full 三场景可能读到 restore 前的 stale 行；compare.py 的 audit 第一轮（restore →
 哨兵污染 → invoke → 全量比对，§8.2）即可抓住。**NPU 若挂的二分顺序**：① 无条件恢复
@@ -1468,21 +1486,75 @@ Step0 SyncGrid（保留其余）→ 过则锁定白付清理 B；② 再恢复 F
 锁定 A；③ 都恢复仍挂才查 P-E（B0 是加栅栏，priGm 读可见性与旧 pass1 直读同构，
 风险极低）。辅助判据：cold_reset 过而 warm/full 挂 → 强指跨 invocation 可见性问题。
 
+**上板验证（2026-10-16，空闲设备）**：3906f91+9b63e24 构建上板，audit/golden 四
+场景全过——上述残余风险（跳过两个 dcci 的跨 invocation 可见性）在设备上兑现为
+**安全**，挂起二分顺序未启用。口径：kernel 级 P50（profile_kernel.sh，空闲设备，
+blocks=32、rows=32、topk=2048、capacity=4096，自适应 512 线程，§8.4）：
+
+| 场景 | SIMT μs | Echo μs | Echo/SIMT | vs round-3（§9.14） |
+|---|---:|---:|---:|---|
+| cold_reset | 75.24 | 94.16 | 1.25× | 92.94 → 94.16（+1.3%，噪声内持平；cold 无白付可省） |
+| warm_75pct | 81.20 | 58.28 | **0.72×** | 64.39 → 58.28（**−9.5%**） |
+| warm_all_hit | 82.26 | 55.34 | **0.67×** | 61.92 → 55.34（**−10.6%**） |
+| full_cache_75pct | 93.21 | 120.12 | 1.29× | 129.29 → 120.12（−7.1%） |
+
+**分步数据**（echo_perf_step 口径，Σ步 max 跨轮中位，单位周期；括号内为 round-3
+同项（§9.14），未入 round-3 Top5 的项无括号）：
+
+| 场景（Σ步周期；round-3） | Top1 | Top2 | Top3 | Top4 | Top5 |
+|---|---|---|---|---|---|
+| cold_reset（Σ141787；138468） | OpResetRows 34362 / 24.2%（31788） | OpSetUpdate 21892（23424） | OpHitMiss 19717（20420） | OpMissCumsum 17010（15542） | OpAllocPriority 7487 |
+| warm_75pct（Σ90018；96418） | OpHitMiss 24356 / 27.5%（26812） | OpMissCumsum 15836（14250） | OpSetUpdate 13602（13964） | OpAllocPop 5954（5860） | OpAllocPriority 5827（5610） |
+| warm_all_hit（Σ83277；88094） | OpHitMiss 23756 / 28.8%（26635） | OpMissCumsum 15622（14036） | OpSetUpdate 10850（11084） | OpAllocPop 5382（5278） | OpAllocPriority 5146（5351） |
+| full_cache_75pct（Σ197964；210956） | ArgtopkAllRows 96356 / 48.9%（105459，**−8.6%**） | OpHitMiss 26060（28154） | OpMissCumsum 16162（14658，+10% 噪声） | OpSetUpdate 14132（14241） | OpFreeRelease 8038（7712） |
+
+**验证结论**：
+
+1. **round-4 验证通过，残余风险兑现为安全**：audit/golden 全过。warm 两场景
+   −9.5%/−10.6%，**超出白付清理 −3~6% 的预期**；其中 OpHitMiss 自身降
+   −2.5~2.9K（26812→24356 / 26635→23756），假说（**待验证**）：prologue dcci
+   移除后，Step1 的 htd 读命中了 restore 拷贝留在 D-cache 的行。
+2. **P-E 收益重校准（重要教训）**：Argtopk 105.5K→96.4K，实际 −9.1K，**远低于
+   静态审计预期 −30K**。模型错误：把 pass1 hist 的 GM 读建成 64 次 × ~750cyc 的
+   串行依赖链，但 load 地址（`i += G` 步进）与加载数据无关，硬件 scoreboard 可
+   并行挂起多个 load——真实成本是**吞吐受限**而非延迟链（方法论教训录入 §7.11）。
+   **Argtopk 现为"栅栏地板（8 栅栏/行）+ pack GM 吞吐 + merge + emission"的弥散
+   结构，无单一主导相位**。边际规律：round-3 batch1 微观优化 −6K、[P-E] −9K，
+   Argtopk 内部每次微观优化的预期收益只有 ~5-10K。
+3. **§9.14 open question 1 关闭**：SIMT 回到 75-93 μs（§9.10 水平）→ 上一轮
+   SIMT ~2× 确认为设备占用干扰。**本轮比值可信：warm 0.72×/0.67×（Echo 领先，
+   warm 已进入 50-60 μs 目标档）、cold 1.25×、full 1.29×**。
+4. **Event 失真依旧**：本轮 warm/full 的 Event−内核差 ~600 μs vs cold ~140 μs，
+   规律未明（§9.14 open question 2 维持开放）→ 维持"只用 kernel 级 P50 + 分步
+   周期"的口径（§7.8）。
+5. **距 50-60 μs 的定量账**：full 现 198K 周期（120.12 μs @ ~1.65 GHz，可用
+   Σ197964 ÷ 120.12 μs 反推验证），目标 50-60 μs ≈ 80-95K 周期；**即使 Argtopk
+   （96.4K）归零余 101K ≈ 65 μs——不动结构到不了目标，v2（维护序，§10.3②）
+   必要性坐实**；v2 落点估 ~75 μs，50-60 μs 还需 v2 之上叠加 pipeline 压缩
+   （HitMiss 26K / MissCumsum 16K / SetUpdate 14K / FreeRelease 8K / misc 37K）。
+6. **int16 hist 扩 G=128 候选撤下**：曾评估把 hist 切片压 int32→int16 以在 UB 内
+   将 G=64 翻到 128、缩短 pass1 hist 的 GM 读链——[P-E] 后 pass1 已 UB-fed（读
+   key[]），该方案收益收缩而 merge 归并成本随 G 线性变贵，评估由正转负。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
 
-最新口径为 §9.14 上板复核（2026-10-16，第二台服务器，round-3 + d461f5d）：
-**warm 场景 64.39 / 61.92 μs、cold 92.94 μs、full_cache（解码稳态代表：缓存满 +
-每步 miss 必然淘汰）129.29 μs**。cold/warm 与 §9.10 消融 t512 噪声内一致（自适应
-blockDim 甜点兑现），full −5.9% 归因 round-3（ArgtopkAllRows 111.8K→105.5K 周期）。
-**Echo/SIMT 比值暂缓更新**：本轮 SIMT 分母疑似受扰偏慢约 2×（§9.14 open
-question 1，待同机重测），最近一次可信比值仍是 §9.10 的 0.78×/0.73×/1.24×/1.48×。
-full_cache 的大头仍是淘汰流水线——本轮分步（§9.14）ArgtopkAllRows 105.5K 周期、
-占 50.1%，依旧是唯一大头；进一步压缩要看行间软件流水与状态表示重构（§10.3②）。
-round-4（[P-E]+白付清理，工作区未提交，§9.15）在此之上预期：full_cache
-ArgtopkAllRows 105.5K→~75K 周期、kernel 129.29→~107-110 μs；warm 64.39/61.92→
-~61-63 μs、cold 92.94→~90-92 μs（估算口径，NPU 待验证）。
+最新口径为 §9.15 上板验证（2026-10-16，空闲设备，round-4＝3906f91+9b63e24，
+kernel 级 P50）：**warm 场景 58.28 / 55.34 μs、cold 94.16 μs、full_cache（解码
+稳态代表：缓存满 + 每步 miss 必然淘汰）120.12 μs**——较 round-3（§9.14）warm
+−9.5%/−10.6%、full −7.1%、cold 噪声内持平。**Echo/SIMT 比值（可信口径：SIMT 分母
+已随空闲设备重测恢复正常，§9.14 open question 1 关闭）**：warm **0.72×/0.67×
+（Echo 领先，warm 已进入 50-60 μs 目标档）**、cold 1.25×、full 1.29×。
+
+**距 50-60 μs 目标的定量差距（§9.15 验证结论 5）**：full_cache 现 198K 周期
+（120.12 μs @ ~1.65 GHz），目标 50-60 μs ≈ 80-95K 周期；即使 ArgtopkAllRows
+（96.4K、占 48.9%）归零，余项仍有 101K ≈ 65 μs——**不动结构到不了目标，v2
+（维护序，§10.3②）必要性坐实**；v2 落点估 ~75 μs，50-60 μs 还需 v2 之上叠加
+pipeline 压缩（HitMiss 26K / MissCumsum 16K / SetUpdate 14K / FreeRelease 8K /
+misc 37K）。Argtopk 自身经 round-4 重校准已是"栅栏地板 + pack 吞吐 + merge +
+emission"的弥散结构——无单一主导相位，每次微观优化预期仅 ~5-10K（§9.15），kernel
+内部继续抠 Argtopk 的边际收益有限。
 
 ### 10.2 地板项清单（不再可优化或收益有限的部分）
 
@@ -1521,6 +1593,7 @@ ArgtopkAllRows 105.5K→~75K 周期、kernel 129.29→~107-110 μs；warm 64.39/
 | 2026-10-16 | 第 5 版 | `d461f5d` | 修复 P-C UB freeIdx 绝对行索引越界（full_cache 挂死），改核内本地行索引（详见 §9.13） |
 | 2026-10-16 | 第 6 版 | `d461f5d`（上板复核） | round-3 两批 + UB freeIdx 修复上板复核（第二台服务器）：新增 §9.14（kernel 级 P50 / 分步周期 / full −5.9% 归因 / 两个测量 open question / 事故闭环）与 §1.6（基准单步口径 vs 真实 decode 多步推演）、§7.10（设备占用测量教训）；§9.11/§9.12/§10 复核状态与现状数字刷新；§11 日志表修复孤立行并核对日期 |
 | 2026-10-16 | 第 7 版 | 待提交（round-4：[P-E]+白付清理） | 同步工作区未提交的 round-4：[P-E] 反向 P-D（OpArgtopkRow 行首全员 pack + B0，hist 一律读 key，Argtopk 栅栏 7→8，§6.2/§6.7/§9.15）与白付清理 A/B（非 spec 跳过 prologue FillZero+SyncGrid、anyReset=0 跳过 Step0 四 Op+SyncGrid，打点槽保留，§5.1/§9.15）；§9.11 [P-D] 条目标注已被回退；全文 kernel.h 行号按当前工作区核对修正；附录⑥标记已解决；NPU 验证待做（预期数字与挂起二分顺序见 §9.15） |
+| 2026-10-16 | 第 8 版 | `3906f91`+`9b63e24`（上板验证） | round-4（[P-E]+白付清理）上板验证（空闲设备）结果写入：§9.15 新增上板验证小节（warm 58.28/55.34 μs＝0.72×/0.67× 超出白付清理预期、cold 94.16 μs、full 120.12 μs；P-E 收益重校准——Argtopk −9.1K 远低于静态预期 −30K，Argtopk 转弥散结构无单一主导相位；距 50-60 μs 定量账 → v2 必要性坐实；int16 hist 扩 G=128 候选撤下）；§9.14 open question 1 关闭（SIMT ~2× 确认为设备占用干扰，比值恢复可信）；§7.11 新增"静态延迟链模型高估依赖读成本"方法论教训；§9 总表 round-4 行、§10.1 现状、§2.2 比值引用、头部覆盖范围同步刷新 |
 
 ---
 
