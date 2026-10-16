@@ -4,7 +4,9 @@
 >
 > **本文档随代码迭代同步更新**：每次代码合入后由维护者增量修订对应章节，并在文末"文档更新日志"表追加一行。
 >
-> 覆盖范围：commit `1121091`（perf(echo): round-3 batch 2 — fold protect, relocate fifo++, split FifoAvail）。
+> 覆盖范围：commit `d461f5d`（fix(echo): index UB freeIdx by per-core local row；含
+> round-3 两批 f8b9c69+1121091）**＋ 工作区未提交的 round-4**（[P-E] 反向 P-D +
+> prologue/Step0 白付清理，§9.15，NPU 待验证）。
 > 工程全貌与运行命令见根目录 `README.md`，本文不重复，只做深读。
 
 ---
@@ -66,14 +68,14 @@ token，查询这些 token 的 KV 是否驻留在设备侧缓存槽中：命中�
 
 | 字段 | 形状 | 语义 |
 |---|---|---|
-| `current_slots` | `[rows, topk]` int32 | 每个 query 的最终槽位：hit = 原槽位（Step1 写），miss = 本轮分配的 `aslot`（Step5 回写，`echo_lru_kernel.h:935`） |
+| `current_slots` | `[rows, topk]` int32 | 每个 query 的最终槽位：hit = 原槽位（Step1 写），miss = 本轮分配的 `aslot`（Step5 回写，`echo_lru_kernel.h:950`） |
 | `miss_host_pos` | `[rows, topk]` int32 | miss 位置填 token 值（host 由此知道去主机取哪个 token 的 KV），hit 填 0（`compare.py:207`） |
-| `miss_alloc_flat` | `[rows, topk]` int32 | miss 填 `row*capacity + aslot`（**保留原接口约定，1 基槽位不减 1**），hit 填 0；**hit 位的 0 不是合法 miss 地址**（`compare.py:208`、`echo_lru_kernel.h:930`） |
+| `miss_alloc_flat` | `[rows, topk]` int32 | miss 填 `row*capacity + aslot`（**保留原接口约定，1 基槽位不减 1**），hit 填 0；**hit 位的 0 不是合法 miss 地址**（`compare.py:208`、`echo_lru_kernel.h:945`） |
 | `miss_mask` | `[rows, topk]` uint8 | 1 = miss。输出不做压缩（SIMT 是压缩前缀 + `miss_count`，两者格式不同） |
 
 `effTopk = min(topkDim, B)`（`echo_lru_plugin.cpp:77`）：防 buffer 超订的有效查询宽度。
 `j >= effTopk` 的位置是 inactive 尾巴：`curSlots=0`、`flat=0`、`mask=0`
-（`echo_lru_kernel.h:282,918`）。本基准 `topk ≤ capacity`，无 inactive 区。
+（`echo_lru_kernel.h:279,933`）。本基准 `topk ≤ capacity`，无 inactive 区。
 
 ### 1.3 一轮的语义时序
 
@@ -84,14 +86,14 @@ reset（若换请求）→ hit/miss 判定与计数 → hit 槽位 pri=fifo（�
 → miss 前缀秩扫描 → htd/dth/输出/curSlots 映射更新
 ```
 
-其中 `nm` = miss 数，`fs = max(nm - avail, 0)` = 需淘汰数（`echo_lru_kernel.h:308-310`）。
+其中 `nm` = miss 数，`fs = max(nm - avail, 0)` = 需淘汰数（`echo_lru_kernel.h:305-307`）。
 CPU 参考 `reference_echo`（`compare.py:159-211`）按同样时序用排序表达淘汰语义。
 
 ### 1.4 与 golden 的关系
 
 - **golden 只做结果验证，不参与计时**：CPU 参考"只有需要淘汰时才排序"，这是参考实现
   省掉无效计算（`compare.py:160-163`）；**设备实现无论是否淘汰都走常数趟数的基数选择
-  路径**（`fsClamp=0` 时提前返回，`echo_lru_kernel.h:419-422`），所以两者只在"输出"上等价，
+   路径**（`fsClamp=0` 时提前返回，`echo_lru_kernel.h:420-423`），所以两者只在"输出"上等价，
   不在"过程"上等价。
 - 验证方式是**逐字段全等**：`check_npu_result`（`compare.py:324-329`）把全部 6 个状态
   字段 + 4 个输出与 `reference_echo` 逐一比对，包括"没有使用的输出尾部、free 栈余量"
@@ -108,7 +110,7 @@ CPU 参考 `reference_echo`（`compare.py:159-211`）按同样时序用排序表
    **不能写 `capacity - rank`**（`compare.py:83-84` 注释）；`fifo = capacity + 1` 保证当前轮
    时间戳高于全部初始历史值；
 3. **free 栈倒序预埋**：空槽升序取出，故 `free[:n] = empty_slots[::-1]`，弹栈时小槽先出
-    （`compare.py:105-107`），与 kernel reset 行为 `free[col] = B - col`（`echo_lru_kernel.h:133`，
+     （`compare.py:105-107`），与 kernel reset 行为 `free[col] = B - col`（`echo_lru_kernel.h:130`，
     弹出顺序 1,2,3,…）语义一致。
 
 基准四场景（`SCENARIOS` 定义见 `compare.py:24-29`；同 seed 同 query，只差预埋与是否
@@ -120,6 +122,30 @@ reset，场景语义表见 README §3）：
 | `warm_75pct` | 512 | 2560 | 0 | 部分命中，无淘汰 → C1 整段跳过 |
 | `warm_all_hit` | 0 | 2048 | 0 | 全命中 |
 | `full_cache_75pct` | 512 | 0 | 512 | **缓存满，每步 miss 必然淘汰**——解码稳态的代表场景，Argtopk 唯一跑满的场景 |
+
+### 1.6 基准口径与真实 decode 的对应
+
+**基准是单步口径**：每次计时迭代都先 restore 同一初态再计时——`measure_one`
+（`compare.py:335-347`）的序列为 restore_state（内含 sync，`compare.py:298-302`）→
+start.record → invoke → end.record → sync。四场景数字都是"从各自初态出发走**一步**"
+的成本，观测不到跨步状态演化。
+
+**多步推演**（不 restore、同一请求连续解码，假设每步持续 512 miss）：warm_75pct
+初态 avail=2560（§1.5 表；`compare.py:105-107`），每步 −512 → **5 步耗尽，第 6 步
+起 fs=512 恒淘汰（avail 恒 0）≡ full_cache_75pct 稳态**。因此四场景对应的真实
+decode 语义：
+
+| 场景 | 真实 decode 中的角色 |
+|---|---|
+| `warm_75pct` | 请求生命周期前 5 步的**瞬态**（free 栈尚有余量，C1 整段跳过） |
+| `full_cache_75pct` | **长解码稳态**的代表（每步持续 miss>0 时，free 栈耗尽后恒淘汰） |
+| `warm_all_hit` | 理想化上界（全部命中、零淘汰） |
+| `cold_reset` | 请求切换事件（reset_mask 全 1，`compare.py:63,76`） |
+
+**远期成本提示（单步口径观测不到）**：fifo 每步 +2（`compare.py:187,203`），长期
+运行 fifo 超过 0xFFFF（自初值 4097 起约 3 万步）后 Argtopk 跳趟降为 3 趟（§6.5
+startPass 规则）；基准每次 restore 初态 fifo=4097（`compare.py:93`）恒 2 趟，该
+成本在本基准中不可见。维护序 v2（§10.3②）可顺带消除。
 
 ---
 
@@ -190,12 +216,12 @@ grid: blockNum 默认 = min(rows, vector cores)，可用 --blocks 覆盖（1..ro
 **为什么可以完全不跨核同步**：算法每行独立（§1.1），而每行只被一个核处理 → 任何
 GM 地址的写者与后续读者要么同核（行内跨线程 RAW，用块内栅栏解决），要么不存在跨核
 写后读。`SyncGrid()` 的注释明说"Path A: 每核只处理自己连续行段, 行间零数据依赖,
-无需跨核 sync"（`echo_lru_kernel.h:1148-1149`）。
+无需跨核 sync"（`echo_lru_kernel.h:1186-1187`）。
 
 **历史包袱（为什么叫 Path A）**：早期曾攻关 Stage 2 全元素 grid-stride 跨核协同
 （需要 `grid_group::sync()`），结论是"极简 probe 全 PASS，但 echo_lru Process 内哪怕
 一个 grid.sync 即 trap，根因是编译单元整体属性，不可复现"，2026-09-16 暂停，回退
-Path A（`echo_lru_kernel.h:1151-1156`、`:1302-1303`；详见上游 `GRID_GROUP_PITFALLS.md`，
+Path A（`echo_lru_kernel.h:1189-1194`、`:1345-1346`；详见上游 `GRID_GROUP_PITFALLS.md`，
 该文件不在本仓）。`csrc/echo/echo_lru_tiling.h:1-9` 头部注释仍残留"Plan B /
 grid_group::sync"时代描述，**以 Path A 实际代码为准**（README §9 亦有说明）。
 `blockNum ≤ 向量核数` 的约束仍由 plugin 强制（`echo_lru_plugin.cpp:91`）。
@@ -206,7 +232,7 @@ grid_group::sync"时代描述，**以 Path A 实际代码为准**（README §9 �
 
 | 常量 | 值 | 含义 | 出处 |
 |---|---:|---|---|
-| `ECHO_LRU_THREAD_NUM` | 1024（默认） | 每核线程数**上限**（= `__launch_bounds__`，`echo_lru_kernel.h:1269`）。实际启动线程数由 plugin 按 topkDim 运行时自适应（公式见下）；仅当 `ECHO_LRU_THREADS` 手动压低上限时才直接约束启动值。static_assert 三条：32 的倍数（warp 大小）、≥64（覆盖 G 路直方图切片）、≤1024（AIV launch 上限） | tiling.h:18-34 |
+| `ECHO_LRU_THREAD_NUM` | 1024（默认） | 每核线程数**上限**（= `__launch_bounds__`，`echo_lru_kernel.h:1312`）。实际启动线程数由 plugin 按 topkDim 运行时自适应（公式见下）；仅当 `ECHO_LRU_THREADS` 手动压低上限时才直接约束启动值。static_assert 三条：32 的倍数（warp 大小）、≥64（覆盖 G 路直方图切片）、≤1024（AIV launch 上限） | tiling.h:18-34 |
 | `ARGTOPK_B_MAX` | 4096 | B（=capacity）上界，plugin CHECK | tiling.h:43 |
 | `ARGTOPK_NPAD_MAX` | 128 | 遗留常量，当前无实际引用（仅出现在一行旧注释里） | tiling.h:44 |
 | `ARGTOPK_GM_NPAD_MAX` | 8192 | = next_pow2(B_MAX+1)：GM 调试 dump 每核 srcKey 容量 | tiling.h:45 |
@@ -249,12 +275,12 @@ launchThreads = clamp( round32(ceil(topk / 4)), 64, ECHO_LRU_THREAD_NUM )
 划分行段，`topkBufferB`=capacity，`freeStackSize`=B+min(topk,B)，`effTopk`=min(topk,B)，
 `specEnabled`（host 按 min(spl)<maxModelLenP1 判定，本基准恒 0），
 `argtopkGroupThreads`=G（`echo_lru_plugin.cpp:68-81`）。kernel 入口从 GM tiling 缓冲逐
-字段重载（`echo_lru_kernel.h:1275-1292`）。
+字段重载（`echo_lru_kernel.h:1318-1335`）。
 
 ### 3.3 单大 `__ubuf__` 数组分段布局
 
 kernel 入口声明 `__ubuf__ int32_t argtopkUb[ARGTOPK_UB_ELEMS]`（128 KiB 静态 UB，
-`echo_lru_kernel.h:1298`），`Init` 手动分段（`echo_lru_kernel.h:1021-1027`）：
+`echo_lru_kernel.h:1341`），`Init` 手动分段（`echo_lru_kernel.h:1036-1042`）：
 
 ```
 argtopkUb（每核一份, 块内共享, 无 myBlock 偏移）, npad = next_pow2(B+1) = 8192, G = 64
@@ -270,20 +296,20 @@ freeIdx 段 fi = rowsPerCore*topkDim, 门: 25096+fi ≤ 32768（基准形态 271
 **[P-C] freeIdx 迁 UB（带门）**：freeIdx 的读者全在本 kernel 内（OpFreeRelease /
 OpFreePush / OpAllocPop），且步骤按行批处理需容纳 `rowsPerCore*topkDim` 个元素——
 放得下就走 UB（省 GM 写 + emission 尾 dcci + 下游 GM 读），放不下（大 batch 形态）
-回退 GM（`echo_lru_kernel.h:1044-1054`，成员 `freeIdxUb_/freeIdxPtr_/freeIdxInUb_`
-`:1262-1264`）。freeIdx 段位于 scalar 之后的固定段峰值之外 [25096, +fi)，与
+回退 GM（`echo_lru_kernel.h:1059-1069`，成员 `freeIdxUb_/freeIdxPtr_/freeIdxInUb_`
+`:1305-1307`）。freeIdx 段位于 scalar 之后的固定段峰值之外 [25096, +fi)，与
 key/hist/globalCnt 等固定段零重叠；Step5 的 scan 缓冲只复用 key 区 [0,128)（见下），
 且彼时 freeIdx 已无读者（末次读者是 Step3 的 OpAllocPop）→ 分时复用无冲突。
 
 **为什么必须单大数组**：`probe_ub_size` 实测（Init 与 kernel 入口注释，
-`echo_lru_kernel.h:1015-1016,1293-1297`）：
+`echo_lru_kernel.h:1030-1031,1336-1339`）：
 - 多个独立 `__ubuf__` 数组会**别名互相覆盖**（读 A 得 D）；
 - 单 `__ubuf__` 数组可到 192 KiB（256 KiB 才 trap）。
 
 所以 key/hist/globalCnt/seg/scalar/freeIdx 全部分段塞进一个数组。`segLocal/segBase`
-是预留的分段 scatter 缓冲（基数选择路径未用，`(void)` 压未用告警，`echo_lru_kernel.h:601-602`）；
+是预留的分段 scatter 缓冲（基数选择路径未用，`(void)` 压未用告警，`echo_lru_kernel.h:615-616`）；
 `scalar` 在 [方向2] 决策本地化后**无任何读者**，槽位保留只为防 UB 布局漂移
-（`echo_lru_kernel.h:603`）。
+（`echo_lru_kernel.h:617`）。
 
 **UB 的分时复用**（同一块内存三个生命周期，互不重叠）：
 
@@ -291,12 +317,12 @@ key/hist/globalCnt 等固定段零重叠；Step5 的 scan 缓冲只复用 key �
 Step1:  argtopkKeyUb_[0..64) 作 warpScratch（行奇偶双缓冲 warp 归约 miss 计数）, [64] 作 C1 淘汰标志
 Step2:  key/hist/globalCnt/scalar 全量投入 radix select；freeIdx 段（若启用）作选择输出
 Step5:  ArgtopkAllRows 早已结束 → argtopkKeyUb_[0..128) 复用作 OpMissCumsum 的 scan 缓冲
-        （2 元素: 行奇偶双缓冲 [0,64)；4 元素: (行奇偶×scan序) 四缓冲 [0,128)，echo_lru_kernel.h:781,853-854）
+         （2 元素: 行奇偶双缓冲 [0,64)；4 元素: (行奇偶×scan序) 四缓冲 [0,128)，echo_lru_kernel.h:796,868-869）
 ```
 
 ### 3.4 GM workspace 布局与公式逐项对应
 
-kernel 侧布局在 `Init`（`echo_lru_kernel.h:996-1035`），host 侧公式在
+kernel 侧布局在 `Init`（`echo_lru_kernel.h:1011-1056`），host 侧公式在
 `EchoWorkspaceElements`（`csrc/echo/echo_lru_launch.h:21-30`），两者逐项一致：
 
 ```
@@ -318,7 +344,7 @@ int32 元素偏移
 
 对应关系：`base = rows*(capacity + 1 + 4 + 3*topk)` 中的 `1` = wsCumsum 的 `B+1`、
 `4` = pushCount/numHits/numMisses/freeSize、`3*topk` = freeIdx/rawSlots/wsMissRank
-（freeIdx 的 GM 段保留为 [P-C] 大 batch 回退落点，`echo_lru_kernel.h:1044-1054`）；
+（freeIdx 的 GM 段保留为 [P-C] 大 batch 回退落点，`echo_lru_kernel.h:1059-1069`）；
 `(base+1)&~1` 对应 Init 的 `elemOff = (o+1)&~1`（8 字节对齐）；`perBlock = 256 +
 ARGTOPK_GM_NPAD_MAX(8192)`（perf 构建再 +28 = ECHO_PERF_NUM_STEPS）。
 
@@ -329,7 +355,7 @@ ARGTOPK_GM_NPAD_MAX(8192)`（perf 构建再 +28 = ECHO_PERF_NUM_STEPS）。
 
 ### 3.5 栅栏模型：syncthreads + dcci 三明治
 
-两个原语（`echo_lru_kernel.h:1142-1161`）：
+两个原语（`echo_lru_kernel.h:1180-1199`）：
 
 - `asc_syncthreads()`：块内栅栏，解决**行内跨线程 RAW**——同一 GM/UB 地址被不同线程
   先写后读（例：OpHitMiss 的 hit 分支以 topkDim 步长写 `pri[row,s]`，OpArgtopkRow 以
@@ -349,18 +375,22 @@ asc_syncthreads();                          // 3) 全员的后继读排序在 dc
 **为什么 t0 做一次就够**：dcci_entire 作用于整核 cache，块内全部线程共享
 同一份 D-cache，多线程重复刷只是浪费（且一次 ~成本不低，见 §7）。
 
-**SyncBlock vs SyncGrid**：代码里两者实现相同（`echo_lru_kernel.h:1142-1161`），语义上
+**SyncBlock vs SyncGrid**：代码里两者实现相同（`echo_lru_kernel.h:1180-1199`），语义上
 区分"块内协作栅栏"与"步间栅栏"。裸 `asc_syncthreads()`（不带 dcci）用在两处
-（`echo_lru_kernel.h:1111,1125`）：Step2 freeIdx RAW 栅栏的 **UB 路径**（[P-C]：
+（`echo_lru_kernel.h:1149,1163`）：Step2 freeIdx RAW 栅栏的 **UB 路径**（[P-C]：
 freeIdx 在 UB 时块内栅栏即完成写→读排序，免 dcci；GM 路径仍走完整 SyncGrid）与
 Step4 的 **Bug2 栅栏**——后者要解决的是"**读先于写**"的排序（Bug2，§5），写在栅栏
 之后发生，不存在 stale 读问题；后续读者可见性由更后面的完整 SyncGrid 兜底。
+（OpArgtopkRow 行内的 B0/B1/B2/emission 栅栏也是裸 syncthreads，属行内结构，见
+§6.2/§6.7。另有两处步间 SyncGrid 自 round-4 起按条件门控：prologue FillZero 后的
+SyncGrid 仅 spec 时执行、Step0 尾 SyncGrid 仅本核行段有 reset 时执行——跳过论证见
+§9.15 白付清理 A/B。）
 
 ---
 
 ## 4. warp 协作原语
 
-`PackedBlockScan`（`echo_lru_kernel.h:56-72`）是全部 warp 协作的基础（OpArgtopkRow 的
+`PackedBlockScan`（`echo_lru_kernel.h:53-69`）是全部 warp 协作的基础（OpArgtopkRow 的
 emission、OpMissCumsum 的秩扫描都用它），对照 SIMT 基线的 `BlockExclusiveScan`
 （`sparse_kv_plan_kernel.cpp:107-139`）同构。
 
@@ -388,7 +418,7 @@ return base + inclusive - packedValue;             // exclusive = warp 基址 + 
 - **二级（本地重算）**：warp 基址 `base` 是 warpTotals 的**确定性函数**——给定栅栏后
   的同一 warpTotals 快照，每线程自己 `Σ warpTotals[0..warp)` 即可（≤32 次 UB 读，
   warp 数 ≤ 32），无需 t0 串行扫描、无需 warpBases 数组、无需第二次栅栏（[Scan-v2]
-  删除 B2，`echo_lru_kernel.h:67-71`）。
+  删除 B2，`echo_lru_kernel.h:64-68`）。
 - **grand total 本地 Σ**：全块总和相关论断（emission 的 totalLt/totalEq、秩扫描的
   total0/t0/t01/t2）也由**调用方**在返回后各自 `Σ warpTotals[0..warpCount)` 得到，
   `control[0]` 广播槽已删除。
@@ -401,8 +431,8 @@ return base + inclusive - packedValue;             // exclusive = warp 基址 + 
 
 | 调用点 | 打包 | 字段上界论证 |
 |---|---|---|
-| OpArgtopkRow emission（`echo_lru_kernel.h:565`） | `nLt \| (nEq << 16)` | 块内总和 ≤ validN = B+1 ≤ 4097 < 2^16（`echo_lru_kernel.h:564`） |
-| OpMissCumsum 2 元素路径（`:782`）/ 4 元素路径（`:855-856`） | `ind0 \| (ind1 << 12)`；4 元素再链一次 `ind2 \| (ind3 << 12)` | 块内各字段（各 tile）总和 ≤ topkDim ≤ 2048 < 2^12（`:738,801-803`） |
+| OpArgtopkRow emission（`echo_lru_kernel.h:579`） | `nLt \| (nEq << 16)` | 块内总和 ≤ validN = B+1 ≤ 4097 < 2^16（`echo_lru_kernel.h:578`） |
+| OpMissCumsum 2 元素路径（`:797`）/ 4 元素路径（`:870-871`） | `ind0 \| (ind1 << 12)`；4 元素再链一次 `ind2 \| (ind3 << 12)` | 块内各字段（各 tile）总和 ≤ topkDim ≤ 2048 < 2^12（`:753,816-817`） |
 
 ### 4.3 为什么只有 1 次栅栏（B2 的删除论证）
 
@@ -419,7 +449,7 @@ scan 才能复用它"（`sparse_kv_plan_kernel.cpp:105`）。Echo 先由 P4 删�
   到达下一轮 B1；而 X 的读发生在 X 到达下一轮 B1 **之前** → **读先于写**，安全；
 - **(b) 背靠背两次调用免栅栏**（OpMissCumsum 4 元素路径的链式 scan1/scan2）：同一行
   的 scan1 与 scan2 写的是**不相交的缓冲**（四缓冲按 (行奇偶 × scan 序) 轮转，
-  `echo_lru_kernel.h:804-807`），scan2 的写与 scan1 的读无同址竞争；跨行复用
+  `echo_lru_kernel.h:819-822`），scan2 的写与 scan1 的读无同址竞争；跨行复用
   （行 r+2 复用行 r 的缓冲）则隔着行 r+1 的 B1/B1 两次栅栏，同样读先于写。
 
 竞争对被"下一轮的 B1"天然隔开，B2 是纯冗余。这正是"1024 线程栅栏一次数千周期"
@@ -428,7 +458,7 @@ scan 才能复用它"（`sparse_kv_plan_kernel.cpp:105`）。Echo 先由 P4 删�
 
 ### 4.4 warp 数按 blockDim.x 运行时推导
 
-`warpCount = blockDim.x >> 5`（`echo_lru_kernel.h:59`）而不是编译期常量，原因
+`warpCount = blockDim.x >> 5`（`echo_lru_kernel.h:56`）而不是编译期常量，原因
 （`echo_lru_kernel.h:43`）：同一份源码要在多处跑——设备 blockDim 由 plugin 自适应
 传入（§3.2：生产 topk=2048 → 512 → 16 warp；上限 1024 → 32 warp；消融 knob 压到
 768/256 → 24/8 warp）、CPU 回归 `checks/check_echo_kernel_host.py` 模拟
@@ -447,19 +477,19 @@ blockDim=128（4 warp）。运行时推导使线程数变化（自适应公式�
 
 ### 5.1 总表
 
-`Process()`（`echo_lru_kernel.h:1060-1138`）内非 spec 路径共 20 个打点步，步名与
+`Process()`（`echo_lru_kernel.h:1075-1176`）内非 spec 路径共 20 个打点步，步名与
 `echo_perf_step.py` 的 `ECHO_PERF_STEP_NAMES`（`echo_perf_step.py:50-58`）一一对应。
 打点由 `PerfBegin/PerfEnd` 包裹（t0 的 `clock()` 差值写入 workspace 尾部，
-`echo_lru_kernel.h:1163-1185`）。
+`echo_lru_kernel.h:1201-1223`）。
 
 | # | 步名 | 函数 | 做什么（读 → 写） | 行内跨线程 RAW / 栅栏 |
 |---|---|---|---|---|
-| 0 | （无打点） | OpFillZero + SyncGrid | t0 清 pushCount（spec 用）；prologue 不在 20 步内 | — |
-| 1 | Step0.OpResetRows | OpResetRows | resetMask=1 行：htd 整行 `col==0?0:I32_MAX` | 各线程写各自列，无 RAW |
-| 2 | Step0.OpResetDthPri | OpResetDthPri | dth=I32_MAX；pri=`col==0?I32_MAX:-1` | 同上 |
-| 3 | Step0.OpResetFree | OpResetFree | free[col<B]=B−col，其余 0 | 同上 |
-| 4 | Step0.OpResetAvailFifo | OpResetAvailFifo | t0：avail=B，fifo=1 | t0-only；可见性由步 5 兜底 |
-| 5 | Step0.SyncGrid | SyncGrid | — | reset 写（含 t0 的 avail/fifo）→ Step1 读 htd（全员）/ avail（t0）|
+| 0 | （无打点） | OpFillZero + SyncGrid | t0 清 pushCount（spec 用）；**非 spec 时整段跳过**（[白付清理 A]，§9.15）；prologue 不在 20 步内 | — |
+| 1 | Step0.OpResetRows | OpResetRows | resetMask=1 行：htd 整行 `col==0?0:I32_MAX`；anyReset=0 时跳过（打点槽保留，[白付清理 B]） | 各线程写各自列，无 RAW |
+| 2 | Step0.OpResetDthPri | OpResetDthPri | dth=I32_MAX；pri=`col==0?I32_MAX:-1`；同上跳过 | 同上 |
+| 3 | Step0.OpResetFree | OpResetFree | free[col<B]=B−col，其余 0；同上跳过 | 同上 |
+| 4 | Step0.OpResetAvailFifo | OpResetAvailFifo | t0：avail=B，fifo=1；同上跳过 | t0-only；可见性由步 5 兜底 |
+| 5 | Step0.SyncGrid | SyncGrid | —；anyReset=0 时跳过 | reset 写（含 t0 的 avail/fifo）→ Step1 读 htd（全员）/ avail（t0）|
 | 6 | Step1.OpHitMiss | OpHitMiss | pos/htd → curSlots；hit 槽顺手写 pri=fifo（protect 折叠）；miss 计数 warp 归约；t0 写 numMisses/freeSize/C1 标志 | 1 栅栏/行（行奇偶双缓冲，[Scan-v2]） |
 | 7 | Step1.SyncGrid | SyncGrid | — | curSlots/pri 写 → Step2/3/5 读；numMisses/freeSize（t0 GM 写）经 dcci 对全员可见 |
 | 8 | Step2.ArgtopkAllRows | [C1] needFree=0 时**跳过** | radix select：pri/fifo → freeIdx（UB 或 GM，[P-C]） | 每行内部自带栅栏（§6） |
@@ -479,12 +509,16 @@ blockDim=128（4 warp）。运行时推导使线程数变化（自适应公式�
 ### 5.2 每步要点
 
 **Step0（reset 四连）**：只对 `resetMaskGm[row]!=0` 的行执行；行内 blockDim.x 线程
-（运行时自适应，§3.2；生产 topk=2048 → 512）grid-stride 扫列（`echo_lru_kernel.h:88-153`）。htd 行长 `maxModelLenP1`=262144 int32=1 MiB，cold
+（运行时自适应，§3.2；生产 topk=2048 → 512）grid-stride 扫列（`echo_lru_kernel.h:85-150`）。htd 行长 `maxModelLenP1`=262144 int32=1 MiB，cold
 场景 32 行全 reset → 每核 1 MiB 纯写，是 cold 场景的带宽地板项（§10）。步 5 的 SyncGrid
 同时解决"全员写 htd → 全员读 htd"与"t0 写 avail/fifo → t0 读 avail"两类依赖。
+**[白付清理 B]** 本核行段无 reset 时整段跳过（每线程各自读本核行段 resetMask 算出
+逐线程一致的 anyReset，`echo_lru_kernel.h:1105-1117`）：四个 reset Op 对该核行段本来
+就全部 continue 零写，步 5 SyncGrid 无 RAW 可保护；Step1 读的 htd/avail/fifo 是跨调用
+持久态，kernel 边界保证可见（§9.15）。打点槽原位保留（跳过记录 ≈0 周期，同 C1 做法）。
 
 **Step1：hit/miss 判定 + protect 折叠 + warp 归约计数 + fs 折叠 + C1 跳过标志**
-（`OpHitMiss`，`echo_lru_kernel.h:260-318`）：
+（`OpHitMiss`，`echo_lru_kernel.h:257-315`）：
 
 ```
 每线程: for j = t; j < topkDim; j += blockDim.x
@@ -506,28 +540,28 @@ t0:       nm = Σ warpScratch[(r&1)*32 + 0..warpCount)
 1. **[P0] 去 atomic**：atomic 版本每线程一次 `asc_atomic_add` 打同一 GM 地址，warm 场景
    ~1024 次/行 × 同地址 atomic 串行 ~9K 周期 → 该步实测 ~9.4M 周期（根因证据：cold 无
    atomic 仅 ~10K，hit 数 1536 vs 2048 耗时几乎相同 → 耗时与 atomic 次数强相关、与 hit
-   数无关）。改 warp 归约 + t0 汇总后一次 GM 写搞定（`echo_lru_kernel.h:248-251`）。
-    `numHitsGm` 槽位保留但不再读写（防 workspace 布局漂移，`echo_lru_kernel.h:257,1003`）。
+   数无关）。改 warp 归约 + t0 汇总后一次 GM 写搞定（`echo_lru_kernel.h:245-248`）。
+     `numHitsGm` 槽位保留但不再读写（防 workspace 布局漂移，`echo_lru_kernel.h:254,1018`）。
 2. **[P4] fs 折叠**：`fs = nm - avail`（clamp≥0）在 t0 汇总段顺手写出，省掉独立的
-   OpFreeSize 步及其 SyncGrid（`echo_lru_kernel.h:252-256,308-310`）。`nm` 直接数
+   OpFreeSize 步及其 SyncGrid（`echo_lru_kernel.h:249-253,305-307`）。`nm` 直接数
    `curSlots==I32_MAX` 的个数，与公式 `effTopk - numHits` 恒等。
 3. **[protect 折叠]**：hit 分支 slot 就在手边，顺手写 `pri[row, clamp(slot,0,B)] = fifo`
-   （本步初值 f，`echo_lru_kernel.h:279,290-295`）——免去独立步骤重读 curSlots 的
+   （本步初值 f，`echo_lru_kernel.h:276,287-292`）——免去独立步骤重读 curSlots 的
    O(topk) GM 往返与其前后 3 个栅栏。写冲突安全性：一行内 pos 不重复（§5 Step5 契约）
    → distinct token 经 htd 直查得 distinct slot（htd/dth 互逆），各线程写的 pri 地址
    互不相同；pri 行内写 → Argtopk 行内读的 RAW 由步 7 的 SyncGrid（dcci）保证。
 4. **[Scan-v2] 每行 1 栅栏（行奇偶双缓冲）**：warpScratch 按行奇偶双缓冲，行 r+2 复用
    buf(r&1)，中间隔着行 r+1 的栅栏 → t0 读先于下一轮 lane0 写，无需每行第二个
-   "复用保护"栅栏（`echo_lru_kernel.h:297-306`）。t0 的 GM 写可见性由步 7 的 SyncGrid
+   "复用保护"栅栏（`echo_lru_kernel.h:294-300`）。t0 的 GM 写可见性由步 7 的 SyncGrid
    兜底。
 5. **[C1] 标志**：`warpScratch[64]`（UB）写"本核任一行 fs>0"，经步 7 的 SyncGrid 对全
-   块可见；槽 64 与双缓冲占用的 [0,64) 不冲突（`echo_lru_kernel.h:314-317`）。
+   块可见；槽 64 与双缓冲占用的 [0,64) 不冲突（`echo_lru_kernel.h:311-314`）。
 
 **fifo 的两次自增与 Argtopk 的一致旧值（[OpFifoInc 挪位]，机理）**：fifo 每轮自增两次，
 语义逐值不变——protect 盖 f（Step1 读初值）、alloc 盖 f+1（Step4 OpAllocPriority）、
 终值 f+2（Step4 尾第二次自增），与 `reference_echo` 的两次 `fifo += 1`
 （`compare.py:187,203`）一致。第一次自增（OpFifoInc）位于 Step3 的 OpAllocPop **之后**
-（`echo_lru_kernel.h:1115-1121`，函数头注释 `:320-327`），这是关键的设计修正：
+（`echo_lru_kernel.h:1154-1158`，函数头注释 `:318-324`），这是关键的设计修正：
 
 - **若把 fifo++ 留在 protect 之后并删除其后 SyncGrid**：t0 率先执行 OpFifoInc，其 GM 写
   滞留在 t0 自己的 D-cache——t0 后续读 fifo 命中**新值**，其他线程读 GM 拿到**旧值**。
@@ -538,7 +572,7 @@ t0:       nm = Σ warpScratch[(r&1)*32 + 0..warpCount)
   全部 pri ≤ f 仍成立（protect 盖的就是 f），跳趟启发式的安全前提不变；fifo 的下一个
   读者是 Step4 的 OpAllocPriority（读 f+1），其可见性由步 14 的 SyncGrid 保证。
 
-**Step2：C1 条件执行**（`echo_lru_kernel.h:1102-1113`）：
+**Step2：C1 条件执行**（`echo_lru_kernel.h:1140-1151`）：
 
 ```cpp
 bool needFree = (argtopkKeyUb_[64] != 0);   // 步 7 之后读, 块统一条件
@@ -549,7 +583,7 @@ PerfBegin(); if (needFree) OpFreePush(...);                        PerfEnd();
 ```
 
 全 0（本核所有行 fs=0）时四步整体跳过，**步数/步名不变（打点记录 ≈0 周期）**。安全性
-论证（`echo_lru_kernel.h:1103-1107`）：fs=0 时 OpArgtopkRow 本来就走 fsClamp==0 提前
+论证（`echo_lru_kernel.h:1141-1145`）：fs=0 时 OpArgtopkRow 本来就走 fsClamp==0 提前
 返回；OpFreeRelease/OpFreePush 的 `j<fs` 循环体不执行；**freeIdx 无任何读者**——fs=0
 时 OpAllocPop 的 `readIdx = avail + 0 - nm + j`，由 fs=0 ⟹ nm≤avail 得 readIdx <
 avail，恒走老栈路径（§5 Step3），从不读 freeIdx；avail 也不变（+=0）。条件对全块统一
@@ -557,15 +591,15 @@ avail，恒走老栈路径（§5 Step3），从不读 freeIdx；avail 也不变�
 
 第二个打点是 [P-C] 的条件栅栏：freeIdx 在 UB 时，emission 写 → OpFreeRelease 读都是
 块内 UB 访问，普通 `asc_syncthreads()` 即完成排序（免 dcci）；GM 回退路径仍走完整
-SyncGrid（`echo_lru_kernel.h:1110-1111`）。
+SyncGrid（`echo_lru_kernel.h:1148-1149`）。
 
-Argtopk 本身见 §6。OpFreeRelease（`echo_lru_kernel.h:608-637`）对 j<fs 的每个淘汰槽：
-`pri=-1, dth=I32_MAX, htd[tok]=I32_MAX`（tok≠I32_MAX 时）。OpFreePush（`:639-660`）：
+Argtopk 本身见 §6。OpFreeRelease（`echo_lru_kernel.h:622-651`）对 j<fs 的每个淘汰槽：
+`pri=-1, dth=I32_MAX, htd[tok]=I32_MAX`（tok≠I32_MAX 时）。OpFreePush（`:653-674`）：
 `free[avail+j] = freeIdx[j]`——把新释放槽压回栈；P4 之后**本 kernel 内它没有读者**
 （OpAllocPop 直读 freeIdx，见下），其写入只为持久化给下一次调用，因此 FreePush 之后
 不再需要 SyncGrid。
 
-**Step3：OpAllocPop 直读 freeIdx 的等价性推导**（`echo_lru_kernel.h:671-705`）：
+**Step3：OpAllocPop 直读 freeIdx 的等价性推导**（`echo_lru_kernel.h:685-720`）：
 
 栈语义序列：FreePush 写 `free[availOld+k] = freeIdx[k]`（k<fs）→ avail += fs →
 avail −= nm → 弹出 `free[availOld + fs − nm + j]`（j<nm）。
@@ -580,23 +614,23 @@ avail 更新推迟到 Step4 尾，本步读到的 avail 恒为初值 availOld，
 - **readIdx < availOld**：老栈区段 `free[readIdx]`，本 kernel 从未写该区段（FreePush
   只写 [availOld, availOld+fs)），读老栈原值即可。
 
-两段合起来与栈弹出**逐值一致**（`echo_lru_kernel.h:662-670` 的注释即此推导；
+两段合起来与栈弹出**逐值一致**（`echo_lru_kernel.h:676-684` 的注释即此推导；
 `checks` 第 4 组用旧栈 golden 逐值验证，`check_echo_kernel_host.py:272-310`）。
 `j ≥ nm` 的位置填 0（无效）。freeIdx 的落点由 [P-C] 决定（`freeIdxPtr_`，UB 或 GM），
 两条路径输出逐位一致（`checks` 第 1b 组）。
 
 步 13 的 OpFifoInc（t0，全部行 f→f+1）紧随其后，其挪位机理见 Step1 末段。
 
-**Step4：OpAllocPriority + Bug2 栅栏 + FifoAvail 拆分**（`echo_lru_kernel.h:708-729,1123-1128`）：
+**Step4：OpAllocPriority + Bug2 栅栏 + FifoAvail 拆分**（`echo_lru_kernel.h:723-744,1161-1166`）：
 
 OpAllocPriority 对 j<nm 的每个分配槽写 `pri[row, clamp(aslot)] = fifo`——fifo 此时已是
 f+1（步 13 自增、步 14 可见）。**Bug2 栅栏**（步 16，裸 syncthreads，
-`echo_lru_kernel.h:1125-1126`）：全线程在 OpAllocPriority 里的 fifo 读必须先于 t0 在
+`echo_lru_kernel.h:1163-1164`）：全线程在 OpAllocPriority 里的 fifo 读必须先于 t0 在
 OpFifoAvailUpdate 里的第二次 fifo++，否则后到的线程会把 pri 多写 1（历史实测诊断：
 row143 slot3706 kernel=12 golden=11 diff+1）；该栅栏同时排空 avail 的全员读者。裸
 syncthreads 即可：竞争是"读（栅栏前）vs 写（栅栏后）"，不存在 stale 读。
 
-**OpFifoAvailUpdate 的 avail 终值恒等式**（`echo_lru_kernel.h:349-370`）：
+**OpFifoAvailUpdate 的 avail 终值恒等式**（`echo_lru_kernel.h:339-367`）：
 
 ```
 终值 avail' = availOld + fs − nm
@@ -607,35 +641,35 @@ syncthreads 即可：竞争是"读（栅栏前）vs 写（栅栏后）"，不存
 ```
 
 **[FifoAvail 拆分]**：fifo++ 与 avail+=fs−nm 无数据依赖，t0/t1 各管一个
-（`echo_lru_kernel.h:354-369`）——t0 的串行 GM 依赖访存从 6 次/行减半到 3 次（t1 同）。
-依赖分析（`:342-348,354-356`）：t0 读的 fifo 是自己写的（同线程 GM RAW 安全）；
+（`echo_lru_kernel.h:351-365`）——t0 的串行 GM 依赖访存从 6 次/行减半到 3 次（t1 同）。
+依赖分析（`:343-345,351-353`）：t0 读的 fifo 是自己写的（同线程 GM RAW 安全）；
 t1 读的 fs/nm 由 t0 在 Step1 写入、经步 7 SyncGrid dcci 可见；两写地址不同无冲突；
 avail 的全员读者（OpFreePush/OpAllocPop）已被步 14 与步 16 排空。**尾 SyncGrid 已删**：
 此步之后 pri/fifo/avail 在本 kernel 内再无读者，kernel 结束即对 host 可见
-（`echo_lru_kernel.h:1128`）。
+（`echo_lru_kernel.h:1166`）。
 
 **Step5：两级扫描 rank 拼装与 SetUpdate 回写**：
 
-`OpMissCumsum`（`echo_lru_kernel.h:748-895`）按门条件选三条路径之一（Bm =
+`OpMissCumsum`（`echo_lru_kernel.h:763-910`）按门条件选三条路径之一（Bm =
 blockDim.x）。每线程认领的都是**连续映射**位置（`p = t + k*Bm`，理由同 §6.6
 emission 的连续切片——rank 必须按位置序拼装，grid-stride 会得到"线程主序"）：
 
 | 路径 | 门条件 | 每线程位置 | 扫描结构 | 栅栏/行 |
 |---|---|---|---|---:|
-| 2 元素 | `topkDim ≤ 2*Bm`（`:759`） | p0=t, p1=t+Bm | 1 次 PackedBlockScan | 1 |
-| 4 元素 | `topkDim ≤ 4*Bm`（`:796`） | p0..p3 = t, t+Bm, t+2Bm, t+3Bm | 2 次链式 PackedBlockScan | 2 |
-| 串行 | 以上均不满足 | — | t0 逐位累加（`:881-894`） | 0 |
+| 2 元素 | `topkDim ≤ 2*Bm`（`:774`） | p0=t, p1=t+Bm | 1 次 PackedBlockScan | 1 |
+| 4 元素 | `topkDim ≤ 4*Bm`（`:811`） | p0..p3 = t, t+Bm, t+2Bm, t+3Bm | 2 次链式 PackedBlockScan | 2 |
+| 串行 | 以上均不满足 | — | t0 逐位累加（`:896-909`） | 0 |
 
 门只剩线程侧条件（UB 侧的 `2*/4*topkDim ≤ 8192` 是 Hillis-Steele 时代 bufA/bufB 缓冲
 的遗留约束，warp 扫描版 scratch 与 topkDim 无关，已删，commit 8856e2a；头注释
-`echo_lru_kernel.h:738-745`）。自适应 blockDim（§3.2）下的路径分布：生产 topk=2048 →
+`echo_lru_kernel.h:754-757`）。自适应 blockDim（§3.2）下的路径分布：生产 topk=2048 →
 Bm=512，2 元素门失效（2048 > 2×512），由 **4 元素路径**接住（2048 ≤ 4×512）——4 元素
 路径即生产路径；小 topk（≤ 128，Bm 压到 64 下限）命中 2 元素路径（topk ≤ 2×64）；
 topk > 4096 时 4×1024（上界）< topk → t0 串行（超出当前生产 topk 形态）——自适应
 blockDim 下 **topk ≤ 4096 恒并行**。消融 knob 把上限压到 256 时（4×256=1024 < 2048）
 回退串行——t256 消融崩塌的根因（§9.10）。
 
-**2 元素路径的 rank 拼装**（`echo_lru_kernel.h:759-795`）：
+**2 元素路径的 rank 拼装**（`echo_lru_kernel.h:777-809`）：
 
 ```
 e0(t) = Σ_{t'<t} ind0(t') = 位置 [0, t) 的 miss 数            → rank(p0=t)   = e0
@@ -644,15 +678,15 @@ total0 = (Σ warpTotals) & 0xFFF = 前半段 miss 总数              // [Scan-v
 rank(p1 = t+Bm) = total0 + e1(t)                          ← 后半段的排名 = 前半段总数 + 后半段内部前缀
 ```
 
-**4 元素路径的 rank 拼装**（`echo_lru_kernel.h:796-878`）：位置序切成四个
+**4 元素路径的 rank 拼装**（`echo_lru_kernel.h:811-893`）：位置序切成四个
 tile——[0,Bm) 由各线程 p0 覆盖、[Bm,2Bm) 由 p1、[2Bm,3Bm) 由 p2、[3Bm,4Bm) 由 p3。
 两次链式扫描（12bit 字段安全：各 tile 的 miss 总数 ≤ topkDim ≤ 2048 < 4096，
-`echo_lru_kernel.h:801-803`）：`excl1 = scan(ind0 | ind1<<12)` 覆盖 [0,2Bm)、
-`excl2 = scan(ind2 | ind3<<12)` 覆盖 [2Bm,4Bm)（`:855-856`）。**[Scan-v2] 四缓冲**：
+`echo_lru_kernel.h:816-817`）：`excl1 = scan(ind0 | ind1<<12)` 覆盖 [0,2Bm)、
+`excl2 = scan(ind2 | ind3<<12)` 覆盖 [2Bm,4Bm)（`:870-871`）。**[Scan-v2] 四缓冲**：
 warpTotals 按 (行奇偶 × scan 序) 轮转——行 r 的 scan1 用 `scanUb+(r&1)*64`、scan2 用
-`+32`（`:853-854`）；背靠背两次扫描间**不需要栅栏**（scan1/scan2 写不相交缓冲；行 r+2
+`+32`（`:868-869`）；背靠背两次扫描间**不需要栅栏**（scan1/scan2 写不相交缓冲；行 r+2
 复用本行缓冲时隔着行 r+1 的两次栅栏，论证见 §4.3(b)）；t0/t01/t2 由各线程返回后本地
-Σ 缓冲得出（`:859-863`），无 control 槽。rank 拼装（`:864-876`）：
+Σ 缓冲得出（`:874-878`），无 control 槽。rank 拼装（`:880-891`）：
 
 ```
 t0  = grand1 & 0xFFF             = [0,Bm) 的 miss 总数
@@ -660,7 +694,7 @@ t01 = t0 + (grand1 >> 12)        = [0,2Bm) 的 miss 总数
 t2  = grand2 & 0xFFF             = [2Bm,3Bm) 的 miss 总数
 rank(p0=t)     = e0
 rank(p1=t+Bm)  = t0  + e1       ← ⚠ 不能写 t01+e1：p1 在 tile1 段内而非段后，
-rank(p2=t+2Bm) = t01 + e2          多加 tile1 自身总数会让 rank 偏大（`:817-818`）
+rank(p2=t+2Bm) = t01 + e2          多加 tile1 自身总数会让 rank 偏大（`:832-833`）
 rank(p3=t+3Bm) = t01 + t2 + e3
 ```
 
@@ -669,28 +703,28 @@ commit d20fc50。）串行回退与两条并行路径语义逐字段一致（`ch
 golden）。scan 缓冲复用 argtopkKeyUb_（radix select 早已结束）：2 元素用行奇偶双缓冲
 [0,64)、4 元素用 (行奇偶×scan序) 四缓冲 [0,128)（§3.3）。
 
-`OpSetUpdate`（`echo_lru_kernel.h:897-942`）对每个 miss 位 j：
+`OpSetUpdate`（`echo_lru_kernel.h:912-957`）对每个 miss 位 j：
 `rank = wsMissRank[j]` → `aslot = rawSlots[rank]` → `htd[row, mpos] = aslot`、
 `dth[row, aslot] = mpos`、`missAllocFlat = row*B + aslot`、`missMask = 1`。**[P2] 顺手
 回写 `curSlots[j] = aslot`**：miss 的最终槽位就是本轮分配的 aslot，hit 位 curSlots 在
 Step1 已正确，独立的全量 gather 步（OpFinalSlots）是纯冗余，[P2] 已删除
-（`echo_lru_kernel.h:932-935`）。并行写 htd/dth 的地址不冲突由**输入契约**保证：同一行
+（`echo_lru_kernel.h:947-950`）。并行写 htd/dth 的地址不冲突由**输入契约**保证：同一行
 内 pos 不重复（一行 = 一个 request，topk 选出的 token id 必不重复，
-`echo_lru_kernel.h:906-909`）。
+`echo_lru_kernel.h:921-924`）。
 
 **spec 路径（Step0.5，本基准不覆盖）**：`specEnabled=1` 时在 Step0.SyncGrid 之后插入
 8 步（4 个 Op + 4 个栅栏）：`OpInvalidateSpecSuffix`（驱逐 `tok ≥ spl` 的投机后缀槽，
 写 wsCumsum 标记）→ `OpSpecCumsum`（t0 前缀和 + pushCount）→ `OpSpecPushFree`
 （差分判定 `cum[slot]−cum[slot−1]==1` 找回真 spec 槽压栈——**不能用 `cum>0`**，否则
-末段非 spec 槽会误判并发覆盖，见 `echo_lru_kernel.h:216-220` 的实战记录）→
+末段非 spec 槽会误判并发覆盖，见 `echo_lru_kernel.h:213-217` 的实战记录）→
 `OpSpecAvailAdd`。
 
 ---
 
 ## 6. Argtopk 基数选择深读
 
-本章是 Echo 的性能核心。`OpArgtopkRow`（`echo_lru_kernel.h:401-604`，头注释
-`:375-400`）解决：**从 B+1 个打包 key 中选出 pri 最小的 fsClamp 个槽，平局按槽号
+本章是 Echo 的性能核心。`OpArgtopkRow`（`echo_lru_kernel.h:403-618`，头注释
+`:372-402`）解决：**从 B+1 个打包 key 中选出 pri 最小的 fsClamp 个槽，平局按槽号
 升序，写入 freeIdxOut**。
 
 ### 6.1 目标与 key 打包
@@ -699,52 +733,61 @@ Step1 已正确，独立的全量 gather 步（OpFinalSlots）是纯冗余，[P2
 key[i] = (i==0 || i>B || pri[i]<0) ? I32_MAX : pri[i]        // i ∈ [0, validN=B+1)
 ```
 
-全非负、无效/填充沉底为 I32_MAX（`echo_lru_kernel.h:377,464`）。选择目标等价于
+全非负、无效/填充沉底为 I32_MAX（`echo_lru_kernel.h:374,438`）。选择目标等价于
 稳定排序 `(key, slot)` 字典序取前 fsClamp 个（`checks` 用 stable_sort 交叉验证，
 `check_echo_kernel_host.py:154-161`）。
 
-**key 数组只写 [0, B+1)**：[P-D] pack 融合后，key 的写入发生在首迭代 G 路 hist
-循环内（`for i = t; i < validN; i += G` 顺手写 `key[i]`，stride=G 恰好覆盖全部
-[0,validN)，`echo_lru_kernel.h:462-465`）。padding
+**key 数组只写 [0, B+1)**：[P-E] 后 key 的写入集中在行首独立的全员 pack 相位
+（`for i = t; i < validN; i += blockDim.x`，`echo_lru_kernel.h:436-439`），选择循环内
+不再写 key。padding
 区 [B+1, Npad) 的 Npad−(B+1) 个键（恒为 I32_MAX）**从不物化**——它们只在两处被
 "解析式"消费：merge 相位计入直方图（下文）、emission 越界时按序补索引——相比写满
 8192 个键的满扫描省掉约一半打包写入。CPU 回归显式断言 padding 区未被触碰
 （`check_echo_kernel_host.py:167`）。
 
-### 6.2 每趟结构：[hist] → B1 → [merge（破坏性）] → B2 → [本地决策]
+### 6.2 每行结构：行首 [pack（全员）] → B0；每趟 [hist] → B1 → [merge（破坏性）] → B2 → [本地决策]
 
-4 趟 MSB-first（pass 0 看 byte3，pass 3 看 byte0，`shift = (3-pass)*8`）。一趟的相位图：
+4 趟 MSB-first（pass 0 看 byte3，pass 3 看 byte0，`shift = (3-pass)*8`）。[P-E 反向 P-D]
+后的相位图——pack + B0 **每行一次**（位于 fsClamp==0 早退之后、attempt 循环之前，
+`echo_lru_kernel.h:429-440`），其余为每趟结构：
 
 ```
-┌──────────── 相位 (a) hist ─────────────────┐   ┌─ (b) merge ─┐   ┌─ (c) 本地决策 ─┐
-│ 首迭代: G 路清零各自 hist[256] 切片          │   │ 256 桶并行: │   │ 全员各自重算    │
-│         G 路直读 priGm 统计本字节直方图,     │ B1│ 每桶归并 G  │B2│ b/prefix/      │
-│         顺手写 key[i] ([P-D] pack 融合,      │ → │ 个切片, 读后│ →│ remaining      │
-│         stride=G 覆盖 [0,validN))           │   │ 清零 ([P-B])│   │ (寄存器 T/quota)│
-│ 后续趟: G 路读 key[] 统计(带 prefix 过滤,     │   │ +padding    │   │                 │
-│         不 clear —— 上趟 merge 已清零)       │   │ 解析式计入  │   │                 │
-└─────────────────────────────────────────────┘   └─────────────┘   └─────────────────┘
+┌──── (0) [P-E] pack ─────┐   ┌──────────── 相位 (a) hist ─────────┐   ┌─ (b) merge ─┐   ┌─ (c) 本地决策 ─┐
+│ 全块 blockDim 线程读    │   │ G 路读 key[] 统计本字节直方图       │   │ 256 桶并行: │   │ 全员各自重算    │
+│ priGm 写 key[] (每线程  │ B0│ 首迭代: 先清零各自 hist[256] 切片;   │ B1│ 每桶归并 G  │B2│ b/prefix/      │
+│ ≤ceil((B+1)/blockDim.x)│ → │ 后续趟: 不 clear —— 上趟 merge 已    │ → │ 个切片, 读后│ →│ remaining      │
+│ 次, 完全协同、高 MLP;   │   │ 破坏性清零; 带 prefix 过滤          │   │ 清零 ([P-B])│   │ (寄存器 T/quota)│
+│ 每行一次)               │   │                                    │   │ +padding    │   │                 │
+│                         │   │                                    │   │ 解析式计入  │   │                 │
+└─────────────────────────┘   └────────────────────────────────────┘   └─────────────┘   └─────────────────┘
 ```
 
-- **首迭代：[P-D] pack 融合 + clear 仅首次**（`echo_lru_kernel.h:450-471`）：G 路 active
-  线程的 hist 循环本来就读 priGm，顺手写 `key[i]`——独立的全员 pack 循环已删除。
-  clear 只在首迭代执行（`:459`），用途是覆盖 kernel 启动时 UB 的初始垃圾；首趟若
+- **[P-E] 行首全员 pack + B0**（`echo_lru_kernel.h:429-440`）：全块 blockDim 线程读
+  priGm 打包写 `key[i]`（每线程 ≤ceil(validN/blockDim.x) 次、完全协同、高 MLP），B0
+  栅栏隔开 "pack 写 key（全员）→ hist 读 key（G 路）" 的跨线程 RAW。此后 hist 首迭代
+  与后续趟**一律读 key[]（UB）**，pass1 起的 GM 依赖读链整体消除（动机与分步数据见
+  §9.15）。可见性：priGm 的上一个写者是 Step1 OpHitMiss（protect），由 Step1 尾
+  SyncGrid 保证；上一行 emission 对同一 key UB 区的读已由其尾部两栅栏排空（行间复用，
+  §9.13 教训：key 无行索引）。pack 必须放在 fsClamp==0 早退之后（checks 断言早退时
+  输出/UB/dbg 全不写）。
+- **首迭代：clear 仅首次**（`:473-474`）：用途是覆盖 kernel 启动时 UB 的初始垃圾；首趟若
   `startPass>0`，hist 带 `prefix=0` 候选过滤：`(v >> (shift+8)) == 0`
-  （key 的高于本字节的全零）；I32_MAX 键 byte3=0x7F≠0 被天然排除（`:466-470`）。
+  （key 的高于本字节的全零）；I32_MAX 键 byte3=0x7F≠0 被天然排除（`:475-476,479-483`）。
 - **后续趟：不 clear**（[P-B]）：上一趟 merge 已把全部 G×256 槽破坏性清零（见 (b)），
   hist 直接增量；过滤条件改为高字节匹配当前 `prefix`
-  （`(v >> (shift+8)) == (prefix >> (shift+8))`，`echo_lru_kernel.h:477`）。回退重跑
+  （`(v >> (shift+8)) == (prefix >> (shift+8))`，`echo_lru_kernel.h:490`）。回退重跑
   （§6.5 的 attempt=1）同样不 clear：快路径失败的 break 发生在 merge **之后**的决策段，
   彼时 hist 已被该趟 merge 清零 → 回退起跑时恒为全零。
 - **G=64 路纯写切片**：`ARGTOPK_GROUP_THREADS` 个线程各写自己独占的 `hist[t*256..]`
   切片，**无 atomic、无争用**（tiling.h:40-41）。
 
-**B1/B2 保护的读写对**（跨趟复用的安全性）：
+**B0/B1/B2 保护的读写对**（跨趟/跨行复用的安全性）：
 
 ```
 hist 切片:  pass p 的 merge 读+清零 (B1~B2 之间) vs  pass p+1 的 hist 增量写 (B2 之后)  → B2 分隔 ✓
 globalCnt:  pass p 的决策读 (B2 之后)         vs  pass p+1 的 merge 写 (B1(p+1) 之后)  → B1(p+1) 分隔 ✓
-key:        首迭代 pack 写 (B1(首趟) 之前)     vs  后续趟 hist 读                       → 首趟 B1+B2 分隔 ✓
+key:        [P-E] pack 写 (B0 之前, 全员)     vs  各趟 hist 读 (G 路, B0 之后)          → B0 分隔 ✓
+            上一行 emission 读 key            vs  本行 pack 写 (同一 UB 区复用)         → emission 尾 2 栅栏排空 ✓
 ```
 
 ### 6.3 merge：256 桶并行 + 破坏性清零 + padding 解析式计入
@@ -764,11 +807,11 @@ for (uint32_t b = t; b < 256; b += blockDim.x) {          // 256 桶摊给全块
 }
 ```
 
-（`echo_lru_kernel.h:487-504`。）
+（`echo_lru_kernel.h:497-518`。）
 
 - **256 桶并行**：t0 串行扫 G×256=16384 项的版本改为全块线程各领 ≤1 桶（循环步长
   blockDim.x，≥256 线程时每线程至多一桶）、每桶归并 G=64 个切片，**墙钟只有 G 次读**
-  （[B] 注释，`echo_lru_kernel.h:380-381`）。
+  （[B] 注释，`echo_lru_kernel.h:381`）。
 - **[P-B] 破坏性归并**：merge 读切片后顺手清零（`s += *slot; *slot = 0`）——清零写
   与下一趟 hist 增量之间有 B2 隔开，下一趟 hist 因此不再需要 clear 相位（首迭代除外，
   见 §6.2）。
@@ -781,10 +824,10 @@ for (uint32_t b = t; b < 256; b += blockDim.x) {          // 256 桶摊给全块
 
 ### 6.4 决策本地化（方向 2）：为什么能去掉第 3 次栅栏
 
-决策不经过任何广播（`echo_lru_kernel.h:507-533`）：**桶决策是 globalCnt 的确定性函数**
+决策不经过任何广播（`echo_lru_kernel.h:534-546`）：**桶决策是 globalCnt 的确定性函数**
 ——给定相同的 globalCnt 快照与相同的 remaining，任何线程执行同一段循环必然得到相同的
 b/prefix/remaining/T/quota。于是让**每个线程各自重算**（本数据 break 出现在前几个桶，
-每线程 ≤4 次 UB 读，`echo_lru_kernel.h:390-392`），T/quota 留在**寄存器**里直接给
+每线程 ≤4 次 UB 读，`echo_lru_kernel.h:391-392`），T/quota 留在**寄存器**里直接给
 emission 用。没有跨线程写 ⟹ 没有栅栏（对照：t0 串行决策 → 把 T/quota 写 scalar（UB）
 → 第 3 次栅栏广播 → 全员读 scalar 的结构需要那次栅栏）。`scalar` 从此无读者（槽位保留
 防布局漂移）。
@@ -804,10 +847,10 @@ remaining -= cum;                          // 桶内还差 remaining' 个
 T = prefix;  quota = remaining;
 ```
 
-**不变量**（`echo_lru_kernel.h:396-397`）：`|{key < T}| + quota == fsClamp`（计数含
+**不变量**（`echo_lru_kernel.h:398-399`）：`|{key < T}| + quota == fsClamp`（计数含
 padding）。归纳：每趟结束时 remaining' = fsClamp − |{高字节前缀 < prefix 的键}|，
 4 趟走完 T 即 fsClamp-th 小的键，quota = fsClamp − |{key<T}|。又 **remaining' ≥ 1 恒
-成立**：b-loop 在 `cum + c ≥ remaining` 时 break 且 `cum < remaining`（`:531` 注释），
+成立**：b-loop 在 `cum + c ≥ remaining` 时 break 且 `cum < remaining`（`:544` 注释），
 这保证下一趟必有候选、决策不会空转。
 
 ### 6.5 自适应跳趟（方向 1）：startPass、候选过滤与回退
@@ -820,10 +863,10 @@ else if ((fifoVal >> 8 ) != 0u) startPass = 2u;   // z=2 → 跳 pass 0..1
                                                     // z=3 → 只跑 byte0
 ```
 
-（`echo_lru_kernel.h:430-433`。）
+（`echo_lru_kernel.h:445-448`。）
 
 **依据**：pri 的唯一写入来源是 fifo（OpHitMiss 的 hit 分支 / OpAllocPriority 写
-`pri=fifo`），fifo 单调递增，故**当前所有有效 pri ≤ fifoVal**（`echo_lru_kernel.h:384-385`）。
+`pri=fifo`），fifo 单调递增，故**当前所有有效 pri ≤ fifoVal**（`echo_lru_kernel.h:385`）。
 Argtopk 读到的 fifoVal 恒为本轮初值 f（第一次自增在 Step3 OpAllocPop 之后，§5 Step1
 末段），故 pri ≤ f 前提稳定成立。若 fifoVal
 有 z 个前导零字节，则所有有效 pri 的前 z 个字节全零——**pass 0..z−1 对这些键的直方图
@@ -843,22 +886,22 @@ Argtopk 读到的 fifoVal 恒为本轮初值 f（第一次自增在 Step3 OpAllo
 `pass=0, remaining=fsClamp, prefix=0` 重来一次完整 4 趟（key 已打包，不重 pack、不重
 clear——失败趟的 merge 已破坏性清零，§6.2）。
 全趟候选 = 全部 Npad 个键 ≥ fsClamp（fsClamp ≤ topkDim ≤ Npad），**必然收敛**
-（`echo_lru_kernel.h:535-541`）。
+（`echo_lru_kernel.h:549-555`）。
 
 **健壮性不依赖 pri ≤ fifo**：跳趟只是启发式；启发式失效（pri>fifo 的键真实存在时）
 的表现是"快路径放不下 → 回退"，**任何输入下输出与全趟版逐位一致**——失效只损失
-性能，不损失正确性（`echo_lru_kernel.h:387-389`，commit 145d3ce 信息）。CPU 回归用
+性能，不损失正确性（`echo_lru_kernel.h:388-390`，commit 145d3ce 信息）。CPU 回归用
 4 个 fifo 变体（0x40000000 全趟 / 4097 跳2趟 / 65536 跳1趟 / 100 只跑 byte0）×
 全部 B/pattern 组合验证跳趟与回退路径输出 golden 与全趟逐位一致，含全 I32_MAX 键等
 强制回退用例（`check_echo_kernel_host.py:99-105,171-178`）。
 
 **外层 attempt 循环的写法**：`for (attempt = 0; attempt < 2; ++attempt)` + 迭代边界
 break，**刻意不用 `while(true)` + 数据依赖 continue**——后者会跨栅栏结构段错误（§7.6），
-前者与旧版 scalar[3] break 同构、已验证可编译（`echo_lru_kernel.h:441-445`）。
+   前者与旧版 scalar[3] break 同构、已验证可编译（`echo_lru_kernel.h:456-460`）。
 
 ### 6.6 emission：连续切片不变量与 padding 补齐
 
-选出 T/quota 后，全员把选择结果写出去（`echo_lru_kernel.h:545-599`）：
+选出 T/quota 后，全员把选择结果写出去（`echo_lru_kernel.h:559-613`）：
 
 ```
 1) 每线程统计自己连续切片 [lo, hi) 内:  nLt (key<T 个数) | nEq (key==T 个数) 打包
@@ -873,7 +916,7 @@ break，**刻意不用 `while(true)` + 数据依赖 continue**——后者会跨
 6) syncthreads; GM 路径 t0 再 dcci(freeIdxOut)                     ← 2 次"尾"栅栏 ([P-C]: UB 路径免 dcci)
 ```
 
-**连续切片不变量（为什么不能 grid-stride）**（`echo_lru_kernel.h:546-549`）：切片必须
+**连续切片不变量（为什么不能 grid-stride）**（`echo_lru_kernel.h:560-563`）：切片必须
 是 `lo = t*chunk` 的**连续区间**。若用 grid-stride（线程 t 拿 {t, t+blockDim.x, …}），扫描
 给出的写入基址按"线程主序"分配，各线程写出的键顺序会变成线程交错序——freeIdx 的
 输出顺序就不再是全局槽号升序，与原语义（稳定排序的 (pri,slot) 序）逐位不一致。连续
@@ -881,12 +924,12 @@ break，**刻意不用 `while(true)` + 数据依赖 continue**——后者会跨
 
 **输出语义**：先全部 key<T（槽号升序），再前 quota 个 key==T（槽号升序），越过有效区
 时补 padding 索引，尾部补 0。**key==T 平局取最小槽号**，与稳定排序 (pri, slot) 字典序
-一致（`echo_lru_kernel.h:398-400`）。
+一致（`echo_lru_kernel.h:400-402`）。
 
 **padding 补齐何时触发**：`m > 0` ⟺ quota > totalEq（有效区 ==T 键不够配额）。由选择
 不变量（计数含 padding）保证 `0 ≤ m ≤ padN`。基准形状下 `topkDim ≤ B < validN`，有效
 区键数总够，m 恒为 0；该路径为接口一般性（topkDim > B 的合法输入）保留，与满扫描
-版本逐位一致（`echo_lru_kernel.h:550-552,584-590`）。
+版本逐位一致（`echo_lru_kernel.h:564-566,598-604`）。
 
 ### 6.7 栅栏计数演变（基准路径，每行口径）
 
@@ -896,10 +939,12 @@ break，**刻意不用 `while(true)` + 数据依赖 continue**——后者会跨
 | [B] 重构后 | 3 | 4 | 4 | 16 |
 | 方向 1+2（145d3ce，fifo=4097 跳 2 趟） | 2 | 2 | 2（扫描）+2（尾） | **8** |
 | Scan-v2 + P-C（f8b9c69） | 2 | 2 | 1（扫描）+2（尾） | **7** |
+| [P-E] 反向 P-D（round-4，本轮） | 2 + 行首 B0×1 | 2 | 1（扫描）+2（尾） | **8**（= B0 1 + 2 趟×2 + 扫描 1 + 尾 2） |
 
-（按 `echo_lru_kernel.h:394-395` 注释的口径重算：[Scan-v2] 后 emission 扫描 2→1，
-合计 2×2+1+2=7；[P-C] UB 路径再免掉 emission 尾的 dcci。注意该代码注释本身仍记
-"扫描 2 + 尾 2 = 8"，未随 Scan-v2 更新——见文末"通读发现的不一致"⑥。）
+（[Scan-v2] 后 emission 扫描 2→1，合计 2×2+1+2=7；[P-C] UB 路径再免掉 emission 尾的
+dcci。[P-E] 加回行首 B0（pack 写 key → hist 读 key 的 RAW 栅栏），合计回到 8；头注释
+已同步更新为 "B0 1 + 基准 2 趟 × 2 栅栏 + emission 扫描 1 + 尾 2 = 8"（
+`echo_lru_kernel.h:395-397`）——文末"通读发现的不一致"⑥ 随本轮解决。）
 
 ---
 
@@ -913,8 +958,8 @@ CMakeLists.txt:131）纯 SIMT 后端的经验总结，改动相关代码前先�
 - **现象**：P0 前的 OpHitMiss 每线程一次 `asc_atomic_add` 打同一 GM 地址，warm 场景
   ~1024 次/行，该步实测 ~9.4M 周期（占绝对大头）。
 - **证据**：cold 场景 0 hit 无 atomic 仅 ~10K 周期；hit 数 1536（warm75）与 2048
-  （warm_all）两场景耗时几乎相同 → 耗时与 atomic 次数强相关、与有效工作量无关
-  （`echo_lru_kernel.h:248-251`）。
+（warm_all）两场景耗时几乎相同 → 耗时与 atomic 次数强相关、与有效工作量无关
+（`echo_lru_kernel.h:245-248`）。
 - **规避**：块内计数一律走 warp 归约/扫描（`asc_reduce_add`/`asc_shfl_up`）+ t0 汇总
   单写。CPU 回归甚至断言 `atomicCalls == 0`（`check_echo_kernel_host.py:244`）。
 
@@ -948,7 +993,7 @@ CMakeLists.txt:131）纯 SIMT 后端的经验总结，改动相关代码前先�
 ### 7.5 UB 多数组别名：必须单大 `__ubuf__` 数组
 
 - **实测**：多个独立 `__ubuf__` 数组会别名互相覆盖（读 A 得 D）；单数组可到 192 KiB
-  （256 KiB 才 trap）（`echo_lru_kernel.h:1015-1016,1293-1297`）。
+  （256 KiB 才 trap）（`echo_lru_kernel.h:1030-1031,1336-1339`）。
 - **规避**：argtopk 全部状态（key/hist/globalCnt/seg/scalar/freeIdx）分段塞进单个
   `argtopkUb[32768]`，分段偏移集中在 `Init` 一处管理（§3.3）。
 
@@ -957,17 +1002,17 @@ CMakeLists.txt:131）纯 SIMT 后端的经验总结，改动相关代码前先�
 1. **短路式里的文本 UB 被投机求值**：`pass == 0 || (v >> (shift+8)) == 0` 这种写法，
    pass 0 时 `shift+8 == 32`，`v >> 32` 是文本可见的 UB——即使短路逻辑上不会执行到，
    bisheng SIMT 后端可能**投机求值**导致段错误。规避：写成 if/else 分支，让 UB 表达式
-   不出现在 pass 0 的路径上（`echo_lru_kernel.h:454-455,466-470,490-494`）。
+    不出现在 pass 0 的路径上（`echo_lru_kernel.h:479-483,488-492,503-507`）。
 2. **`while(true)` + 数据依赖 continue 跨栅栏结构段错误**：attempt 循环刻意**不用**
    `while(true)` + continue 重跑——continue 的跳转目标取决于数据、且跨越栅栏结构，
    bisheng 前端收敛分析崩溃。规避：有界 `for (attempt < 2)` + 迭代边界 break（与旧版
-    scalar[3] break 同构，已验证可编译）（`echo_lru_kernel.h:441-445`；commit 145d3ce）。
+    scalar[3] break 同构，已验证可编译）（`echo_lru_kernel.h:456-460`；commit 145d3ce）。
 
 ### 7.7 dav-3510 无 64 位值运算
 
 - 设备侧热路径全部使用 32 位运算（kernel 内索引/计数均 uint32_t/int32_t）；仅有的
   uint64_t 是打点用的 `perfLast_` 与 `clock()` 差值，且**立即 clamp 到 0x7FFFFFFF 后以
-  int32 存储**（`echo_lru_kernel.h:1174-1176`）。手抄修正清单里专门有一条 "perfLast_
+  int32 存储**（`echo_lru_kernel.h:1214`）。手抄修正清单里专门有一条 "perfLast_
   截断为 32 位" 的教训（README）。写设备代码时不要引入 64 位算术路径。
 
 ### 7.8 Event 计时含 ~百 μs 固定开销，看 kernel 级要用 profiler
@@ -982,8 +1027,18 @@ CMakeLists.txt:131）纯 SIMT 后端的经验总结，改动相关代码前先�
 
 极简 probe 全 PASS，但 echo_lru Process 内哪怕一个 grid.sync 即 trap（输出全 0 不
 hang），根因是编译单元整体属性（Process 巨大/19 Op/Init 多 GM 指针，代码注释原文），
-probe 无法复现。跨核协同方案因此暂停（`echo_lru_kernel.h:1151-1156`）。**在可预见的将来不要
+probe 无法复现。跨核协同方案因此暂停（`echo_lru_kernel.h:1189-1194`）。**在可预见的将来不要
 在本 kernel 里尝试 grid.sync**。
+
+### 7.10 设备被占/残留进程：新进程第一次 sync 即 507034 超时
+
+- **现象**：round-3 上板复核（§9.14）途中一轮 compare.py 报"cold_reset 挂死"——
+  实为 507034 超时，出现在进程**第一次** `torch.npu.synchronize()`（`compare.py:294`，
+  `prepare_npu` 尾部，早于任何 op 调用）。
+- **根因**：device 1 已被他人占满；换卡后同一二进制四场景 golden 全过
+  （§9.14 事故闭环）。
+- **教训（测量 ops）**：挂死/超时**先 `npu-smi` 查卡占用与残留进程**、换卡或复位，
+  再归因代码——第一次 sync 就超时说明问题在设备/环境侧，与 kernel 代码无关。
 
 ---
 
@@ -1009,7 +1064,7 @@ CMakeLists 要点（`CMakeLists.txt:94-171`）：
   `-DECHO_LRU_THREAD_NUM_OVERRIDE=N` 同时加进 Echo kernel 的编译选项与 plugin 的
   `target_compile_definitions`（`CMakeLists.txt:100-113,165-170`）——plugin 侧它是
   自适应 blockDim 的 clamp 上限（`echo_lru_plugin.cpp:105-108`），kernel 侧它是
-  `__launch_bounds__`（`echo_lru_kernel.h:1269`），实际 `<<<blockNum, blockDim>>>`
+  `__launch_bounds__`（`echo_lru_kernel.h:1312`），实际 `<<<blockNum, blockDim>>>`
   传运行时计算值（`echo_lru_launch.cpp:8-9`）；上限必须 ≤ launch bounds，两侧同值
   注入即保证这一点，错位会静默 mismatch。
 - 系统 C++ 编两个 plugin，链接 torch/torch_npu/ascendcl/tiling_api/platform/
@@ -1117,8 +1172,9 @@ block、`std::barrier` 模拟 syncthreads、共享缓冲模拟 shfl_up/reduce_ad
 | B+C1+C2 | Argtopk 重构（该步 410K→199K）+ 无淘汰跳过 + 末行栅栏 | ~95K | 139K | 309K | 审计 0.91-0.97×（full 1.00×） |
 | 方向1+2（145d3ce） | 自适应跳趟 + 决策本地化 | — | — | Argtopk ~135→~87 μs（估算），kernel 210.51→162.16 μs | kernel 级 0.95×/0.91×（warm）、1.38×（cold）、1.75×（full） |
 | 消融基础设施（d20fc50） | 线程数可配 + 4 元素路径 + `--blocks`/`--rows` 入口 | — | — | —（默认 1024 线程路径无变化；消融结果见 §9.10） | — |
-| 自适应 blockDim（e2ca2fd） | plugin 按 topkDim 算 launchThreads，`<<<blockNum, blockDim>>>`（§3.2） | 63.30 / 59.17 μs | 91.44 μs | 137.38 μs | kernel 级 0.78×/0.73×（warm）、1.24×（cold）、1.48×（full）＝消融 t512 数字（§9.10）；自适应构建 NPU 复核待服务器 |
-| round-3 两批（f8b9c69+1121091） | Scan-v2 / 破坏性归并 / freeIdx 迁 UB / pack 融合 + protect 折叠 / fifo++ 挪位 / FifoAvail 拆分（非 spec 步骤 23→20，§9.11/§9.12） | — | — | —（动机分步数据见 §9.11；NPU 复核待服务器） | — |
+| 自适应 blockDim（e2ca2fd） | plugin 按 topkDim 算 launchThreads，`<<<blockNum, blockDim>>>`（§3.2） | 63.30 / 59.17 μs | 91.44 μs | 137.38 μs | kernel 级 0.78×/0.73×（warm）、1.24×（cold）、1.48×（full）＝消融 t512 数字（§9.10）；自适应构建 NPU 已复核（§9.14） |
+| round-3 两批（f8b9c69+1121091） | Scan-v2 / 破坏性归并 / freeIdx 迁 UB / pack 融合 + protect 折叠 / fifo++ 挪位 / FifoAvail 拆分（非 spec 步骤 23→20，§9.11/§9.12） | — | — | 129.29 μs / −5.9% vs t512（动机分步数据见 §9.11；上板复核见 §9.14） | — |
+| round-4（工作区未提交，§9.15） | [P-E] 反向 P-D（行首全员 pack + B0，Argtopk 栅栏 7→8）+ 白付清理 A/B（非 spec 跳过 prologue、无 reset 跳过 Step0） | 预期 ~61-63 μs（待验证） | 预期 ~90-92 μs（待验证） | 预期 ~107-110 μs（Argtopk 105.5K→~75K 周期，待验证） | — |
 
 **kernel 级 profiler（profile_kernel.sh，P50，SIMT/Echo，方向 1+2 落地后）**：
 
@@ -1139,7 +1195,7 @@ block、`std::barrier` 模拟 syncthreads、共享缓冲模拟 shfl_up/reduce_ad
 - **现象**：warm 场景该步 9.3-9.4M 周期，占绝对大头；cold（无 atomic）仅 ~10K。
 - **根因**：1024 线程对同一 GM 地址的 atomic 串行化，每次 ~9K 周期（§7.1）。
 - **改法**：warp 归约（`asc_reduce_add`）→ lane0 写 UB → 1 栅栏 → t0 汇总直接写
-  `numMisses`（`echo_lru_kernel.h:301-312`）；OpNumMisses 子步删除。
+  `numMisses`（`echo_lru_kernel.h:298-309`）；OpNumMisses 子步删除。
 - **效果**：warm 该步 9.4M → ~19K（source_manifest 记录），Event 比进入 <1 区间。
 
 ### 9.2 P1：Argtopk emission 并行化
@@ -1147,7 +1203,7 @@ block、`std::barrier` 模拟 syncthreads、共享缓冲模拟 shfl_up/reduce_ad
 - **现象**：full_cache 该步 ~2.1M 周期。
 - **根因**：t0 串行两遍 Npad 扫描 + 串行补零，延迟无法隐藏（§7.4）。
 - **改法**：全员连续切片统计 `(nLt | nEq<<16)` 打包块扫描得写入基址 → 并行写 + 并行
-  补零；连续切片保证输出仍按全局槽号升序、与原语义逐位一致（`echo_lru_kernel.h:545-549`）。
+  补零；连续切片保证输出仍按全局槽号升序、与原语义逐位一致（`echo_lru_kernel.h:560-563`）。
 - **效果**：该步 2.1M → 398K（source_manifest）。
 
 ### 9.3 P2：OpFinalSlots 删除
@@ -1155,7 +1211,7 @@ block、`std::barrier` 模拟 syncthreads、共享缓冲模拟 shfl_up/reduce_ad
 - **现象**：miss 的最终槽位在 OpSetUpdate 里已经现成（aslot），之后再全量 gather 一遍
   htd 纯属重复（~10K 周期 + 一个尾步栅栏）。
 - **改法**：OpSetUpdate 顺手写回 `curSlots[j]=aslot`（hit 位 Step1 已正确），
-  OpFinalSlots 删除（`echo_lru_kernel.h:932-935,945-946`）。
+  OpFinalSlots 删除（`echo_lru_kernel.h:947-950,959-961`）。
 
 ### 9.4 P3：OpMissCumsum 去 Hillis-Steele
 
@@ -1181,7 +1237,7 @@ block、`std::barrier` 模拟 syncthreads、共享缓冲模拟 shfl_up/reduce_ad
 - **改法**（§6.2/6.3）：pass 0 的 pack 与 clear+hist0 合并为单相位（hist0 直读 priGm，
   无交叉 RAW）；scalar 初始化与 dbg dump 折进 t0 决策段；每趟栅栏 4→3；merge 改 256
   桶并行；hist/pack/emission 只扫有效区 `[0, B+1)`，padding 键解析式计入 + emission
-  按需补齐——与旧满扫描输出逐位一致（`echo_lru_kernel.h:378-383`）。
+  按需补齐——与旧满扫描输出逐位一致（`echo_lru_kernel.h:381-384`）。
 - **效果**：该步 410K → 199K。
 
 ### 9.7 C1+C2：无淘汰跳过与末行栅栏
@@ -1249,8 +1305,8 @@ Echo/SIMT 比 rows128 warm 1.07–1.13×、rows64 1.17–1.25×（对比 rows32 
 
 **落地（e2ca2fd）**：plugin 按 topkDim 自适应 blockDim（§3.2），topk=2048 → 512
 自动落在甜点。本机验证：checks 171 项、自适应公式 9 组边界用例（含 2047/2049/4095）、
-bisheng kernel 编译（launch.cpp）exit 0、plugin 头语法检查；NPU 复核待服务器
-（预期 = t512 消融数字）。
+bisheng kernel 编译（launch.cpp）exit 0、plugin 头语法检查；NPU 复核已完成
+（§9.14：cold/warm 与 t512 数字噪声内一致，预期兑现；full −5.9% 归因 round-3）。
 
 ### 9.11 round-3 batch 1（commit f8b9c69）：Scan-v2 / 破坏性归并 / freeIdx 迁 UB / pack 融合
 
@@ -1271,10 +1327,11 @@ bisheng kernel 编译（launch.cpp）exit 0、plugin 头语法检查；NPU 复�
   GM（大 batch）；emission 尾 dcci 与 Process 中 Argtopk 后的 SyncGrid 均条件化（UB
   路径普通 syncthreads 即可）；OpFreeRelease/OpFreePush/OpAllocPop 改读 `freeIdxPtr_`。
 - **[P-D] pack 融合**（§6.2）：首趟 active 线程的 hist 循环（本来就读 priGm）顺手写
-  `key[i]`（stride=G 覆盖 [0,validN)），独立的全员 pack 循环删除。
+  `key[i]`（stride=G 覆盖 [0,validN)），独立的全员 pack 循环删除。（round-4 [P-E] 已
+  回退该融合，见 §9.15——融合删掉的 pack 循环本便宜，真正的 GM 依赖链未动。）
 - **验证（本机）**：checks 172 项 ASan/UBSan 通过（新增 UB 路径 vs GM 路径输出逐位
   一致用例；scan 缓冲扩至 160）；bisheng 三配置（默认/512 覆盖/打点）编译 exit 0；
-  g++ mock 全头语法通过。步骤数/步名不变（23 步）。NPU 验证待服务器。
+  g++ mock 全头语法通过。步骤数/步名不变（23 步）。NPU 复核已完成（§9.14）。
 
 ### 9.12 round-3 batch 2（commit 1121091）：protect 折叠 / fifo++ 挪位 / FifoAvail 拆分 / 步骤重排
 
@@ -1297,11 +1354,11 @@ bisheng kernel 编译（launch.cpp）exit 0、plugin 头语法检查；NPU 复�
   顺序逐一核对一致（§5.1）。
 - **验证（本机）**：checks 172 项 ASan/UBSan 通过（OpHitMiss 用例新增 protect pri
   时间戳 golden）；bisheng 三配置编译 exit 0；g++ mock 全头语法通过；步骤顺序 20+8
-  核对一致。NPU 验证待服务器。
+  核对一致。NPU 复核已完成（§9.14）。
 
 ---
 
-### 9.13 事故记录：UB freeIdx 绝对行索引越界（2026-10-17，d461f5d 修复）
+### 9.13 事故记录：UB freeIdx 绝对行索引越界（2026-10-16，d461f5d 修复）
 
 **现象**：round-3 后 compare.py 仅在 full_cache_75pct 挂死（其余三场景正常）。
 **根因**：[P-C] freeIdx 迁 UB 时沿用 GM 的绝对行索引 `freeIdxOut[row*topkDim+w]`；GM 布局按绝对行分区合法，但 UB 缓冲是每核私有的 `rowsPerCore*topkDim`（基准 1 行=2048 元素）。block≥1 写到 `uo+row*2048`，最大 32×2048=65544 ≫ ARGTOPK_UB_ELEMS=32768 → UB 越界写 → 核挂死。cold/warm 的 fs=0 被 C1 跳过不写 freeIdx，故仅 full_cache 触发。
@@ -1309,33 +1366,137 @@ bisheng kernel 编译（launch.cpp）exit 0、plugin 头语法检查；NPU 复�
 **修复**：UB 路径全部改核内本地行索引 `row-startRow`（OpArgtopkRow 的 freeIdxOut 参数语义改为"本行切片基址"，由 ArgtopkAllRows 计算传入；OpFreeRelease/OpFreePush/OpAllocPop 增加 freeIdxLocal 参数）；GM 回退路径保持绝对行。rawSlots 等其余 GM 量恒绝对行。
 **教训**：per-core 私有缓冲的行索引基准与全局共享缓冲不同，迁移数据结构时索引语义必须同步审计；单 block 测试无法暴露多 block 索引问题。
 
+### 9.14 round-3 上板复核（2026-10-16，第二台服务器）
+
+round-3 两批（f8b9c69+1121091，§9.11/§9.12）+ UB freeIdx 修复（d461f5d，§9.13）
+在第二台 NPU 服务器完成上板复核（自适应 blockDim 构建，topk=2048 → 512 线程，
+§3.2）。**事故闭环**：d461f5d 设备复测通过——full_cache_75pct 不再挂死，四场景
+golden 全过；此前一轮"cold_reset 挂死"实为 device 1 被他人占满（507034 出现在
+进程第一次 sync，`compare.py:294`，早于任何 op 调用，§7.10）。
+
+**kernel 级 P50**（profile_kernel.sh 口径，blocks=32、rows=32、topk=2048、
+capacity=4096）：
+
+| 场景 | SIMT μs | Echo μs | Echo/SIMT |
+|---|---:|---:|---:|
+| cold_reset | 140.86 | 92.94 | 0.66× |
+| warm_75pct | 150.28 | 64.39 | 0.43× |
+| warm_all_hit | 151.47 | 61.92 | 0.41× |
+| full_cache_75pct | 169.35 | 129.29 | 0.76× |
+
+**与 §9.10 消融 t512（前一台服务器、round-3 之前）的 Echo 对比**：
+
+| 场景 | §9.10 t512 | 本轮 | Δ | 判读 |
+|---|---:|---:|---:|---|
+| cold_reset | 91.44 | 92.94 | +1.6% | 噪声内复现 |
+| warm_75pct | 63.30 | 64.39 | +1.7% | 噪声内复现 |
+| warm_all_hit | 59.17 | 61.92 | +4.6% | 噪声内复现 |
+| full_cache_75pct | 137.38 | 129.29 | **−5.9%** | 归因 round-3 |
+
+cold/warm 跨机噪声内复现 → **Echo 数字跨机可信**，"自适应构建 = t512 消融数字"
+的预期兑现（§9.10）；full −5.9% 归因 round-3 的 Argtopk 定向优化——ArgtopkAllRows
+111.8K → 105.5K 周期（§9.11 动机数据 → 本轮分步，见下）。
+
+**分步数据**（echo_perf_step 口径，每步 = 最慢核跨轮中位，单位周期，% 为占该场景
+Σ步周期比。**本轮分步 μs 换算不可信**——见 open question 2，只看周期）：
+
+| 场景（Σ步周期） | Top1 | Top2 | Top3 | Top4 | Top5 |
+|---|---|---|---|---|---|
+| cold_reset（Σ138468） | OpResetRows 31788 / 23.1% | OpSetUpdate 23424 / 17.0% | OpHitMiss 20420 / 14.8% | OpMissCumsum 15542 / 11.3% | OpAllocPop 7317 / 5.3% |
+| warm_75pct（Σ96418） | OpHitMiss 26812 / 28.3% | OpMissCumsum 14250 / 15.0% | OpSetUpdate 13964 / 14.7% | OpAllocPop 5860 / 6.1% | OpAllocPriority 5610 / 5.8% |
+| warm_all_hit（Σ88094） | OpHitMiss 26635 / 30.4% | OpMissCumsum 14036 / 16.0% | OpSetUpdate 11084 / 12.6% | OpAllocPriority 5351 / 6.1% | OpAllocPop 5278 / 6.0% |
+| full_cache_75pct（Σ210956） | ArgtopkAllRows 105459 / 50.1% | OpHitMiss 28154 / 13.4% | OpMissCumsum 14658 / 7.0% | OpSetUpdate 14241 / 6.8% | OpFreeRelease 7712 / 3.7% |
+
+- **OpHitMiss 21.4K→28.2K（full 口径）不是回退**：protect 折叠（§9.12）把原独立
+  OpProtect 步（约 7K 周期）并入 OpHitMiss 的 hit 分支，属记账转移，两步合计相当。
+- **频率交叉验证**：Σ步周期 ÷ 本轮 kernel P50 ≈ 1.42–1.63 GHz（cold 138468 ÷
+  92.94 μs ≈ 1.49 GHz、full 210956 ÷ 129.29 μs ≈ 1.63 GHz），与历史 ~1.47 GHz
+  标定（§9 开篇注）一致 → **分步周期数可信**（尽管脚本自身的频率标定失真，见
+  open question 2）。
+
+**两个测量疑点（open question，暂不下结论）**：
+
+1. **SIMT 分母疑似受扰**：本轮 SIMT P50 比前一台服务器慢约 2×（cold 73.55→140.86、
+   warm_75 80.61→150.28、warm_all 81.08→151.47、full 92.65→169.35 μs；旧值见 §9
+   开篇方向 1+2 表，§9.10 反推一致）而 Echo 跨机复现 → 本轮 0.66×/0.43×/0.41×/
+   0.76× 比值**暂不可作正式结论**，待同机同 session 重测 SIMT。疑似共卡干扰或设备
+   状态差异：本轮 device 1 曾被他人占满（§7.10），换卡后继续。
+2. **Event 口径失真**：Event P50 与 kernel P50 的差距远超历史 ~200μs 量级开销
+   （§7.8；cold 641.67 vs 92.94 μs），echo_perf_step 频率标定随之失真（214/168/
+   180/386 MHz vs 真实 ~1.5 GHz）→ 本轮 Event 口径与分步 μs 换算**不可用**，只看
+   周期；host 侧疑似受扰。
+
+### 9.15 round-4：[P-E] 反向 P-D + prologue/Step0 白付清理（2026-10-16，工作区未提交，NPU 待验证）
+
+三处改动全部不改变任何输出（checks 逐位一致）；行号按当前工作区代码。主会话已逐
+hunk 审查通过。
+
+- **[P-E 反向 P-D]（OpArgtopkRow，`echo_lru_kernel.h:429-440`）**：在 fsClamp==0 早退
+  之后、attempt 循环之前新增**全员 pack 相位 + B0 栅栏**——全块 blockDim 线程读
+  priGm 写 key[]（每线程 ≤ceil(validN/blockDim.x) 次、完全协同、高 MLP），此后 hist
+  首迭代与后续趟一律读 key[]（UB）。**动机**：分步审计证实 pass1 hist 的 G=64 路 GM
+  依赖读链（每线程 64 次串行依赖读、MLP=64）占 Argtopk 105.5K 周期（§9.14）中的
+  40-51K，单项主导；round-3 [P-D] pack 融合删掉的全员 pack 循环本来就便宜（纯协同
+  写、无 GM 链），GM 读链一根没动——用 1 个 B0 把 priGm 读从 G=64 路换成全块
+  blockDim 路并行。**栅栏计数 7→8**（B0 1 + 2 趟×2 + emission 扫描 1 + 尾 2，§6.7；
+  头注释 `:395-397` 已同步）。可见性：priGm 的上一写者是 Step1 OpHitMiss（protect），
+  由 Step1 尾 SyncGrid 保证；上一行 emission 对同一 key UB 区的读已由其尾两栅栏排空
+  （§9.13 教训：key 无行索引）。
+- **[白付清理 A]（Process prologue，`echo_lru_kernel.h:1085-1095`）**：非 spec 时
+  OpFillZero + 其 SyncGrid 整段跳过——pushCount 的唯一读者 OpSpecAvailAdd 在
+  Step0.5 的 spec 门内，非 spec 时该 SyncGrid 无 RAW 可保护；prologue 本就不占
+  打点槽，无打点顺序影响。
+- **[白付清理 B]（Process Step0，`echo_lru_kernel.h:1097-1117`）**：每线程各自读本核
+  行段 resetMask 算同一 anyReset（全员读同样字节 → 逐线程一致 → 栅栏无发散），
+  anyReset=0 时四个 reset Op + Step0 SyncGrid 全跳过；打点槽原位保留（跳过记录 ≈0
+  周期，同 C1 做法，步数/步名/顺序不变）。**安全性论证**：四个 reset Op 对该核行段
+  本来就全部 continue 零写；Step1 读的 htd/avail/fifo 是跨调用持久态，写者在上一
+  invocation 或 host，kernel 边界保证可见（同 P4 删尾 SyncGrid 的论证：kernel 结束
+  即对 host/下一次调用可见），本 kernel 内无需 dcci。
+
+**本机验证**：checks 172 项全过（输出逐位不变）；`bash build.sh` 与
+`ECHO_PERF_STEP=ON bash build.sh` 均 exit 0；28 个打点槽顺序逐一核对一致。
+
+**NPU 预期（估算口径，待上板验证）**：full_cache ArgtopkAllRows 105.5K → ~75K 周期、
+kernel 129.29 → ~107-110 μs；warm 64.39/61.92 → ~61-63 μs；cold 92.94 → ~90-92 μs。
+
+**残余风险（来自代码子代理报告、主会话认可）**：跳过的两个 dcci 点的 invalidate
+侧——若 runtime 不在 kernel launch 时 invalidate 本核 D-cache 且跨核不连贯，
+warm/full 三场景可能读到 restore 前的 stale 行；compare.py 的 audit 第一轮（restore →
+哨兵污染 → invoke → 全量比对，§8.2）即可抓住。**NPU 若挂的二分顺序**：① 无条件恢复
+Step0 SyncGrid（保留其余）→ 过则锁定白付清理 B；② 再恢复 FillZero+SyncGrid → 过则
+锁定 A；③ 都恢复仍挂才查 P-E（B0 是加栅栏，priGm 读可见性与旧 pass1 直读同构，
+风险极低）。辅助判据：cold_reset 过而 warm/full 挂 → 强指跨 invocation 可见性问题。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
 
-见 §9.10 消融表。一句话：**blockDim 已按 topk 运行时自适应（§3.2），topk=2048 →
-512 落在消融甜点——warm 场景 Echo 领先（0.78×/0.73×），cold 1.24×，full_cache
-（解码稳态代表：缓存满 + 每步 miss 必然淘汰）仍落后 1.48×（137.38 vs ~92.9 μs）**。
-（数字为消融 t512 配置实测；自适应构建的 NPU 复核待服务器，预期一致。）full_cache
-的大头仍是淘汰流水线——512 线程自适应口径分步数据（§9.11 动机数据：ArgtopkAllRows
-111.8K 周期、占 51.9%）证实 Argtopk 依旧是唯一大头，round-3 两批 kernel 内优化
-（§9.11/§9.12：栅栏削减 + freeIdx 走 UB + 步骤 23→20）正对着它，NPU 复核后需重采
-分步；进一步压缩要看行间软件流水与状态表示重构（§10.3②）。
+最新口径为 §9.14 上板复核（2026-10-16，第二台服务器，round-3 + d461f5d）：
+**warm 场景 64.39 / 61.92 μs、cold 92.94 μs、full_cache（解码稳态代表：缓存满 +
+每步 miss 必然淘汰）129.29 μs**。cold/warm 与 §9.10 消融 t512 噪声内一致（自适应
+blockDim 甜点兑现），full −5.9% 归因 round-3（ArgtopkAllRows 111.8K→105.5K 周期）。
+**Echo/SIMT 比值暂缓更新**：本轮 SIMT 分母疑似受扰偏慢约 2×（§9.14 open
+question 1，待同机重测），最近一次可信比值仍是 §9.10 的 0.78×/0.73×/1.24×/1.48×。
+full_cache 的大头仍是淘汰流水线——本轮分步（§9.14）ArgtopkAllRows 105.5K 周期、
+占 50.1%，依旧是唯一大头；进一步压缩要看行间软件流水与状态表示重构（§10.3②）。
+round-4（[P-E]+白付清理，工作区未提交，§9.15）在此之上预期：full_cache
+ArgtopkAllRows 105.5K→~75K 周期、kernel 129.29→~107-110 μs；warm 64.39/61.92→
+~61-63 μs、cold 92.94→~90-92 μs（估算口径，NPU 待验证）。
 
 ### 10.2 地板项清单（不再可优化或收益有限的部分）
 
 | 项 | 场景 | 量级估算 | 依据 |
 |---|---|---|---|
-| OpResetRows 带宽 | cold | 每行 htd 1 MiB（262144 int32）纯写，32 行 = 32 MiB；cold 整 kernel 91.44 μs（t512 口径，§9.10），reset 是其中的主导步（若按整 kernel 摊算已 ≈360 GB/s，步内瞬时带宽更高，接近写带宽地板） | `echo_lru_kernel.h:98-99`，`compare.py:376` |
+| OpResetRows 带宽 | cold | 每行 htd 1 MiB（262144 int32）纯写，32 行 = 32 MiB；cold 整 kernel 91.44 μs（t512 口径，§9.10），reset 是其中的主导步（若按整 kernel 摊算已 ≈360 GB/s，步内瞬时带宽更高，接近写带宽地板） | `echo_lru_kernel.h:95-96`，`compare.py:376` |
 | OpHitMiss gather | 全部 | 每行 2048 次随机 GM 读（htd[row, tok]，跨 1 MiB 区间），cache miss 为主 | `echo_lru_kernel.h:281-286` |
 | 必要 scatter | 全部 | htd/dth/curSlots/flat/mask 的逐 miss 写 + pri 的逐 hit 写 | OpHitMiss（hit 分支）/OpSetUpdate |
 
 ### 10.3 已识别方向（按当前优先级排序）
 
-1. **round-3 上板复核 + 分步重采**：自适应 blockDim（e2ca2fd）与 round-3 两批优化
-   （f8b9c69+1121091）的 NPU 复核均待服务器；512 线程自适应口径的动机分步数据已采
-   （§9.11：full_cache Σ216K，Argtopk 111.8K 占 51.9%），优化落地后用 echo_perf_step
-   （§8.3，非 spec 20 步）重采，确认 Argtopk 栅栏削减与 freeIdx 走 UB 的实际收益。
+1. **round-3 上板复核 + 分步重采**：已完成（§9.14）——cold/warm 与消融 t512 噪声
+   内复现、full 129.29 μs（−5.9%，ArgtopkAllRows 111.8K→105.5K 周期，分步已重采）。
+   Argtopk 仍占 full 场景 50.1%，后续优化方向转入 ②③。
 2. **行间软件流水（rows 扩展性）或"维护序"v2 接口**：消融证实每核行间完全串行是
    结构性软肋（rows 64/128 时 warm 优势消失，§9.10）——在 Op 内 r 循环引入跨行
    重叠（软件流水）可改善 rows 扩展性；追平 SIMT ~50 μs 量级的根本路径则是把持久
@@ -1357,6 +1518,9 @@ bisheng kernel 编译（launch.cpp）exit 0、plugin 头语法检查；NPU 复�
 | 2026-10-15 | 第 2 版 | `d20fc50` | 同步消融基础设施（ECHO_LRU_THREADS 编译期线程数、OpMissCumsum 4 元素路径、`--blocks`/`--rows` 消融入口、README 消融章节）与方向 1+2 kernel 级实测（full_cache 162.16 μs=1.75×、warm 0.95/0.91×、cold 1.38×）；协作机制：本仓代码由 developer-code 子代理按主会话规格实现、文档由 developer-doc 维护、均经主会话审查 |
 | 2026-10-16 | 第 3 版 | `e2ca2fd` | 同步运行时自适应 blockDim（plugin 按 topkDim 计算 launchThreads、`launch_echo_lru` 增加 blockDim 参数、`ECHO_LRU_THREADS` 定位为纯消融 knob）与消融实验结论（§9.10：t512 全场景最优 −9%~−18%、t256 崩塌为串行 MissCumsum 混杂因素、blocks 16/8 单调变差、rows 64/128 行间串行软肋）；§10 现状与后续方向按当前优先级重排 |
 | 2026-10-16 | 第 4 版 | `1121091` | 同步 round-3 两批 kernel 内优化（f8b9c69：[Scan-v2] 单栅栏扫描/破坏性归并/[P-C] freeIdx 迁 UB/[P-D] pack 融合，§9.11；1121091：protect 折叠进 OpHitMiss/OpFifoInc 挪至 AllocPop 后/[FifoAvail 拆分]/非 spec 步骤 23→20 与 ECHO_PERF_NUM_STEPS 31→28，§9.12）；§4 单栅栏论证、§5 步表按 20 步重写（含 fifo 挪位机理）、§6 相位图与栅栏计数刷新；补全 8856e2a 扫描门 UB 侧条件删除的表格与正文同步；checks 172 项 |
+| 2026-10-16 | 第 5 版 | `d461f5d` | 修复 P-C UB freeIdx 绝对行索引越界（full_cache 挂死），改核内本地行索引（详见 §9.13） |
+| 2026-10-16 | 第 6 版 | `d461f5d`（上板复核） | round-3 两批 + UB freeIdx 修复上板复核（第二台服务器）：新增 §9.14（kernel 级 P50 / 分步周期 / full −5.9% 归因 / 两个测量 open question / 事故闭环）与 §1.6（基准单步口径 vs 真实 decode 多步推演）、§7.10（设备占用测量教训）；§9.11/§9.12/§10 复核状态与现状数字刷新；§11 日志表修复孤立行并核对日期 |
+| 2026-10-16 | 第 7 版 | 待提交（round-4：[P-E]+白付清理） | 同步工作区未提交的 round-4：[P-E] 反向 P-D（OpArgtopkRow 行首全员 pack + B0，hist 一律读 key，Argtopk 栅栏 7→8，§6.2/§6.7/§9.15）与白付清理 A/B（非 spec 跳过 prologue FillZero+SyncGrid、anyReset=0 跳过 Step0 四 Op+SyncGrid，打点槽保留，§5.1/§9.15）；§9.11 [P-D] 条目标注已被回退；全文 kernel.h 行号按当前工作区核对修正；附录⑥标记已解决；NPU 验证待做（预期数字与挂起二分顺序见 §9.15） |
 
 ---
 
@@ -1365,11 +1529,11 @@ bisheng kernel 编译（launch.cpp）exit 0、plugin 头语法检查；NPU 复�
 撰写与历次修订时逐条核对发现以下不一致，**均未改动任何代码**，仅在此登记，供后续修订
 README 或代码注释时参考：
 
-1. **README §"本次 Echo 更新"/§8 说 checks 为 "169 项"**：当前 `checks/check_echo_kernel_host.py`
+1. **README §"本次 Echo 更新"（`README.md:152`）说 checks 为 "171 项"**：当前 `checks/check_echo_kernel_host.py`
    实际产出 **172 项**（160+1+3+7+1，§8.5）——d20fc50 补 4 元素用例至 171 项后，
    f8b9c69 再加 [P-C] UB/GM 一致性用例至 172 项，README 数字未同步。
 2. **echo_lru_tiling.h:1-9 头注释**仍描述 "Plan B / grid_group::sync" 时代的排布；
-   **echo_lru_kernel.h:12,1267** 的 "<<<blockNum, 512, ...>>>" 是 512 线程旧值，且
+    **echo_lru_kernel.h:12,1310** 的 "<<<blockNum, 512, ...>>>" 是 512 线程旧值，且
    kernel 头部 `:15`、行段宏注释 `:83` 仍写 "行内 ECHO_LRU_THREAD_NUM(=1024) 线程"
    （`echo_lru_launch.cpp:8-9` 实际传 plugin 自适应的运行时 blockDim）。当前有效
    事实：Path A、blockDim 运行时自适应（上限 `ECHO_LRU_THREAD_NUM=1024`，§3.2）。
@@ -1380,14 +1544,16 @@ README 或代码注释时参考：
 4. **代码注释引用的 `GRID_GROUP_PITFALLS.md`、`probe_grid_sync/`、`probe_ub_size`、
    `golden.py`、`gen_data.py`、`echo-lru-argtopk-debug-status` 等上游工程产物不在本仓**，
    相关结论只能以注释转述为准（§3.1、§7.5、§5 spec 段）。
-5. **PackedBlockScan 头注释（echo_lru_kernel.h:46-55）**仍描述双栅栏 + `control[0]`
-   grand total + warpBases 的旧结构，与 [Scan-v2] 后的函数体（单缓冲、单栅栏、本地
-   重算，`:56-72`）不一致；§4 按函数体描述。
-6. **OpArgtopkRow 头注释（echo_lru_kernel.h:394-395）**的栅栏计数 "emission 扫描 2 +
-   尾 2 = 8" 未随 [Scan-v2] 更新——现扫描 1 + 尾 2，基准路径 7 栅栏/行（§6.7）。
-7. **OpMissCumsum 头注释（echo_lru_kernel.h:739）**仍写 "扫描 scratch 固定 66 槽
+5. **PackedBlockScan 头注释陈旧**——**已解决（d461f5d 轮）**：f8b9c69/1121091 时该
+   注释（曾位于 echo_lru_kernel.h:46-55）确仍描述双栅栏 + `control[0]` grand total +
+   warpBases 的旧结构；d461f5d 已改写为 [Scan-v2] 单栅栏/本地重算描述（现
+   `echo_lru_kernel.h:46-52`），与函数体（`:53-69`）一致；§4 按函数体描述。
+6. **OpArgtopkRow 头注释的栅栏计数陈旧**——**已解决（2026-10-16，round-4 [P-E]）**：
+   原注释（曾位于 echo_lru_kernel.h:391-392，旧条目误记 :394-395）的 "emission 扫描 2 +
+   尾 2 = 8" 未随 [Scan-v2] 更新；本轮 [P-E] 加 B0 时已一并改写为 "B0 1 + 基准 2 趟 × 2 栅栏 +
+   emission 扫描 1 + 尾 2 = 8"（现 `echo_lru_kernel.h:395-397`），与 §6.7 表一致。
+7. **OpMissCumsum 头注释（echo_lru_kernel.h:754）**仍写 "扫描 scratch 固定 66 槽
    （warpTotals/warpBases/ctrlA/ctrlB）"——[Scan-v2] 后为 (行奇偶×scan序) 四缓冲
    128 槽、无 warpBases/ctrl（§4.1/§5 Step5）。
 8. **kernel 头注释（echo_lru_kernel.h:17-18）**的行内跨线程 RAW 举例仍引用 OpProtect
    ——protect 已折叠进 OpHitMiss 的 hit 分支（§5 Step1），该 Op 函数已删除。
-| 2026-10-17 | d461f5d | 修复 P-C UB freeIdx 绝对行索引越界（full_cache 挂死），改核内本地行索引（详见 §9.13） |
