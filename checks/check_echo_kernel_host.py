@@ -27,7 +27,7 @@ root=Path(__file__).resolve().parents[1]
 # 断言模型常量与实际头文件一致，防止以后修改 tiling 后误用旧模型。
 tiling=(root/'csrc/echo/echo_lru_tiling.h').read_text()
 for name,value in [('ARGTOPK_GROUP_THREADS',64),('ARGTOPK_UB_NPAD_MAX',8192),
-                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',31)]:
+                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',28)]:
     match=re.search(r'constexpr uint32_t '+name+r'\s*=\s*(\d+)\s*;',tiling)
     assert match and int(match.group(1))==value, f'{name} 已改变，请同步调整 CPU 模型'
 src=(root/'csrc/echo/echo_lru_kernel.h').read_text()
@@ -209,25 +209,31 @@ try{
         ++checks;
     }
 
-    // ---- 2) OpHitMiss: warp 归约计数 (含 [P4] 折叠的 freeSize), 无 atomic ----
+    // ---- 2) OpHitMiss: warp 归约计数 + [P4] freeSize 折叠 + [protect 折叠], 无 atomic ----
     for(uint32_t eff:{4u,1536u,2048u}){
-        constexpr uint32_t R=3,L=4096,T=2048;
+        constexpr uint32_t R=3,L=4096,T=2048,B=4096;
         std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),misses(R,-777),fsOut(R,-777),scratch(65,-777);
-        std::vector<int32_t> avail(R);
-        for(uint32_t r=0;r<R;++r)avail[r]=static_cast<int32_t>(r*700+13);
+        std::vector<int32_t> avail(R),fifo(R),pri(R*(B+1),-777);
+        for(uint32_t r=0;r<R;++r){avail[r]=static_cast<int32_t>(r*700+13);fifo[r]=static_cast<int32_t>(1000+r);}
         for(uint32_t i=0;i<R*L;++i)htd[i]=(i%4==0)?I32_MAX:static_cast<int32_t>(i%4096);
         for(uint32_t i=0;i<R*T;++i)pos[i]=(i%7==0)?-1:static_cast<int32_t>((i*5)%(L+100));
         atomicCalls=0;
         int32_t anyFs=0;   // [C1] 淘汰标志 golden: 本核任一行 fs>0
-        launch([&]{OpHitMiss(R,T,eff,L,R,R,htd.data(),pos.data(),out.data(),
-                             misses.data(),avail.data(),fsOut.data(),scratch.data());});
+        launch([&]{OpHitMiss(R,T,eff,L,B,R,R,htd.data(),pos.data(),out.data(),
+                             misses.data(),avail.data(),fsOut.data(),pri.data(),fifo.data(),scratch.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t expectedMisses=0;
+            std::vector<int32_t> expectPri(R==0?B+1:B+1,-777);   // 本行 protect 期望
+            std::vector<int32_t> goldenPri(B+1,-777);
             for(uint32_t j=0;j<T;++j){
                 int32_t expectedSlot=j>=eff?0:htd[r*L+std::clamp(pos[r*T+j],0,static_cast<int32_t>(L-1))];
                 require(out[r*T+j]==expectedSlot,"hit slot mismatch");
                 if(j<eff&&expectedSlot==I32_MAX)++expectedMisses;
+                if(j<eff&&expectedSlot!=I32_MAX&&expectedSlot>=0&&expectedSlot<=static_cast<int32_t>(B))
+                    goldenPri[expectedSlot]=fifo[r];   // distinct token → distinct slot, 直接覆盖即期望
             }
+            for(uint32_t s2=0;s2<=B;++s2)
+                require(pri[r*(B+1)+s2]==goldenPri[s2],"[protect] pri timestamp mismatch");
             require(misses[r]==expectedMisses,"miss count mismatch");
             int32_t expectedFs=expectedMisses-avail[r];
             if(expectedFs<0)expectedFs=0;
