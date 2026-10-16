@@ -130,7 +130,7 @@ try{
             uint32_t startPass=3u;
             if((fifoVal>>24)!=0u)startPass=0u;else if((fifoVal>>16)!=0u)startPass=1u;else if((fifoVal>>8)!=0u)startPass=2u;
             bool const fullPass=(startPass==0u);
-            launch([&]{OpArgtopkRow(B,n,B,G,fifoVal,pri.data(),0,out.data(),freeSize,
+            launch([&]{OpArgtopkRow(B,n,B,G,fifoVal,pri.data(),0,out.data(),freeSize,true,
                 key,hist,globalCnt,segLocal,segBase,scalar,
                 dbgCount.data(),dbgKey.data());});
             if(fsClamp==0u){
@@ -180,6 +180,35 @@ try{
          }
         }
     }
+    // ---- 1b) [P-C] freeIdx 走 UB 路径 (freeIdxIsGm=false): 输出与 GM 路径 golden 一致 ----
+    {
+        const uint32_t B=64u;
+        uint32_t n=1;while(n<B+1)n*=2;
+        std::mt19937 rng(4242);
+        std::vector<int32_t> pri(B+1);
+        for(auto& q:pri) q=(rng()%5==0)?-1:static_cast<int32_t>(rng()%4);
+        int32_t freeSize=static_cast<int32_t>(rng()%B);
+        uint32_t fsClamp=freeSize<0?0u:(freeSize>(int32_t)B?B:(uint32_t)freeSize);
+        std::vector<int32_t> packed(n,I32_MAX);
+        for(uint32_t i=1;i<=B;++i)packed[i]=pri[i]<0?I32_MAX:pri[i];
+        constexpr uint32_t G=ARGTOPK_GROUP_THREADS;
+        uint32_t footprint=n+G*256u+256u+G*2u+G*2u+8u;
+        std::vector<int32_t> ub(32768+16,-777),outUB(B+16,-777),outGM(B+16,-777),dbgKey(n,-777);
+        std::vector<uint32_t> dbgCount(256,0x7fffffff);
+        int32_t *key=ub.data(),*hist=ub.data()+n,*globalCnt=hist+G*256u;
+        int32_t *segLocal=globalCnt+256u,*segBase=segLocal+G*2u,*scalar=segBase+G*2u;
+        uint32_t const fifoVal=4097u;
+        launch([&]{OpArgtopkRow(B,n,B,G,fifoVal,pri.data(),0,outGM.data(),freeSize,true,
+            key,hist,globalCnt,segLocal,segBase,scalar,dbgCount.data(),dbgKey.data());});
+        std::fill(ub.begin(),ub.end(),-777); std::fill(outUB.begin(),outUB.end(),-777);
+        std::fill(dbgKey.begin(),dbgKey.end(),-777); std::fill(dbgCount.begin(),dbgCount.end(),0x7fffffff);
+        launch([&]{OpArgtopkRow(B,n,B,G,fifoVal,pri.data(),0,outUB.data(),freeSize,false,
+            key,hist,globalCnt,segLocal,segBase,scalar,dbgCount.data(),dbgKey.data());});
+        // golden: 与 GM 路径逐位一致 (同一选择语义)
+        require(outUB==outGM,"[P-C] UB-path output differs from GM-path");
+        ++checks;
+    }
+
     // ---- 2) OpHitMiss: warp 归约计数 (含 [P4] 折叠的 freeSize), 无 atomic ----
     for(uint32_t eff:{4u,1536u,2048u}){
         constexpr uint32_t R=3,L=4096,T=2048;
@@ -220,7 +249,7 @@ try{
         std::vector<int32_t> cur(R*topk),pos(R*topk),rank(R*topk,-777),mpos(R*topk,-777);
         for(uint32_t i=0;i<R*topk;++i){cur[i]=(rng()%3==0)?I32_MAX:static_cast<int32_t>(rng()%4097);pos[i]=static_cast<int32_t>(rng()%9000);}
         // [P3] 只需 warp scratch (warpTotals[32]+warpBases[32]+ctrlA/ctrlB 两个控制槽 = 66) + 哨兵余量
-        std::vector<int32_t> scan(std::max<uint32_t>(2*topk+16,80),-777);
+        std::vector<int32_t> scan(std::max<uint32_t>(2*topk+16,160),-777);  // [Scan-v2] 四缓冲 128 槽+余量
         launch([&]{OpMissCumsum(R,topk,eff,R,R,cur.data(),pos.data(),rank.data(),mpos.data(),scan.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t serial=0;
