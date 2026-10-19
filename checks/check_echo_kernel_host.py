@@ -40,6 +40,17 @@ def extract(name):
             end=src.index('\n}\n',start)+3
             return src[start:end]
     raise KeyError(name)
+# ---- 整文件结构审计 (2026-10-19 教训: v2 Init 结尾多一个 '}' 把 class 提前关闭,
+#      bisheng 全文件编译才暴露, 而逐函数抽取的 mock 编译抓不到 —— 此处在 CPU
+#      侧先拦住这类问题): ① 大括号平衡; ② class 体完整 (Init/Process/两个行循环
+#      wrapper 都在 class 开闭之间); ③ 入口函数在 class 之后。----
+_open,_close=src.count('{'),src.count('}')
+assert _open==_close, f'kernel.h 大括号不平衡: {{={_open} }}={_close}'
+_cls=src.index('class EchoLruKernel {')
+_cls_end=src.index('\n};\n',_cls)
+for _m in ('void Init(','void Process(','void EvictScanAllRows(','void LruRebuildAllRows('):
+    assert _cls<src.index(_m,_cls)<_cls_end, f'{_m} 不在 class 体内 —— 作用域被破坏'
+assert src.index('echo_lru_kernel(')>_cls_end, '入口函数应在 class 之后'
 functions=(extract('PackedBlockScan')+'\n'+extract('OpHitMiss')+'\n'+extract('OpEvictScanRow')
            +'\n'+extract('OpLruRebuildRow')+'\n'+extract('OpMissCumsum')+'\n'+extract('OpAllocPop')
            +'\n'+extract('OpFifoAvailUpdate'))
