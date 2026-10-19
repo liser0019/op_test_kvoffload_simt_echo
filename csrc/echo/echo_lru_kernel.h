@@ -582,8 +582,18 @@ __aicore__ inline void OpLruRebuildRow(
     asc_syncthreads();
     // ---- phase D: 散射写回 GM lru。K: 切片基址+片内运行前缀 (位置序); H: totalK +
     //      hExcl[slot] (槽号升序); A: totalK+totalH + aExcl[aslot]; 尾 [occNew, B] 清零。 ----
-#ifndef ECHO_V2_RB_NOD
-    // [debug] RB_NOD: 跳过 phase D 的 GM 写 (栅栏配平保留) —— 判别 GM 写是否为 trap 触发源。
+#if defined(ECHO_V2_RB_NOD)
+    // [debug] RB_NOD: 跳过 phase D 全部 GM 写 (栅栏配平保留)。
+    (void)baseK;
+#elif defined(ECHO_V2_RB_ZEROONLY)
+    // [debug] RB_ZEROONLY: phase D 换全行清零 (与 OpResetDthLru 的 lru 写同型 ——
+    //   该模式已在 Step0 被设备验证安全; 用于判别触发源是 "写容量/模式" 还是
+    //   "数据依赖散射")。
+    (void)baseK;
+    for (uint32_t p = t; p <= B; p += blockDim.x) {
+        lruGm[lruRowOff + p] = 0;
+    }
+#else
     int32_t runK = baseK;
     for (uint32_t p = lo; p < hi; ++p) {
         int32_t slot = lruUb[p];
@@ -605,11 +615,11 @@ __aicore__ inline void OpLruRebuildRow(
     }
     // 尾部清零: occNew = totalK + totalH + nm = occ − fsClamp' + nm ≤ B (avail' ≥ 0 恒等式)
     uint32_t occNew = totalK + totalH + nm;
+#ifndef ECHO_V2_RB_NOTAIL
     for (uint32_t p = occNew + t; p <= B; p += blockDim.x) {
         lruGm[lruRowOff + p] = 0;
     }
-#else
-    (void)baseK;   // [debug] RB_NOD: phase D 跳过 (防未用告警)
+#endif
 #endif
     asc_syncthreads();                       // B4: flagsUb/aAtUb/lruUb/hExclUb/aExclUb 下一行 phase A 复用保护
 }
