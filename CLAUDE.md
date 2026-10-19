@@ -33,7 +33,7 @@ SIMT 基线（`csrc/simt/`，同仓对照）竞争。
 1. 本文件
 2. `docs/ascend_vec_simt_stack_overflow.md` — 最阴险的设备坑，先读
 3. `docs/echo_lru_deep_dive.md` — 技术深读（注意头部 **v2 转型 banner**；
-   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.19 最新；§10.3 是方向清单）
+   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.20 最新；§10.3 是方向清单）
 4. `README.md` — 工程全貌
 
 ## 当前状态（2026-10-19，tag `v2.0`）
@@ -55,8 +55,8 @@ v2 维护序重构（lru 顺序数组取代 pri 时间戳 + Argtopk 基数选择
 
 ## 下一步优先级（deep-dive §10.3，按序）
 
-1. **FifoAvailUpdate 并行化**：32 行 t0/t1 串行 GM RMW → 摊给全线程，
-   6.2K → ~1K。低风险。
+1. **opt3 FifoAvail 预置摊销上板验证**（§9.20，已实现待验证：早算 stash + 纯存储
+   摊开，预期 FifoAvail 6.2K→~1K）。
 2. **Rebuild 常数削减**：flags staging 跨 Step2/Step4 复用（Step2 的
    EvictScan 已 stage 过 flags 到 UB，Step4 重复 stage——中间隔 Step3
    SyncGrid 且无写者，可复用，省 4097 GM 读 + 4097 UB 写）。中风险（UB 生命周期论证）。
@@ -78,7 +78,7 @@ v2 维护序重构（lru 顺序数组取代 pri 时间戳 + Argtopk 基数选择
 
 ```bash
 git pull
-python3 checks/check_echo_kernel_host.py        # CPU 回归 50 项（纯 stdlib+g++）
+python3 checks/check_echo_kernel_host.py        # CPU 回归 52 项（纯 stdlib+g++）
 bash build.sh && ECHO_PERF_STEP=ON bash build.sh
 python compare.py --device 0 --warmup 2 --repeat 4 --verify-each-sample  # 四场景 golden
 bash profile_kernel.sh --device 0               # kernel 级 P50
@@ -98,7 +98,7 @@ csrc/echo/          Echo kernel (echo_lru_kernel.h 主体) + plugin + launch
 csrc/simt/          SIMT 基线（同事的，一般不动）
 compare.py          基准主控（输入构造/golden/校验/计时）
 echo_perf_step.py   分步周期；profile_kernel.sh|py  kernel 级 P50
-checks/             50 项 CPU 回归（从 kernel.h 文本提取函数 + g++ mock）
+checks/             52 项 CPU 回归（从 kernel.h 文本提取函数 + g++ mock）
 debug_v2_state.py   逐字段 mismatch dump；debug_v2_stepcycles.py  打点取证
 docs/               deep-dive（主文档）+ 栈溢出全记录
 build_t*/ build_perf*/ build_v2dbg/   各构建产物目录（.gitignore）

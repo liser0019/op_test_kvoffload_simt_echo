@@ -4,7 +4,7 @@
 >
 > **本文档随代码迭代同步更新**：每次代码合入后由维护者增量修订对应章节，并在文末"文档更新日志"表追加一行。
 >
-> 覆盖范围：v2 维护序重构 + 栈溢出修复 + v2-opt1/2（§9.17–§9.19，2026-10-19）。
+> 覆盖范围：v2 维护序重构 + 栈溢出修复 + v2-opt1/2/3（§9.17–§9.20，2026-10-19）。
 >
 > ⚠ **v2 转型说明（2026-10-19）**：淘汰路径已从 pri 时间戳 + Argtopk 基数选择重构为
 > lru 顺序数组 + 每步重建（§9.17）。本文 §5（20 步表）、§6（Argtopk 深读）及 §9.6–§9.12
@@ -1719,6 +1719,60 @@ freeIdx 写 → OpAllocPop 读，跨 Op 依赖，与 B4 性质不同）。checks
 kernel P50：warm_all 77.25→74.02（0.91×）、warm75 79.18→77.59（0.96×）、
 full 104.06→100.68（1.08×）、cold 111.73→108.19。快照 tag `v2.0`。
 
+### 9.20 v2-opt 第 2 轮：FifoAvail 预置摊销（早算 stash + 纯存储摊开）（2026-10-19，NPU 待验证）
+
+**动机**：分步 FifoAvail 6.2K（warm 口径，v2.0）。构成分析：基准形态 blocks=32、
+rowsPerCore=1（batch=32）——每核只有 1 行，t0 做 `fifoGm[row]+=2`、t1 做
+`availGm[row]+=fs-nm`，均为一次冷 GM 读→写 RMW 链；分步打点只记 t0 的 clock
+（PerfBegin/PerfEnd，`echo_lru_kernel.h:1317-1339`），故 6.2K ≈ t0 的单次冷读链
+延迟（fifo/avail 的上一写者是上一 invocation；且紧邻的 LruRebuild 刚做完大量散射
+写，cache/写队列均冷）。推论：rowsPerCore=1 时"把行摊给更多线程"字面上无事可
+摊——优化必须把 GM 读移出 Step4 打点窗口。
+
+**设计（早算 + 晚写摊开，两半缺一不可）**：
+- **早算**（`echo_lru_kernel.h:339-352`）：Step1 OpHitMiss 的 t0 汇总段本来就为
+  `fs = nm - availGm[row]` 冷读一次 avail；在其紧邻之前再发一次 `fifoGm[row]`
+  冷读（两读同时在途，t0 等待≈不变），就地算出终值 `fifoNew = fifoOld + 2`、
+  `availNew = availOld + fs - nm`，写入 UB stash 专段（每行 2 int，[2r]=fifoNew、
+  [2r+1]=availNew，r 为核内本地行号）。
+- **晚写摊开**（`echo_lru_kernel.h:391-402`）：Step4 尾 OpFifoAvailUpdate 改为行摊
+  全线程（`r = threadIdx.x` 步进 blockDim.x，每线程至多一行/pass），每线程读
+  stash 2 个 UB int，对 fifoGm/availGm 做两次独立纯 GM store（无依赖链
+  fire-and-forget），打点窗口 ~百周期级。
+- **为何必须"早算晚写"而不能把整步挪到 Step1 后**：avail 在 Step2/Step3 有读者
+  （OpFreePush/OpAllocPop 必须读到旧值 availOld——occ = B−availOld 的全部推导
+  依赖它），写必须留在 Step4 尾（Step3 尾 SyncGrid 已排空这些读者）。
+- **语义等价**：fifo/avail 在 Step1→Step4 间无任何写者（写者仅 Step0 reset /
+  Step0.5 spec，均在 Step1 之前，且各自后续有 SyncGrid/内核边界保证可见；另一个
+  写者就是本 Op 自身），终值在 Step1 t0 段即完全确定；终值公式与老 RMW 路径逐位
+  相同（checks 6b 两链逐位互证）。
+- **可见性链**：t0 Step1 写 UB stash → Step1 尾 SyncGrid（syncthreads）→ Step4
+  全员读。UB 跨线程 RAW 只需 syncthreads 不需 dcci（先例：freeIdx UB 路径，
+  EvictScan 写→行内尾栅栏→FreeRelease 读）。
+- **UB 布局**（`echo_lru_kernel.h:1160-1171`）：stash 专段追加在 rbScan 段之后
+  （256 对齐、容量 2×rowsPerCore int），专段专用、不与 freeIdx/rbScan/scanScratch
+  分时复用（避开 EvictScan/Rebuild/RB_SERIAL 的生命周期交叠）。基准形态
+  （rowsPerCore=1）逐段实算：5 大段（基址 256 对齐、精确尺寸 B+1）尾 21761 →
+  freeIdx@21761+2048 → rbScan@24064+2112 → faStash@26368，UB 峰值 26370 ≤
+  ARGTOPK_UB_ELEMS=32768（余 6398）。放不下（超大 batch）时 faStashInUb_=false
+  回退原 t0/t1 串行 RMW（freeIdxInUb_ 同型回退，回退分支与 v2.0 实现逐字符等价）。
+- **栈安全声明**：无新增栈数组（stash 在 UB 段）；两个受改 Op 保持 noinline
+  （§9.18 规则），签名只增标量参数，帧大小不变。
+
+**预期**：FifoAvail 6.2K → ~0.5-1K（打点窗口内无 GM 读）；HitMiss 25K → 25~26K
+（fifo 冷读与 avail 冷读并行在途，rowsPerCore=1 时 +2 次 UB 写可忽略）；P50 粗估
+warm75 77.6→~74.5 / warm_all 74.0→~71 / full 100.7→~97.5 / cold 108.2→~107
+（cold 的 fifo/avail 是 Step0 刚写的 L2 热，收益小）。
+
+**风险声明**：6.2K 的微观构成（冷读延迟 vs Rebuild 写队列排空的连带）是推断；
+方案对两种成因都有效（读移出打点窗口 + 写摊开均为纯收益，不依赖成因假设）。
+若不及预期，分步表 HitMiss/FifoAvail 两槽的此消彼长可直接切换归因再迭代。
+
+**checks**：50 → 52 项（组 4 顺势断言 stash 内容与 fifo 只读；新增 6b 两路径终值
+逐位等价——覆盖 nm>avail / nm<avail / nm=0 三类值；6c 多行摊开 + 尾核守卫）。
+
+**上板验证**：待做（golden 四场景 + kernel P50 + 分步表，流程同 §9.19）。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
@@ -1741,9 +1795,8 @@ v1 终版快照：tag `v1-argtopk-final`（§9.14/9.15 数字）。
 
 ### 10.3 已识别方向（按当前优先级排序）
 
-1. **v2-opt 第 1 轮验证**（§9.19，已实现待上板）：nm=0 快路径 + 末行免 B4，
-   预期 warm Rebuild −5~8K；随后 FifoAvail 并行化（32 行 t0/t1 串行 RMW 6K →
-   摊给全线程 ~1K）。
+1. **opt3 FifoAvail 预置摊销上板验证**（§9.20，已实现待验证：早算 stash + 纯存储
+   摊开，预期 FifoAvail 6.2K→~1K）。
 2. **Rebuild 常数削减**（结构性）：固定开销 = flags staging（4097 GM 读）+
    槽域 O(B) 扫描 + 5 栅栏。候选：staging 合并（flags 与 aAt 清零已合并，lru
    staging 可与 classify 融合省一趟 UB 写）、栅栏再削（B1 与 scan1 内部栅栏
@@ -1772,6 +1825,7 @@ v1 终版快照：tag `v1-argtopk-final`（§9.14/9.15 数字）。
 | 2026-10-16 | 第 6 版 | `d461f5d`（上板复核） | round-3 两批 + UB freeIdx 修复上板复核（第二台服务器）：新增 §9.14（kernel 级 P50 / 分步周期 / full −5.9% 归因 / 两个测量 open question / 事故闭环）与 §1.6（基准单步口径 vs 真实 decode 多步推演）、§7.10（设备占用测量教训）；§9.11/§9.12/§10 复核状态与现状数字刷新；§11 日志表修复孤立行并核对日期 |
 | 2026-10-16 | 第 7 版 | 待提交（round-4：[P-E]+白付清理） | 同步工作区未提交的 round-4：[P-E] 反向 P-D（OpArgtopkRow 行首全员 pack + B0，hist 一律读 key，Argtopk 栅栏 7→8，§6.2/§6.7/§9.15）与白付清理 A/B（非 spec 跳过 prologue FillZero+SyncGrid、anyReset=0 跳过 Step0 四 Op+SyncGrid，打点槽保留，§5.1/§9.15）；§9.11 [P-D] 条目标注已被回退；全文 kernel.h 行号按当前工作区核对修正；附录⑥标记已解决；NPU 验证待做（预期数字与挂起二分顺序见 §9.15） |
 | 2026-10-16 | 第 8 版 | `3906f91`+`9b63e24`（上板验证） | round-4（[P-E]+白付清理）上板验证（空闲设备）结果写入：§9.15 新增上板验证小节（warm 58.28/55.34 μs＝0.72×/0.67× 超出白付清理预期、cold 94.16 μs、full 120.12 μs；P-E 收益重校准——Argtopk −9.1K 远低于静态预期 −30K，Argtopk 转弥散结构无单一主导相位；距 50-60 μs 定量账 → v2 必要性坐实；int16 hist 扩 G=128 候选撤下）；§9.14 open question 1 关闭（SIMT ~2× 确认为设备占用干扰，比值恢复可信）；§7.11 新增"静态延迟链模型高估依赖读成本"方法论教训；§9 总表 round-4 行、§10.1 现状、§2.2 比值引用、头部覆盖范围同步刷新 |
+| 2026-10-19 | 第 12 版 | 待提交（v2-opt3） | §9.20 新增 FifoAvail 预置摊销（早算 stash + 纯存储摊开，NPU 待验证）：6.2K 构成分析、设计论证（为何必须早算晚写 / 语义等价 / UB 专段布局 峰值 26370/32768 / 栈安全）、预期与风险声明；§10.3 重排（opt3 上板验证列条目 1）；头部覆盖范围更新（§9.17–§9.20）；checks 50→52 项（组 4 stash 内容断言 + 6b 两路径终值逐位等价 + 6c 多行摊开/尾核守卫）；CLAUDE.md 优先级与工作流同步 |
 | 2026-10-19 | 第 11 版 | v2.0（6f4ad92+验证） | §9.19 opt1/2 上板验证（Rebuild warm_all 37.2→30.5K，P50 四场景 −2~−4%）；§10.1 刷新至 v2.0 数字；快照 tag v2.0。交接文档 CLAUDE.md 新增（新 AI 接手用） |
 | 2026-10-19 | 第 10 版 | v2 轮（fe10f91..本轮） | 恢复记录（按 owner 指示跳过中间误判过程）：新增 §9.17 v2 维护序重构全记录（设计/接口变更/上板 P50/分步/warm 回退账目）、§9.18 栈溢出事故（根因+修复，详见 §7.12 与独立文档）、§9.19 v2-opt1/2（待验证）；§7.12 新增 VEC SIMT 栈溢出条目（含 §7.9 grid.sync 关联修订）；头部 v2 转型 banner（§5/§6 Argtopk 内容保留为 v1 历史，checks 50 项）；§10.1/§10.3 按 v2 现状重写 |
 | 2026-10-19 | 第 9 版 | `05046f2`（NPU 待验证） | 恢复按 owner 指示暂停的文档同步：新增 §9.16 round-4b（emission 尾栅栏去重——OpArgtopkRow 函数尾栅栏 GM-only、Process Step2.SyncGrid 槽 UB 路径跳过；Argtopk 栅栏 UB 8→7/行）；§6.7 表追加 round-4b 行并核对头注释（:395-399），§3.5/§5.1（含 §5.2 Step2、§6.2/§6.6 emission 尾部描述）同步更新、行号按 05046f2 核对；§8.1 新增本机/服务器验证分工（本机只跑 checks，编译与 NPU 验证归服务器）；§2.2 补 warm→full 边际成本定量论证（Echo +61.84 vs SIMT +12.01、边际差 49.83 μs，v2 定量动机）；§10.3 附注已评估并搁置的微优化候选（rawSlots/wsMissRank 迁 UB、UB 扩容 192 KiB）+ §3.2 G=64 成因注记 |
