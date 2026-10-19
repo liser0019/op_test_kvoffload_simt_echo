@@ -1173,6 +1173,15 @@ public:
         // ---- Step 4: lru 重建 (每步必执行) + fifo/avail 折叠更新 ----
         PerfBegin(); LruRebuildAllRows(); PerfEnd();
         PerfBegin(); OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_); PerfEnd();
+#if defined(ECHO_V2_RB_DCCI)
+        // [debug/候选修复] Step4→Step5 之间补回栅栏: 重 UB 写 (rebuild A-C) 之后的
+        //   可合并递增 GM 写 (phase D 尾零) 会毒化紧随的访存 —— MissCumsum trap。
+        //   v1 在此位置有 SyncBlock (v2 曾以竞争源删除为由去掉)。RB_DCCI = 完整
+        //   SyncGrid (dcci 三明治); RB_SYNC = 裸 syncthreads (最小修复对照)。
+        SyncGrid();
+#elif defined(ECHO_V2_RB_SYNC)
+        asc_syncthreads();
+#endif
         if (ECHO_V2_DEBUG_CUTOFF_V == 6u) return;   // [v2 debug] 阶段 6 截断 (Step4 后)
         // [P4/v2] 尾 SyncGrid 已删: lru/fifo/avail 此后无本 kernel 内读者 (kernel
         //   结束即对 host/下一次调用可见); Bug2 栅栏随 OpAllocPriority 删除 (fifo
