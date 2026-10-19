@@ -14,6 +14,7 @@ SOC_VERSION="ascend950"
 PERF_STEP="${ECHO_PERF_STEP:-OFF}"
 ECHO_THREADS="${ECHO_LRU_THREADS:-1024}"
 V2_CUTOFF="${ECHO_V2_DEBUG_CUTOFF:-0}"
+V2_SKIPRB="${ECHO_V2_SKIP_REBUILD:-OFF}"
 for arg in "$@"; do
     case "$arg" in
         --soc=*) SOC_VERSION="${arg#*=}" ;;
@@ -52,8 +53,8 @@ BUILD_DIR="$SCRIPT_DIR/build"
 if [[ "$PERF_STEP" == "ON" ]]; then
     BUILD_DIR="$SCRIPT_DIR/build_perf"
 fi
-if [[ "$V2_CUTOFF" != "0" ]]; then
-    # v2 调试截断构建使用独立目录, 不覆盖正式产物。
+if [[ "$V2_CUTOFF" != "0" || "$V2_SKIPRB" != "OFF" ]]; then
+    # v2 调试构建 (截断/跳重建) 使用独立目录, 不覆盖正式产物。
     BUILD_DIR="$SCRIPT_DIR/build_v2dbg"
 fi
 if [[ "$ECHO_THREADS" != "1024" ]]; then
@@ -67,7 +68,7 @@ fi
 CMAKE_ARGS=(
     -S "$SCRIPT_DIR" -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release -DNPU_ARCH="$SOC_VERSION"
-    -DECHO_PERF_STEP="$PERF_STEP" -DECHO_LRU_THREADS="$ECHO_THREADS" -DECHO_V2_DEBUG_CUTOFF="$V2_CUTOFF"
+    -DECHO_PERF_STEP="$PERF_STEP" -DECHO_LRU_THREADS="$ECHO_THREADS" -DECHO_V2_DEBUG_CUTOFF="$V2_CUTOFF" -DECHO_V2_SKIP_REBUILD="$V2_SKIPRB"
     -DPython3_EXECUTABLE="$BUILD_PYTHON")
 for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
     if [[ -n "${!name:-}" ]]; then

@@ -121,6 +121,12 @@ set(ECHO_V2_DEBUG_CUTOFF "0" CACHE STRING "echo_lru v2 debug: early-return after
 if(NOT ECHO_V2_DEBUG_CUTOFF STREQUAL "0")
     list(APPEND ECHO_FLAGS -DECHO_V2_DEBUG_CUTOFF=${ECHO_V2_DEBUG_CUTOFF})
 endif()
+# [v2 debug] ECHO_V2_SKIP_REBUILD=ON: LruRebuildAllRows 体置空 (零写零栅栏),
+#   用于隔离 MissCumsum trap 的触发源 (rebuild 的写 vs 其他)。
+option(ECHO_V2_SKIP_REBUILD "echo_lru v2 debug: skip LruRebuild body" OFF)
+if(ECHO_V2_SKIP_REBUILD)
+    list(APPEND ECHO_FLAGS -DECHO_V2_SKIP_REBUILD)
+endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(KERNEL_OPT_FLAGS -O0 -g)
 else()

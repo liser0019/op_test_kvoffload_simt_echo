@@ -1211,6 +1211,11 @@ private:
         for (uint32_t r = 0; r < rowCount; ++r) {
             uint32_t row = startRow + r;
             if (row >= R) break;
+#ifdef ECHO_V2_SKIP_REBUILD
+            // [v2 debug] 跳过重建体 (零写零栅栏): 定位 MissCumsum trap 是否由
+            //   rebuild 的 UB/GM 写触发。golden 必挂 (lru 不更新) —— 只看 trap 有无。
+            continue;
+#endif
             int32_t avail = availGm_[row];
             uint32_t occ = (avail >= (int32_t)B) ? 0u : ((uint32_t)B - (uint32_t)avail);
             int32_t nm = numMissesGm_[row];
