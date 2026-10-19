@@ -13,6 +13,7 @@ BUILD_JOBS="${JOBS:-4}"
 SOC_VERSION="ascend950"
 PERF_STEP="${ECHO_PERF_STEP:-OFF}"
 ECHO_THREADS="${ECHO_LRU_THREADS:-1024}"
+V2_CUTOFF="${ECHO_V2_DEBUG_CUTOFF:-0}"
 for arg in "$@"; do
     case "$arg" in
         --soc=*) SOC_VERSION="${arg#*=}" ;;
@@ -41,11 +42,19 @@ if ! [[ "$ECHO_THREADS" =~ ^[0-9]+$ ]] || (( ECHO_THREADS % 32 != 0 || ECHO_THRE
     echo "--threads / ECHO_LRU_THREADS 必须是 32 的倍数且在 [64,1024]: $ECHO_THREADS" >&2
     exit 2
 fi
+if ! [[ "$V2_CUTOFF" =~ ^[0-7]$ ]]; then
+    echo "ECHO_V2_DEBUG_CUTOFF 必须是 0..7 (0=关闭; 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7=全程): $V2_CUTOFF" >&2
+    exit 2
+fi
 # 使用激活环境中的确切解释器，也让 CMake 使用同一个解释器。
 BUILD_PYTHON="$(command -v -- "$BUILD_PYTHON")"
 BUILD_DIR="$SCRIPT_DIR/build"
 if [[ "$PERF_STEP" == "ON" ]]; then
     BUILD_DIR="$SCRIPT_DIR/build_perf"
+fi
+if [[ "$V2_CUTOFF" != "0" ]]; then
+    # v2 调试截断构建使用独立目录, 不覆盖正式产物。
+    BUILD_DIR="$SCRIPT_DIR/build_v2dbg"
 fi
 if [[ "$ECHO_THREADS" != "1024" ]]; then
     # 线程数消融配置使用独立构建目录, 避免覆盖默认 1024 线程的产物。
@@ -58,7 +67,7 @@ fi
 CMAKE_ARGS=(
     -S "$SCRIPT_DIR" -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release -DNPU_ARCH="$SOC_VERSION"
-    -DECHO_PERF_STEP="$PERF_STEP" -DECHO_LRU_THREADS="$ECHO_THREADS"
+    -DECHO_PERF_STEP="$PERF_STEP" -DECHO_LRU_THREADS="$ECHO_THREADS" -DECHO_V2_DEBUG_CUTOFF="$V2_CUTOFF"
     -DPython3_EXECUTABLE="$BUILD_PYTHON")
 for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
     if [[ -n "${!name:-}" ]]; then

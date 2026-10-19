@@ -114,6 +114,13 @@ list(APPEND ECHO_FLAGS -DECHO_LRU_THREAD_NUM_OVERRIDE=${ECHO_LRU_THREADS})
 if(ECHO_PERF_STEP)
     list(APPEND ECHO_FLAGS -DECHO_PERF_STEP)
 endif()
+# [v2 debug] ECHO_V2_DEBUG_CUTOFF=N: Process 在第 N 阶段后提前 return (仅 kernel 侧,
+#   用于二分定位设备侧 trap; 产物目录 build_v2dbg/, 不覆盖正式构建)。
+#   阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7/0=全程。
+set(ECHO_V2_DEBUG_CUTOFF "0" CACHE STRING "echo_lru v2 debug: early-return after stage N (0=off)")
+if(NOT ECHO_V2_DEBUG_CUTOFF STREQUAL "0")
+    list(APPEND ECHO_FLAGS -DECHO_V2_DEBUG_CUTOFF=${ECHO_V2_DEBUG_CUTOFF})
+endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(KERNEL_OPT_FLAGS -O0 -g)
 else()

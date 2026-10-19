@@ -1035,6 +1035,7 @@ public:
             OpFillZero(R, rowsPerCore, tailRows, pushCountGm_);
         }
         SyncGrid();
+        if (ECHO_V2_DEBUG_CUTOFF_V == 1u) return;   // [v2 debug] 阶段 1 截断
 
         // ---- Step 0: reset (anyReset 门控, 沿用 round-4 白付清理) ----
         bool anyReset = false;
@@ -1050,6 +1051,7 @@ public:
         PerfBegin(); if (anyReset) OpResetFree(R, B, freeStackSize, rowsPerCore, tailRows, resetMaskGm_, freeGm_); PerfEnd();
         PerfBegin(); if (anyReset) OpResetAvailFifo(R, B, rowsPerCore, tailRows, resetMaskGm_, availGm_, fifoGm_); PerfEnd();
         PerfBegin(); if (anyReset) SyncGrid(); PerfEnd();
+        if (ECHO_V2_DEBUG_CUTOFF_V == 2u) return;   // [v2 debug] 阶段 2 截断
 
         // ---- Step 0.5: invalidate speculative suffix (spec 路径; 非 spec 跳过) ----
         if (tiling_.specEnabled) {
@@ -1069,6 +1071,7 @@ public:
                      flagsGm_, scanScratchUb_); PerfEnd();
         PerfBegin(); SyncGrid(); PerfEnd();  // flags/curSlots (全员写) 经 dcci 对后续全员读可见;
                                             // numMisses/freeSize (t0 写) 同点可见。
+        if (ECHO_V2_DEBUG_CUTOFF_V == 3u) return;   // [v2 debug] 阶段 3 截断
 
         // ---- Step 2: free ([C1] needFree 门控; v2 用 EvictScan 取代基数选择) ----
         // [C1 2026-10-13] t0 在 Step1 写入"本核任一行 fs>0"标志 (UB 槽 64, 经 Step1
@@ -1084,16 +1087,19 @@ public:
         PerfBegin(); if (needFree && !freeIdxInUb_) SyncGrid(); PerfEnd();
         PerfBegin(); if (needFree) OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, dthGm_, htdGm_); PerfEnd();
         PerfBegin(); if (needFree) OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
+        if (ECHO_V2_DEBUG_CUTOFF_V == 4u) return;   // [v2 debug] 阶段 4 截断
 
         // ---- Step 3: alloc pop (OpFifoInc 已并入 Step4 的 fifo+=2) ----
         PerfBegin(); OpAllocPop(R, topkDim, freeStackSize, rowsPerCore, tailRows,
                      numMissesGm_, freeSizeGm_, availGm_, freeIdxPtr_, freeIdxInUb_, freeGm_, rawSlotsGm_); PerfEnd();
         PerfBegin(); SyncGrid(); PerfEnd();  // rawSlots 跨线程 RAW → Rebuild/SetUpdate 读;
                                              // flags bit1 (EvictScan 写) → Rebuild staging 读 (dcci)
+        if (ECHO_V2_DEBUG_CUTOFF_V == 5u) return;   // [v2 debug] 阶段 5 截断
 
         // ---- Step 4: lru 重建 (每步必执行) + fifo/avail 折叠更新 ----
         PerfBegin(); LruRebuildAllRows(); PerfEnd();
         PerfBegin(); OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_); PerfEnd();
+        if (ECHO_V2_DEBUG_CUTOFF_V == 6u) return;   // [v2 debug] 阶段 6 截断
         // [P4/v2] 尾 SyncGrid 已删: lru/fifo/avail 此后无本 kernel 内读者 (kernel
         //   结束即对 host/下一次调用可见); Bug2 栅栏随 OpAllocPriority 删除 (fifo
         //   竞争源消失, avail 读者已被 Step3 SyncGrid 排空)。
