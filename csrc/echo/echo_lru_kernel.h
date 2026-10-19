@@ -984,11 +984,21 @@ public:
         //   +B+1              aExclUb  (槽域 alloc exclusive 前缀);
         //   基准形态合计 128 + 5*4097 = 20613 ≤ ARGTOPK_UB_ELEMS=32768 (余 12155)。
         scanScratchUb_ = ubPool;
+        // [对齐 2026-10-19] 每段基址向上取整到 256 元素 (1KB) 边界: 对齐 v1 已验证
+        //   的 UB 布局形态 (v1 全部分段偏移均为 256 元素倍数, 内部子缓冲 128B 对齐);
+        //   v2 首版奇数偏移 (4225/8322/..., 仅 4B 对齐) 是 cold_reset 上板 trap
+        //   (507035) 的头号嫌疑 —— CPU mock 无法覆盖硬件对齐行为。基准形态峰值
+        //   22016 + 2048 = 24064 ≤ 32768。
         uint32_t uo = 128u;
+        uo = (uo + 255u) & ~255u;
         flagsUb_  = ubPool + uo; uo += B + 1u;
+        uo = (uo + 255u) & ~255u;
         aAtUb_    = ubPool + uo; uo += B + 1u;
+        uo = (uo + 255u) & ~255u;
         lruUb_    = ubPool + uo; uo += B + 1u;
+        uo = (uo + 255u) & ~255u;
         hExclUb_  = ubPool + uo; uo += B + 1u;
+        uo = (uo + 255u) & ~255u;
         aExclUb_  = ubPool + uo; uo += B + 1u;
 
         // [P-C] freeIdx 迁 UB (语义沿用 v1): 仅本 kernel 内读者, 容纳 rowsPerCore*topkDim;
