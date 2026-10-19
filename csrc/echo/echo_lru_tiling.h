@@ -56,8 +56,8 @@ constexpr uint32_t ECHO_PERF_NUM_STEPS = 26;
 // [v2 debug] ECHO_V2_DEBUG_CUTOFF=N: Process 在第 N 阶段后提前 return (0=关闭)。
 //   仅用于二分定位设备侧 trap: 截断后状态不完整, golden 必挂 (Assertion) ——
 //   "trap(RuntimeError 507035)" vs "Assertion/比对失败" 就是二分信号。
-//   阶段: 1=prologue(flags 清零) 2=Step0(reset) 3=Step1(hit/miss) 4=Step2(淘汰)
-//         5=Step3(alloc pop) 6=Step4(lru 重建) 7=全程(Step5)。
+//   阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4
+//         7=Step5.MissCumsum 后 8=Step5.SyncGrid 后 9=全程。
 #ifdef ECHO_V2_DEBUG_CUTOFF
 constexpr uint32_t ECHO_V2_DEBUG_CUTOFF_V = ECHO_V2_DEBUG_CUTOFF;
 #else

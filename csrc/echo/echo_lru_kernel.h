@@ -1109,7 +1109,7 @@ public:
         // ---- Step 4: lru 重建 (每步必执行) + fifo/avail 折叠更新 ----
         PerfBegin(); LruRebuildAllRows(); PerfEnd();
         PerfBegin(); OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_); PerfEnd();
-        if (ECHO_V2_DEBUG_CUTOFF_V == 6u) return;   // [v2 debug] 阶段 6 截断
+        if (ECHO_V2_DEBUG_CUTOFF_V == 6u) return;   // [v2 debug] 阶段 6 截断 (Step4 后)
         // [P4/v2] 尾 SyncGrid 已删: lru/fifo/avail 此后无本 kernel 内读者 (kernel
         //   结束即对 host/下一次调用可见); Bug2 栅栏随 OpAllocPriority 删除 (fifo
         //   竞争源消失, avail 读者已被 Step3 SyncGrid 排空)。
@@ -1117,7 +1117,9 @@ public:
         // ---- Step 5: set_update (含最终槽位回写, 原 OpFinalSlots 已并入) ----
         PerfBegin(); OpMissCumsum(R, topkDim, effTopk, rowsPerCore, tailRows,
                      curSlotsGm_, posGm_, wsMissRankGm_, missHostPosGm_, scanScratchUb_); PerfEnd();
+        if (ECHO_V2_DEBUG_CUTOFF_V == 7u) return;   // [v2 debug] 阶段 7 截断 (MissCumsum 后)
         PerfBegin(); SyncGrid(); PerfEnd();  // wsMissRank/missPos 跨线程 RAW → OpSetUpdate
+        if (ECHO_V2_DEBUG_CUTOFF_V == 8u) return;   // [v2 debug] 阶段 8 截断 (Step5 SyncGrid 后)
         PerfBegin(); OpSetUpdate(R, topkDim, effTopk, B, maxModelLenP1, rowsPerCore, tailRows,
                     curSlotsGm_, wsMissRankGm_, missHostPosGm_, missAllocFlatGm_, missMaskGm_,
                     rawSlotsGm_, htdGm_, dthGm_); PerfEnd();

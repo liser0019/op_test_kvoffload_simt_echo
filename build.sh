@@ -42,8 +42,8 @@ if ! [[ "$ECHO_THREADS" =~ ^[0-9]+$ ]] || (( ECHO_THREADS % 32 != 0 || ECHO_THRE
     echo "--threads / ECHO_LRU_THREADS 必须是 32 的倍数且在 [64,1024]: $ECHO_THREADS" >&2
     exit 2
 fi
-if ! [[ "$V2_CUTOFF" =~ ^[0-7]$ ]]; then
-    echo "ECHO_V2_DEBUG_CUTOFF 必须是 0..7 (0=正式构建产物build/; 1..7=调试构建产物build_v2dbg/, 阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7=完整流水线): $V2_CUTOFF" >&2
+if ! [[ "$V2_CUTOFF" =~ ^[0-9]$ ]]; then
+    echo "ECHO_V2_DEBUG_CUTOFF 必须是 0..9 (0=正式构建产物build/; 1..9=调试构建产物build_v2dbg/, 阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7=MisssCumsum后 8=Step5.SyncGrid后 9=全程): $V2_CUTOFF" >&2
     exit 2
 fi
 # 使用激活环境中的确切解释器，也让 CMake 使用同一个解释器。
