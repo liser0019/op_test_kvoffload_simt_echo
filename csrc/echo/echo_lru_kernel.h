@@ -97,7 +97,7 @@ __aicore__ inline int32_t PackedBlockScan(int32_t packedValue, int32_t* warpTota
 // ===========================================================================
 
 // ---- Step 0: reset ----
-__aicore__ inline void OpResetRows(
+__attribute__((noinline)) __aicore__ void OpResetRows(
     uint32_t R, uint32_t maxModelLenP1, uint32_t rowsPerCore, uint32_t tailRows,
     uint8_t* resetMaskGm, int32_t* htdGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -113,7 +113,7 @@ __aicore__ inline void OpResetRows(
     }
 }
 
-__aicore__ inline void OpResetDthLru(
+__attribute__((noinline)) __aicore__ void OpResetDthLru(
     uint32_t R, uint32_t B, uint32_t rowsPerCore, uint32_t tailRows,
     uint8_t* resetMaskGm, int32_t* dthGm, int32_t* lruGm) {
     uint32_t cols = B + 1;
@@ -133,7 +133,7 @@ __aicore__ inline void OpResetDthLru(
     }
 }
 
-__aicore__ inline void OpResetFree(
+__attribute__((noinline)) __aicore__ void OpResetFree(
     uint32_t R, uint32_t B, uint32_t freeStackSize, uint32_t rowsPerCore, uint32_t tailRows,
     uint8_t* resetMaskGm, int32_t* freeGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -149,7 +149,7 @@ __aicore__ inline void OpResetFree(
     }
 }
 
-__aicore__ inline void OpResetAvailFifo(
+__attribute__((noinline)) __aicore__ void OpResetAvailFifo(
     uint32_t R, uint32_t B, uint32_t rowsPerCore, uint32_t tailRows,
     uint8_t* resetMaskGm, int32_t* availGm, int32_t* fifoGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -170,7 +170,7 @@ __aicore__ inline void OpResetAvailFifo(
 // [v2] pri 写改为 flags 位 1 (被淘汰/移除标记): LruRebuild 的分类据此把
 //   spec 驱逐槽从 lru 丢弃 (v1 写 pri=-1 的等价物)。spec 路径无基准覆盖
 //   (compare.py 的 spl 恒为 max_token), 语义按此维护。
-__aicore__ inline void OpInvalidateSpecSuffix(
+__attribute__((noinline)) __aicore__ void OpInvalidateSpecSuffix(
     uint32_t R, uint32_t B, uint32_t maxModelLenP1, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* splGm, int32_t* dthGm, int32_t* flagsGm,
     int32_t* htdGm, int32_t* wsCumsumGm) {
@@ -197,7 +197,7 @@ __aicore__ inline void OpInvalidateSpecSuffix(
     }
 }
 
-__aicore__ inline void OpSpecCumsum(
+__attribute__((noinline)) __aicore__ void OpSpecCumsum(
     uint32_t R, uint32_t B, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* wsCumsumGm, int32_t* pushCountGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -217,7 +217,7 @@ __aicore__ inline void OpSpecCumsum(
     }
 }
 
-__aicore__ inline void OpSpecPushFree(
+__attribute__((noinline)) __aicore__ void OpSpecPushFree(
     uint32_t R, uint32_t B, uint32_t freeStackSize, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* wsCumsumGm, int32_t* availGm, int32_t* freeGm) {
     uint32_t cols = B + 1;
@@ -247,7 +247,7 @@ __aicore__ inline void OpSpecPushFree(
     }
 }
 
-__aicore__ inline void OpSpecAvailAdd(
+__attribute__((noinline)) __aicore__ void OpSpecAvailAdd(
     uint32_t R, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* availGm, int32_t* pushCountGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -279,7 +279,7 @@ __aicore__ inline void OpSpecAvailAdd(
 //   (等效 v1 的 pri 抬新 —— EvictScan 跳过 bit0 槽 = v1 "hit 不可被本步淘汰")。
 //   distinct token → distinct slot, 线程间无写冲突; 纯 store (prologue 已清零,
 //   bit1 只写非 hit 槽 —— EvictScan 选中的必非 hit)。
-__aicore__ inline void OpHitMiss(
+__attribute__((noinline)) __aicore__ void OpHitMiss(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t maxModelLenP1,
     uint32_t B, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* htdGm, int32_t* posGm, int32_t* curSlotsGm,
@@ -354,7 +354,7 @@ __aicore__ inline void OpHitMiss(
 //   avail 的全员读者 (OpFreePush/OpAllocPop) 已被 Step3 尾 SyncGrid 排空。
 // [v2] fifo 无 kernel 内读者 (OpAllocPriority 已删, 其读 fifo 写 pri 的竞争与
 //   Bug2 栅栏随之消失) → 两次 +1 合并为一次 +2, t0 串行 GM 往返再减半。
-__aicore__ inline void OpFifoAvailUpdate(
+__attribute__((noinline)) __aicore__ void OpFifoAvailUpdate(
     uint32_t R, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* fifoGm, int32_t* availGm, int32_t* freeSizeGm, int32_t* numMissesGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -382,7 +382,7 @@ __aicore__ inline void OpFifoAvailUpdate(
 //   污染 workspace, 残留位会被误判 hit/evicted。清零后的 SyncGrid (dcci) 同时
 //   排空写缓冲, 保证同核 WAW (清零写 → Step1 scatter 写同地址) 的顺序 ——
 //   写滞留线程 store buffer 而他人写已落地会反超覆盖 (fifo 事件同型教训)。
-__aicore__ inline void OpZeroFlags(
+__attribute__((noinline)) __aicore__ void OpZeroFlags(
     uint32_t R, uint32_t B, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* flagsGm) {
     uint32_t cols = B + 1u;
@@ -409,10 +409,12 @@ __aicore__ inline void OpZeroFlags(
 //   语义补索引 [B+1, B+1+m)。
 // ⚠ 切片必须连续 ([P1] 连续切片不变量): 扫描给出的是切片序前缀, grid-stride
 //   会得到"线程主序", 淘汰输出顺序就错了。
-// [noinline 2026-10-19] 设备 errcode 354 "VEC SIMT stack overflow": Process 内联为
-//   单一巨型栈帧, 加上本 Op 后越过设备每线程栈硬上限。重型 Op 必须 noinline
-//   (独立帧, 峰值=各帧最大值; 与 OpLruRebuildRow 一同处理)。帧在 kernel 入口
-//   一次性分配 —— 与执行路径无关 (2026-10-19 排查: 各"阶段二分"实际测的是帧大小)。
+// [noinline 2026-10-19] 设备 errcode 354 "VEC SIMT stack overflow": Process 若把
+//   全部 Op 内联为单一巨型栈帧 (帧 = 所有内联函数溢出槽之和, kernel 入口一次性
+//   分配, 与执行路径无关), 会越过设备每线程栈硬上限 —— v2 普通构建擦线通过后,
+//   打点构建 (ECHO_PERF_STEP 多几行代码) 再次越界即为实证。规则: **所有 Op 一律
+//   noinline** (帧峰值 = 单 Op 最大值, 余量充足); warp 协作辅助 PackedBlockScan
+//   保持 inline (并入宿主帧, 宿主帧已很小)。
 __attribute__((noinline)) __aicore__ void OpEvictScanRow(
     uint32_t B, uint32_t topkDim, uint32_t fsClamp, uint32_t occ,
     int32_t* lruGm, uint32_t lruRowOff,
@@ -653,7 +655,7 @@ __attribute__((noinline)) __aicore__ void OpLruRebuildRow(
 
 
 
-__aicore__ inline void OpFreeRelease(
+__attribute__((noinline)) __aicore__ void OpFreeRelease(
     uint32_t R, uint32_t topkDim, uint32_t B, uint32_t maxModelLenP1,
     uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* freeIdxGm, bool freeIdxLocal, int32_t* freeSizeGm,
@@ -684,7 +686,7 @@ __aicore__ inline void OpFreeRelease(
     }
 }
 
-__aicore__ inline void OpFreePush(
+__attribute__((noinline)) __aicore__ void OpFreePush(
     uint32_t R, uint32_t topkDim, uint32_t freeStackSize, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* freeIdxGm, bool freeIdxLocal, int32_t* freeSizeGm,
     int32_t* availGm, int32_t* freeGm) {
@@ -716,7 +718,7 @@ __aicore__ inline void OpFreePush(
 //   内不再有读者 (仅持久化给下一次调用), FreePush→AllocPop 间的 SyncGrid 可删。
 //   avail 的两步更新 (原 OpFreeAvailAdd +=fs / OpAllocAvailSub -=nm) 合并为
 //   Step5 尾 OpFifoAvailUpdate 的一次写; 本函数读到的 avail 恒为初值 availOld。
-__aicore__ inline void OpAllocPop(
+__attribute__((noinline)) __aicore__ void OpAllocPop(
     uint32_t R, uint32_t topkDim, uint32_t freeStackSize, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* numMissesGm, int32_t* freeSizeGm, int32_t* availGm,
     int32_t* freeIdxGm, bool freeIdxLocal, int32_t* freeGm, int32_t* rawSlotsGm) {
@@ -774,7 +776,7 @@ __aicore__ inline void OpAllocPop(
 //   否则回退 t0 串行累加 (plugin 自适应 blockDim 下, topk ≤ 4096 恒并行)。
 // 语义与串行版逐字段一致: wsMissRank = miss 的 exclusive 前缀秩,
 // missPos = miss ? pos : 0。
-__aicore__ inline void OpMissCumsum(
+__attribute__((noinline)) __aicore__ void OpMissCumsum(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* curSlotsGm, int32_t* posGm,
     int32_t* wsMissRankGm, int32_t* missPosGm,
@@ -923,7 +925,7 @@ __aicore__ inline void OpMissCumsum(
     }
 }
 
-__aicore__ inline void OpSetUpdate(
+__attribute__((noinline)) __aicore__ void OpSetUpdate(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t B, uint32_t maxModelLenP1,
     uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* curSlotsGm, int32_t* wsMissRankGm,
@@ -974,7 +976,7 @@ __aicore__ inline void OpSetUpdate(
 // [P2 2026-10-13] 已并入 OpSetUpdate (miss 位直接写回 aslot, hit 位 Step1 已正确),
 //   独立的 OpFinalSlots (全量 topk 重新 gather htd) 已删除。
 
-__aicore__ inline void OpFillZero(
+__attribute__((noinline)) __aicore__ void OpFillZero(
     uint32_t R, uint32_t rowsPerCore, uint32_t tailRows, int32_t* outGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
