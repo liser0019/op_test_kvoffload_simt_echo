@@ -26,6 +26,10 @@
 // 排布 (Path A): 算法每行完全独立 (golden.py 全是 for row in range(R), 行间零依赖).
 //   每核只处理自己的连续行段 [blockIdx.x*rowsPerCore, +rowCount), 行内 blockDim
 //   线程 grid-stride 扫列. 每核读/写的都是自己负责的行 → 无跨核写后读.
+// ⚠ [栈上限 2026-10-19] 设备 VEC SIMT 每线程栈有硬上限 (errcode 354 "VEC SIMT
+//   stack overflow", 全核同 PC trap): Process 的全部内联代码共用一个栈帧, 帧大小
+//   = 所有内联函数溢出槽之和; 重型 Op (EvictScan/LruRebuild 等) 必须 noinline,
+//   新增内联大函数前先想栈。v1 帧恰好在上限下, v2 +2 Op 即越界。
 // 同步: 步间用块内 asc_syncthreads (解决行内跨线程 RAW, 如 OpHitMiss 以 topkDim
 //   步长写 flags[row,slot]、OpEvictScanRow/OpLruRebuildRow 以 B+1 步长读写
 //   同行状态, 同地址被不同线程访问);
@@ -405,7 +409,11 @@ __aicore__ inline void OpZeroFlags(
 //   语义补索引 [B+1, B+1+m)。
 // ⚠ 切片必须连续 ([P1] 连续切片不变量): 扫描给出的是切片序前缀, grid-stride
 //   会得到"线程主序", 淘汰输出顺序就错了。
-__aicore__ inline void OpEvictScanRow(
+// [noinline 2026-10-19] 设备 errcode 354 "VEC SIMT stack overflow": Process 内联为
+//   单一巨型栈帧, 加上本 Op 后越过设备每线程栈硬上限。重型 Op 必须 noinline
+//   (独立帧, 峰值=各帧最大值; 与 OpLruRebuildRow 一同处理)。帧在 kernel 入口
+//   一次性分配 —— 与执行路径无关 (2026-10-19 排查: 各"阶段二分"实际测的是帧大小)。
+__attribute__((noinline)) __aicore__ void OpEvictScanRow(
     uint32_t B, uint32_t topkDim, uint32_t fsClamp, uint32_t occ,
     int32_t* lruGm, uint32_t lruRowOff,
     int32_t* flagsGm, uint32_t flagsRowOff,
@@ -473,7 +481,7 @@ __aicore__ inline void OpEvictScanRow(
 //   B4 尾 (UB 五段行间复用保护)。
 // lru staging 进 UB 是 phase D 散射写 lruGm 的前置 (H 目标位置可 < p, 同数组
 //   跨线程读写竞争, 必须先全体读入 UB 再写回 GM)。
-__aicore__ inline void OpLruRebuildRow(
+__attribute__((noinline)) __aicore__ void OpLruRebuildRow(
     uint32_t B, uint32_t topkDim, uint32_t occ, uint32_t nm,
     int32_t* lruGm, uint32_t lruRowOff,
     int32_t* flagsGm, uint32_t flagsRowOff,

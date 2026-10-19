@@ -33,7 +33,8 @@ for name,value in [('ARGTOPK_GROUP_THREADS',64),('ARGTOPK_UB_NPAD_MAX',8192),
     assert match and int(match.group(1))==value, f'{name} 已改变，请同步调整 CPU 模型'
 src=(root/'csrc/echo/echo_lru_kernel.h').read_text()
 def extract(name):
-    for prefix in ('__aicore__ inline void ','__aicore__ inline int32_t '):
+    for prefix in ('__aicore__ inline void ','__aicore__ inline int32_t ',
+                    '__attribute__((noinline)) __aicore__ void '):
         tag=prefix+name+'('
         if tag in src:
             start=src.index(tag)
