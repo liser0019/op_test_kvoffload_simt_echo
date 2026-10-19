@@ -490,14 +490,18 @@ __attribute__((noinline)) __aicore__ void OpLruRebuildRow(
     int32_t* rawSlotsGm, uint32_t rawRowOff,
     int32_t* flagsUb, int32_t* aAtUb, int32_t* lruUb,
     int32_t* hExclUb, int32_t* aExclUb, int32_t* scanScratch,
-    uint32_t specOn) {
+    uint32_t specOn, uint32_t lastRow) {
     uint32_t t = threadIdx.x;
     uint32_t warpCount = blockDim.x >> 5;
     uint32_t cols = B + 1u;
     // ---- phase A: staging + 清零 (纯写): flags GM→UB; lru GM→UB; aAt 清零 ----
+    // [v2 opt-1] nm=0 快路径: aAt 全链路 (清零/散射/槽域扫描的高字段/存储) 跳过
+    //   —— warm_all_hit 等零分配步省 ~4097 次 UB 写 + 2×4097 次读写; aExcl 届时
+    //   无读者 (A-append 的 j<nm 不执行), 不写不影响语义。
+    const bool hasAlloc = (nm != 0u);
     for (uint32_t s = t; s < cols; s += blockDim.x) {
         flagsUb[s] = flagsGm[flagsRowOff + s];
-        aAtUb[s] = 0;
+        if (hasAlloc) aAtUb[s] = 0;
     }
     for (uint32_t p = t; p < occ; p += blockDim.x) {
         lruUb[p] = lruGm[lruRowOff + p];
@@ -557,7 +561,7 @@ __attribute__((noinline)) __aicore__ void OpLruRebuildRow(
         //   首版误用 |= (塌缩成至多 1) → hExcl/aExcl 秩错 → H/A 段错位
         //   (CPU 回归 group2 B=4096 用例抓获, 2026-10-19)。
         if (flagsUb[s] & 1) haCnt += 1;
-        if (aAtUb[s]) haCnt += (1 << 16);
+        if (hasAlloc && aAtUb[s]) haCnt += (1 << 16);
     }
 #ifdef ECHO_V2_RB_SERIAL
     int32_t* buf2s = scanScratch + 1024;   // 串行模式独立半区 (rbScan 段已扩容)
@@ -581,9 +585,9 @@ __attribute__((noinline)) __aicore__ void OpLruRebuildRow(
     int32_t runA = excl2 >> 16;
     for (uint32_t s = slo; s < shi; ++s) {
         hExclUb[s] = runH;
-        aExclUb[s] = runA;
+        if (hasAlloc) aExclUb[s] = runA;
         if (flagsUb[s] & 1) ++runH;
-        if (aAtUb[s]) ++runA;
+        if (hasAlloc && aAtUb[s]) ++runA;
     }
     // B3.5: phase C 的 hExcl/aExcl 存储发生在 B3 (scan2 内部栅栏) 之后, 而 phase D
     //   要读任意槽的前缀 (写者与读者跨线程) —— 没有这道栅栏会读到未写的哨兵
@@ -650,7 +654,12 @@ __attribute__((noinline)) __aicore__ void OpLruRebuildRow(
         }
     }
 #endif
-    asc_syncthreads();                       // B4: flagsUb/aAtUb/lruUb/hExclUb/aExclUb 下一行 phase A 复用保护
+    // [v2 opt-2] B4 (UB 段行间复用保护) 仅非末行需要: 末行之后本 invocation 无
+    //   这些段的读者 (Step5 的 MissCumsum 用 scanScratch [0,128), 不同段;
+    //   lru 写 → 下一 invocation 由 kernel 边界保证)。lastRow 为块一致参数, 无发散。
+    if (lastRow == 0u) {
+        asc_syncthreads();                   // B4
+    }
 }
 
 
@@ -1328,7 +1337,8 @@ private:
                             rawSlotsGm_, row * topkDim,
                             flagsUb_, aAtUb_, lruUb_,
                             hExclUb_, aExclUb_, rbScanUb_,
-                            tiling_.specEnabled);
+                            tiling_.specEnabled,
+                            ((r + 1u >= rowCount) || (row + 1u >= R)) ? 1u : 0u);
         }
     }
 

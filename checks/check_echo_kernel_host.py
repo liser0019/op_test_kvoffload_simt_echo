@@ -227,7 +227,8 @@ try{
             launch([&]{OpLruRebuildRow(B,topkDim,occ,nm,lruGm.data(),0,
                                        flagsGm.data(),0,raw.data(),0,
                                        flagsUb.data(),aAt.data(),lruUb.data(),
-                                       hExcl.data(),aExcl.data(),scan.data(),0u);});
+                                       hExcl.data(),aExcl.data(),scan.data(),0u,
+                                       ci==0?0u:1u);});   // 首例 lastRow=0 覆盖 B4 执行路径
             for(uint32_t p=0;p<=B;++p)require(lruGm[p]==expected[p],"rebuild lru mismatch");
             for(uint32_t s=0;s<=B;++s)require(flagsGm[s]==flagsRow[s],"rebuild must not write flags");
             require(raw[nm]==-777,"rawSlots overrun");
@@ -293,7 +294,7 @@ try{
         }
         for(uint32_t j=0;j<nm;++j)raw[j]=allocList[j];
         launch([&]{OpLruRebuildRow(B,B,occ,nm,lruGm.data(),0,flagsGm.data(),0,raw.data(),0,
-                                   flagsUb.data(),aAt.data(),lruUb.data(),hExcl.data(),aExcl.data(),scan.data(),0u);});
+                                   flagsUb.data(),aAt.data(),lruUb.data(),hExcl.data(),aExcl.data(),scan.data(),0u,1u);});
         for(uint32_t p=0;p<=B;++p)require(lruGm[p]==expectedLru[p],"cross: rebuilt lru mismatch (v1 vs v2)");
         ++checks;
     }
@@ -317,7 +318,7 @@ try{
             std::vector<int32_t> flagsUb(B+1+8,-777),aAt(B+1+8,-777),lruUb(B+1+8,-777),
                                   hExcl(B+1+8,-777),aExcl(B+1+8,-777),scan(64+8,-777);
             launch([&]{OpLruRebuildRow(B,B,occ,0,lruGm.data(),0,flagsGm.data(),0,raw.data(),0,
-                                       flagsUb.data(),aAt.data(),lruUb.data(),hExcl.data(),aExcl.data(),scan.data(),specOn);});
+                                       flagsUb.data(),aAt.data(),lruUb.data(),hExcl.data(),aExcl.data(),scan.data(),specOn,1u);});
         };
         // specOn=1: 垃圾尾被清零; 期望 = K+H(尾零)
         std::vector<int32_t> K,H;

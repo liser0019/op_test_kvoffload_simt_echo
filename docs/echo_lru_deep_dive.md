@@ -4,8 +4,17 @@
 >
 > **本文档随代码迭代同步更新**：每次代码合入后由维护者增量修订对应章节，并在文末"文档更新日志"表追加一行。
 >
-> 覆盖范围：commit `05046f2`（perf(echo): round-4b — emission 尾栅栏去重，UB 路径
-> Argtopk 栅栏 8→7/行；**NPU 待验证**，§9.16）；其前为 round-4 `3906f91`（[P-E]
+> 覆盖范围：v2 维护序重构 + 栈溢出修复 + v2-opt1/2（§9.17–§9.19，2026-10-19）。
+>
+> ⚠ **v2 转型说明（2026-10-19）**：淘汰路径已从 pri 时间戳 + Argtopk 基数选择重构为
+> lru 顺序数组 + 每步重建（§9.17）。本文 §5（20 步表）、§6（Argtopk 深读）及 §9.6–§9.12
+> 中涉及 Argtopk/protect/pri 的内容**保留为 v1 历史**，与现行代码的对应关系以 §9.17 为准；
+> 状态字段 `pri`→`lru`、非 spec 步骤 20→18、ECHO_PERF_NUM_STEPS 28→26、checks 重写为
+> 50 项（§8.5 的 172 项为 v1 历史）。§2/§3/§4 的结构分析（Path A/UB/栅栏模型/PackedBlockScan）
+> 在 v2 下继续有效。
+> v1 终版快照：tag `v1-argtopk-final`。v1 末次验证数字见 §9.14/§9.15。
+>
+> 历史覆盖：`05046f2`（round-4b）；round-4 `3906f91`（[P-E]
 > 反向 P-D + 白付清理，含 round-3 两批 f8b9c69+1121091 与修复 d461f5d，已上板验证
 > §9.15）+ `9b63e24`（文档同步）。
 > 工程全貌与运行命令见根目录 `README.md`，本文不重复，只做深读。
@@ -1062,6 +1071,21 @@ hang），根因是编译单元整体属性（Process 巨大/19 Op/Init 多 GM �
 probe 无法复现。跨核协同方案因此暂停（`echo_lru_kernel.h:1189-1194`）。**在可预见的将来不要
 在本 kernel 里尝试 grid.sync**。
 
+### 7.12 VEC SIMT 栈溢出（errcode 354）——单帧内联和 > 每线程栈上限
+
+- **现象**：kernel 启动即 trap（上层 507035），全核同 PC、确定性、`-O0` 不救；
+  **trap 位置随任意源码增删漂移**（帧在入口一次性分配，与执行路径无关）。
+- **根因**：bisheng 把 `__global__` 入口的全部内联设备代码编成一个巨型栈帧
+  （= 所有内联函数局部/溢出槽之和），超过向量核每线程栈硬上限。v1 帧恰在限下，
+  v2 +2 Op 越界；普通构建擦线通过后打点构建再越界（余量以"行"计）。
+- **规避**：重型设备函数一律 `__attribute__((noinline))`（帧峰值从"求和"变
+  "取最大"）；本仓现行规则为**全部 Op noinline**。新增内联大函数前先想栈。
+- **诊断铁律**：507035 第一步 `ASCEND_SLOG_PRINT_TO_STDOUT=1` 重跑读 errcode
+  字符串（上层异常不透出 354）；"位置漂移 + 与执行无关 + 全核同 PC"是本坑指纹，
+  出现即停止语义排查（阶段二分对它完全失效——帧与执行路径无关）。
+- **全记录**：`docs/ascend_vec_simt_stack_overflow.md`（含完整误判链复盘）。
+  §7.9 的 grid.sync trap 高度疑似同根因（加代码涨帧越界），待按本条规则收窄帧后重测。
+
 ### 7.10 设备被占/残留进程：新进程第一次 sync 即 507034 超时
 
 - **现象**：round-3 上板复核（§9.14）途中一轮 compare.py 报"cold_reset 挂死"——
@@ -1609,25 +1633,97 @@ blocks=32、rows=32、topk=2048、capacity=4096，自适应 512 线程，§8.4�
   周期 → full_cache 120.12 → **~115-118 μs**；warm 不受影响（needFree=0，C1
   整段跳过）。
 
+### 9.17 v2：维护序重构（2026-10-19，fe10f91/692c1d7 上板全过）
+
+**动机**（§2.2 边际成本账）：v1 full_cache 的 ArgtopkAllRows 96.4K 周期（48.9%）
+是结构性亏损——O(B) 基数选择每步重付；即使 Argtopk 归零也余 ~101K ≈ 65 μs，
+50-60 μs 目标不动结构不可达。
+
+**设计**（"SIMT 做对的那半 + Echo 做对的那半"）：
+- 状态 `pri` 删除 → `lru[rows, B+1]`（秩→槽位，有效区 [0, occ)、occ = B−avail、
+  尾部恒 0）；htd/dth/free/avail 全不变；fifo 成死状态（+2/步合并进
+  OpFifoAvailUpdate，golden 语义不变）。
+- flags workspace `[R][B+1]`：bit0=本步 hit（OpHitMiss 散射纯 store）、bit1=淘汰
+  /spec 移除（OpEvictScanRow）；prologue 全量清零 + SyncGrid（audit 污染防御 +
+  同核 WAW 写缓冲排空）。
+- **OpEvictScanRow**（替代 7 栅栏 Argtopk）：位置序扫 lru 跳过本步 hit（v1
+  protect 等价物）取前 fsClamp 个非 hit 槽 → freeIdx（输出序 = (pri,slot) 字典序，
+  与 v1 逐位一致）；O(occ) 平扫 3 栅栏/行；padding/尾零语义同 v1。
+- **OpLruRebuildRow**（替代 OpAllocPriority）：每步必执行（"每种情况都维护"），
+  产出 新 lru = [幸存者旧序] ++ [hit 槽号升序] ++ [分配槽号升序]，与 v1 步末
+  (pri,slot) 稳定排序逐位等价（幸存者 pri 严格分层 + 同层槽号平局）。五相位：
+  A staging（flags/lru GM→UB）/ B aAt 散射+位置域分类扫描 / C 槽域联合扫描
+  （hit|alloc 前缀 → hExcl/aExcl 秩）/ D 散射写回 GM / 尾部处理；5 栅栏/行
+  （B1 staging、B2/B3 扫描内部、B3.5 前缀存储→散射读、B4 行间复用）。
+- **尾零删除**：非 spec 路径尾零数学冗余——K/H/A 散射目标恒 < occNew；真实管线
+  fs = max(nm−avail,0) ≤ nm ⟹ occNew ≥ occOld ⟹ 尾区 ⊆ 旧零尾（restore/reset/
+  上一 invocation 不变量归纳）；spec 路径 avail 动态变化保留尾零（specOn 门控）。
+- 步骤 20→18（ECHO_PERF_NUM_STEPS 28→26）；schema `pri`→`lru`；workspace
+  +R×(B+1) flags、删 argtopk 诊断区；UB 布局：[0,128) scanScratch（Step1 归约+C1
+  与 Step5 MissCumsum 的 v1 已验证序列）+ 256 对齐的 flags/aAt/lru/hExcl/aExcl
+  （各 B+1）+ freeIdx + rbScan 段（Step2/Step4 扫描独立缓冲）。
+- checks 整体重写为 **50 项**（v1 pri 语义独立 golden vs v2 链逐位跨验证、
+  尾零 spec 门控、EvictScan/Rebuild 各 15/11 用例）。
+
+**上板结果**（kernel 级 P50，空闲设备；v1 对照为 05046f2 数字）：
+
+| 场景 | SIMT | Echo v2 | Echo/SIMT | vs v1 |
+|---|---:|---:|---:|---:|
+| cold_reset | 75.32 | 111.73 | 1.48× | 94.16 → +19% |
+| warm_75pct | 80.88 | 79.18 | 0.98× | 58.28 → +36% |
+| warm_all_hit | 82.03 | 77.25 | 0.94× | 55.34 → +40% |
+| warm 两场景 71/73/78 → 失去 v1 领先、与 SIMT 持平 | | | | |
+| full_cache_75pct | 93.68 | **104.06** | **1.11×** | **120.12 → −13%** |
+
+分步（周期，最慢核中位；频率交叉验证 Σ/μs ≈ 1.6 GHz，Event 换算照旧不可用）：
+
+| 步 | cold | warm75 | warm_all | full |
+|---|---:|---:|---:|---:|
+| OpLruRebuild | 34.8K | 36.9K | 37.2K | 45.8K |
+| OpEvictScan | — | — | — | 21.7K |
+| OpHitMiss | 21.0K | 24.8K | 25.1K | 26.2K |
+| OpMissCumsum | 17.5K | 16.9K | 16.2K | 16.8K |
+| OpSetUpdate | 23.4K | 14.8K | 11.3K | 14.7K |
+
+**warm 回退的账**：v1 warm Σ90K → v2 Σ118K，差额 +31K ≈ Rebuild 的 37K（减去
+删除的 AllocPriority 5.6K）——回退全部来自每步重建的固定开销（flags staging
+4097 GM 读 + 槽域 O(B) 扫描 + 5 栅栏），与场景工作量弱相关（三 warm 场景
+Rebuild 几乎等值）。这是 v2 的"维护税"，方向上与 SIMT 的 O(C) 维护同价；
+常数可再砍（§9.19/§10.3），O(B) 地板是设计的一部分。
+
+### 9.18 事故：VEC SIMT 栈溢出（2026-10-19，fe10f91 修复）
+
+v2 首次上板 cold_reset 即 507035（device error type 3）trap。根因：**bisheng
+把 Process 全部内联 Op 编成单一巨型栈帧（= 内联函数溢出槽之和，kernel 入口
+一次性分配），超过设备每线程栈硬上限**（设备日志 errcode 354 "The VEC SIMT
+stack overflows"；v1 帧恰在限下，v2 +2 Op 越界）。修复：全部 Op 函数
+`__attribute__((noinline))`（帧峰值 从"求和"变"取最大"）；普通构建擦线通过后
+打点构建（ECHO_PERF_STEP 多几行代码）再次越界，最终统一 noinline 后余量充足。
+教训与完整排查记录见 §7.12 与 `docs/ascend_vec_simt_stack_overflow.md`。
+
+### 9.19 v2-opt 第 1 轮：nm=0 快路径 + 末行免 B4（2026-10-19，NPU 待验证）
+
+分步动机：Rebuild 固定开销主导（§9.17），两项最低风险削减：
+- **opt-1 nm=0 快路径**：hasAlloc 为假时跳过 aAt 清零/散射/槽域扫描 alloc 字段
+  /aExcl 存储（aExcl 届时无读者——A-append 的 j<nm 不执行，语义不变）；
+  warm_all_hit 等零分配步省 ~4097 UB 写 + 2×4097 读。
+- **opt-2 末行免 B4**：B4 仅保护 UB 段行间复用；末行后本 invocation 无这些段的
+  读者（Step5 用 scanScratch [0,128) 不同段；lru 写由 kernel 边界保证）。
+  rowsPerCore=1 的基准形态每次调用直接省一道栅栏。lastRow 块一致参数无发散。
+预期 warm Rebuild 37K → ~30K（−5~8K）；EvictScan 的尾栅栏**保留**（它排序
+freeIdx 写 → OpAllocPop 读，跨 Op 依赖，与 B4 性质不同）。checks 50 项同步更新
+（组 2 首例 lastRow=0 覆盖 B4 执行路径）。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
 
-最新口径为 §9.15 上板验证（2026-10-16，空闲设备，round-4＝3906f91+9b63e24，
-kernel 级 P50）：**warm 场景 58.28 / 55.34 μs、cold 94.16 μs、full_cache（解码
-稳态代表：缓存满 + 每步 miss 必然淘汰）120.12 μs**——较 round-3（§9.14）warm
-−9.5%/−10.6%、full −7.1%、cold 噪声内持平。**Echo/SIMT 比值（可信口径：SIMT 分母
-已随空闲设备重测恢复正常，§9.14 open question 1 关闭）**：warm **0.72×/0.67×
-（Echo 领先，warm 已进入 50-60 μs 目标档）**、cold 1.25×、full 1.29×。
-
-**距 50-60 μs 目标的定量差距（§9.15 验证结论 5）**：full_cache 现 198K 周期
-（120.12 μs @ ~1.65 GHz），目标 50-60 μs ≈ 80-95K 周期；即使 ArgtopkAllRows
-（96.4K、占 48.9%）归零，余项仍有 101K ≈ 65 μs——**不动结构到不了目标，v2
-（维护序，§10.3②）必要性坐实**；v2 落点估 ~75 μs，50-60 μs 还需 v2 之上叠加
-pipeline 压缩（HitMiss 26K / MissCumsum 16K / SetUpdate 14K / FreeRelease 8K /
-misc 37K）。Argtopk 自身经 round-4 重校准已是"栅栏地板 + pack 吞吐 + merge +
-emission"的弥散结构——无单一主导相位，每次微观优化预期仅 ~5-10K（§9.15），kernel
-内部继续抠 Argtopk 的边际收益有限。
+v2（§9.17，2026-10-19 上板全过）：**full_cache 104.06 μs（1.11×，v1 −13%）——
+维护序兑现设计目标但离 50-60 μs 仍有差距；warm 79.18/77.25 μs（0.98×/0.94×，
+与 SIMT 持平，v1 的 0.7× 领先让渡给每步重建的维护税）；cold 111.73（1.48×）**。
+分步看 warm 回退全部来自 Rebuild 的固定开销（37K ≈ +31K 账目闭合，§9.17）；
+HitMiss/Cumsum/SetUpdate 与 v1 逐值持平（代码未动）。SIMT 本轮 75-94 μs。
+v1 终版快照：tag `v1-argtopk-final`（§9.14/9.15 数字）。
 
 ### 10.2 地板项清单（不再可优化或收益有限的部分）
 
@@ -1639,31 +1735,22 @@ emission"的弥散结构——无单一主导相位，每次微观优化预期�
 
 ### 10.3 已识别方向（按当前优先级排序）
 
-1. **round-3 上板复核 + 分步重采**：已完成（§9.14）——cold/warm 与消融 t512 噪声
-   内复现、full 129.29 μs（−5.9%，ArgtopkAllRows 111.8K→105.5K 周期，分步已重采）。
-   Argtopk 仍占 full 场景 50.1%，后续优化方向转入 ②③。
-2. **行间软件流水（rows 扩展性）或"维护序"v2 接口**：消融证实每核行间完全串行是
-   结构性软肋（rows 64/128 时 warm 优势消失，§9.10）——在 Op 内 r 循环引入跨行
-   重叠（软件流水）可改善 rows 扩展性；追平 SIMT ~50 μs 量级的根本路径则是把持久
-   状态改成维护好的序（类似 SIMT 的 lru_slots，淘汰 O(fs)，§2——Echo 每步 O(B)
-   全量基数选择的根源是 pri 只是"派生的序"），属于**接口级 v2 变更**（状态字段、
-   golden、host 侧全部要动），不是 kernel 内部优化。
-3. **投机解码（spec）场景测试**：kernel Step0.5 路径已实现（§5），但 compare.py 四
-   场景 `spl` 恒为 `max_token`（`make_case` 里 stable/visible 都取 max_token，
-   `compare.py:70-71`），spec golden 未覆盖——需先扩 reference_echo 的投机后缀参考，
-   才能谈该路径的正确性与性能。
-
-**附注：已评估并搁置的微优化候选**（2026-10-19，主会话与 owner 两轮定量讨论结论；
-登记在此避免重复评估）：
-
-- **rawSlots / wsMissRank 迁 UB**：各 2048 槽（基准形态每核 rowsPerCore×topk 份额），
-  当前 UB 余量 5624 槽装得下（27144+4096=31240 ≤ 32768，§3.3）；但每项只省 2-3 次
-  topk 规模的 GM 往返（估 ~1-3K 周期），却要付 [P-C] 式落点门控 + 本地/绝对行索引
-  双基准审计的成本（§9.13 教训：per-core 私有缓冲的行索引基准与 GM 不同）——
-  收益/风险比不足，主动搁置。
-- **UB 扩容至 192 KiB**：探针结论单 `__ubuf__` 数组可到 192 KiB（256 KiB 才 trap，
-  §7.5），现用 128 KiB，理论余量 16384 槽；但 192 KiB 档的稳定裕度未文档化，使用前
-  需在服务器重新 probe——现阶段不碰。
+1. **v2-opt 第 1 轮验证**（§9.19，已实现待上板）：nm=0 快路径 + 末行免 B4，
+   预期 warm Rebuild −5~8K；随后 FifoAvail 并行化（32 行 t0/t1 串行 RMW 6K →
+   摊给全线程 ~1K）。
+2. **Rebuild 常数削减**（结构性）：固定开销 = flags staging（4097 GM 读）+
+   槽域 O(B) 扫描 + 5 栅栏。候选：staging 合并（flags 与 aAt 清零已合并，lru
+   staging 可与 classify 融合省一趟 UB 写）、栅栏再削（B1 与 scan1 内部栅栏
+   的合并可行性）、EvictScan/Rebuild 共享 flags staging（Step2 已 stage 过一次，
+   Step4 重复 stage —— 跨 Op 缓存到 UB 的可行性：Step2 与 Step4 间隔 Step3
+   SyncGrid，UB 段无写者，理论可复用，省 4097 GM 读 + 4097 UB 写）。
+   注意 O(B) 地板是 v2 设计代价（等价 SIMT 的 O(C) 维护税），常数收益为主。
+3. **冷启动专项**：cold 111.73 中 OpResetRows 33.1K（htd 1 MiB/行纯写，带宽
+   地板项）+ Rebuild 34.8K + SetUpdate 23.4K；reset 向量化存储与 opt-1/2 叠加后
+   重估。
+4. **投机解码（spec）场景测试**：Step0.5 路径 v2 语义已按 flags bit1 维护
+   （§9.17），但 compare.py 的 spl 恒为 max_token，spec golden 仍未覆盖。
+5. ~~行间流水~~（rows>32 形态）与 ~~维护序 v2~~（已落地）从列表移除。
 
 ---
 
@@ -1679,6 +1766,7 @@ emission"的弥散结构——无单一主导相位，每次微观优化预期�
 | 2026-10-16 | 第 6 版 | `d461f5d`（上板复核） | round-3 两批 + UB freeIdx 修复上板复核（第二台服务器）：新增 §9.14（kernel 级 P50 / 分步周期 / full −5.9% 归因 / 两个测量 open question / 事故闭环）与 §1.6（基准单步口径 vs 真实 decode 多步推演）、§7.10（设备占用测量教训）；§9.11/§9.12/§10 复核状态与现状数字刷新；§11 日志表修复孤立行并核对日期 |
 | 2026-10-16 | 第 7 版 | 待提交（round-4：[P-E]+白付清理） | 同步工作区未提交的 round-4：[P-E] 反向 P-D（OpArgtopkRow 行首全员 pack + B0，hist 一律读 key，Argtopk 栅栏 7→8，§6.2/§6.7/§9.15）与白付清理 A/B（非 spec 跳过 prologue FillZero+SyncGrid、anyReset=0 跳过 Step0 四 Op+SyncGrid，打点槽保留，§5.1/§9.15）；§9.11 [P-D] 条目标注已被回退；全文 kernel.h 行号按当前工作区核对修正；附录⑥标记已解决；NPU 验证待做（预期数字与挂起二分顺序见 §9.15） |
 | 2026-10-16 | 第 8 版 | `3906f91`+`9b63e24`（上板验证） | round-4（[P-E]+白付清理）上板验证（空闲设备）结果写入：§9.15 新增上板验证小节（warm 58.28/55.34 μs＝0.72×/0.67× 超出白付清理预期、cold 94.16 μs、full 120.12 μs；P-E 收益重校准——Argtopk −9.1K 远低于静态预期 −30K，Argtopk 转弥散结构无单一主导相位；距 50-60 μs 定量账 → v2 必要性坐实；int16 hist 扩 G=128 候选撤下）；§9.14 open question 1 关闭（SIMT ~2× 确认为设备占用干扰，比值恢复可信）；§7.11 新增"静态延迟链模型高估依赖读成本"方法论教训；§9 总表 round-4 行、§10.1 现状、§2.2 比值引用、头部覆盖范围同步刷新 |
+| 2026-10-19 | 第 10 版 | v2 轮（fe10f91..本轮） | 恢复记录（按 owner 指示跳过中间误判过程）：新增 §9.17 v2 维护序重构全记录（设计/接口变更/上板 P50/分步/warm 回退账目）、§9.18 栈溢出事故（根因+修复，详见 §7.12 与独立文档）、§9.19 v2-opt1/2（待验证）；§7.12 新增 VEC SIMT 栈溢出条目（含 §7.9 grid.sync 关联修订）；头部 v2 转型 banner（§5/§6 Argtopk 内容保留为 v1 历史，checks 50 项）；§10.1/§10.3 按 v2 现状重写 |
 | 2026-10-19 | 第 9 版 | `05046f2`（NPU 待验证） | 恢复按 owner 指示暂停的文档同步：新增 §9.16 round-4b（emission 尾栅栏去重——OpArgtopkRow 函数尾栅栏 GM-only、Process Step2.SyncGrid 槽 UB 路径跳过；Argtopk 栅栏 UB 8→7/行）；§6.7 表追加 round-4b 行并核对头注释（:395-399），§3.5/§5.1（含 §5.2 Step2、§6.2/§6.6 emission 尾部描述）同步更新、行号按 05046f2 核对；§8.1 新增本机/服务器验证分工（本机只跑 checks，编译与 NPU 验证归服务器）；§2.2 补 warm→full 边际成本定量论证（Echo +61.84 vs SIMT +12.01、边际差 49.83 μs，v2 定量动机）；§10.3 附注已评估并搁置的微优化候选（rawSlots/wsMissRank 迁 UB、UB 扩容 192 KiB）+ §3.2 G=64 成因注记 |
 
 ---
