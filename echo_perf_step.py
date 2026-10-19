@@ -17,7 +17,7 @@ reference_echo 全量比对（本脚本是诊断工具，不是正式性能结�
 
 kernel 侧打点：PerfBegin/PerfEnd（threadIdx.x==0 的 clock() 差值）写入
 workspace 尾部 stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx]，
-非 spec 路径共 20 步（spec 路径 28 步，本基准 spec_enabled=False）。
+非 spec 路径共 18 步（spec 路径 26 步，本基准 spec_enabled=False）。
 """
 from __future__ import annotations
 
@@ -43,17 +43,17 @@ _MATCH = re.search(r"constexpr uint32_t ECHO_PERF_NUM_STEPS\s*=\s*(\d+)\s*;", _T
 assert _MATCH, "echo_lru_tiling.h 中找不到 ECHO_PERF_NUM_STEPS"
 ECHO_PERF_NUM_STEPS = int(_MATCH.group(1))
 
-# 非 spec 路径 Process() 内 PerfBegin/PerfEnd 的 20 个打点（顺序即 perfStepIdx_ 顺序）。
-# protect 折叠后: OpProtect 已并入 OpHitMiss（原 Step2 整段删除），OpFifoInc 挪至
-# alloc pop 之后（防 Argtopk 读到不一致 fifo，详见 kernel 头注释）。
+# 非 spec 路径 Process() 内 PerfBegin/PerfEnd 的 18 个打点（顺序即 perfStepIdx_ 顺序）。
+# [v2 维护序] 相对 v1 的 20 步：Step2 基数选择换成 OpEvictScan；OpFifoInc 并入
+# Step4 的 fifo+=2；OpAllocPriority 换成 OpLruRebuild（Bug2 SyncBlock 随竞争源删除）。
 # specEnabled=1 时 Step0.5 在 "Step0.SyncGrid" 之后额外插入 8 步，本基准不覆盖。
 ECHO_PERF_STEP_NAMES = [
-    "Step0.OpResetRows", "Step0.OpResetDthPri", "Step0.OpResetFree", "Step0.OpResetAvailFifo",
+    "Step0.OpResetRows", "Step0.OpResetDthLru", "Step0.OpResetFree", "Step0.OpResetAvailFifo",
     "Step0.SyncGrid",
     "Step1.OpHitMiss", "Step1.SyncGrid",
-    "Step2.ArgtopkAllRows", "Step2.SyncGrid", "Step2.OpFreeRelease", "Step2.OpFreePush",
-    "Step3.OpAllocPop", "Step3.OpFifoInc", "Step3.SyncGrid",
-    "Step4.OpAllocPriority", "Step4.SyncBlock", "Step4.OpFifoAvailUpdate",
+    "Step2.OpEvictScan", "Step2.SyncGrid", "Step2.OpFreeRelease", "Step2.OpFreePush",
+    "Step3.OpAllocPop", "Step3.SyncGrid",
+    "Step4.OpLruRebuild", "Step4.OpFifoAvailUpdate",
     "Step5.OpMissCumsum", "Step5.SyncGrid", "Step5.OpSetUpdate",
 ]
 ECHO_PERF_NONSPEC_STEPS = len(ECHO_PERF_STEP_NAMES)
@@ -65,10 +65,14 @@ SENTINEL = -12345  # 周期值恒 >= 0，负哨兵可判定“该区域未被 ke
 
 
 def echo_step_region_offset(case, blocks):
-    """workspace 内 stepCycles 区的 int32 偏移，与 EchoLruKernel::Init / EchoWorkspaceElements 一致。"""
+    """workspace 内 stepCycles 区的 int32 偏移，与 EchoLruKernel::Init / EchoWorkspaceElements 一致。
+
+    [v2] 每行段 = wsCumsum(B+1) + 4 标量 + 3*topk 向量 + flags(B+1)；对齐后即
+    stepCycles 区基址（v1 的 argtopk 诊断 dump 区已删除）。
+    """
     rows, topk, capacity = (case[k] for k in ("rows", "topk", "capacity"))
-    base = rows * (capacity + 1 + 4 + 3 * topk)
-    return ((base + 1) & ~1) + blocks * (256 + 8192)
+    base = rows * (2 * (capacity + 1) + 4 + 3 * topk)
+    return (base + 1) & ~1
 
 
 def read_step_cycles(state, case, blocks):

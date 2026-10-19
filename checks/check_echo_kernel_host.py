@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Echo 更新回归：直接提取实际 C++ 函数，用 g++/128 个 CPU 线程检查基数选择、hit 与 miss 扫描。
+"""Echo v2（维护序）回归：提取实际 C++ 函数，g++/128 个 CPU 线程检查淘汰扫描与顺序重建。
 
-覆盖 2026-10-13 手抄版的三处设备算法改动 + P0-P4 性能优化：
-  - OpHitMiss：miss 计数改 warp 归约 + t0 汇总（[P0] 无 atomic，numMisses 直接写出）；
-  - OpArgtopkRow：4 趟 MSB-first 基数选择 + 并行 emission（[P1] 打包块扫描得各线程
-    写入基址，连续切片保槽号升序，替代 t0 串行扫描）；
-  - OpMissCumsum：两级 warp 扫描（[P3] 打包 p0/p1 miss 标志，替代 Hillis-Steele），
-    否则回退 t0 串行；
-  - OpHitMiss 内联块求和并顺手写 freeSize（[P4] 原 OpFreeSize 折叠）；
-  - OpAllocPop：直读 freeIdx + 老栈（[P4] 不依赖 FreePush 新段，与旧栈弹出语义
-    逐值等价）；OpFifoAvailUpdate：fifo++/avail += fs-nm 折叠（[P4] 替代两个
-    独立 t0 步，终值与旧两步序列恒等）；
-  - PackedBlockScan：warp 协作辅助（shfl_up 模拟，2 次栅栏版本）。
+覆盖 v2 的设备算法改动（详见 kernel 头注释与 deep_dive §9.17）：
+  - OpEvictScanRow：位置序扫 lru、跳过本步 hit（v1 protect 语义等价物）取前 fs 个
+    非 hit 槽，输出序 = (pri,slot) 字典序，与 v1 emission 逐位一致；padding/尾零
+    语义与 v1 全同；
+  - OpLruRebuildRow：新 lru = [幸存者(位置序)] ++ [hit 槽号升序] ++ [分配槽号升序]
+    ++ 尾零——与 v1 步末 (pri,slot) 稳定排序逐位等价；
+  - 跨验证组：随机场景下按 v1 pri 语义独立推导 golden（stable_sort by (pri,slot)），
+    与 v2 链（EvictScan+Rebuild）逐位比对——v2 与 v1 语义等价性的 CPU 级证明；
+  - OpHitMiss：hit → flags bit0（v2 替代 pri 时间戳）、warp 归约计数、[P4] freeSize
+    折叠、[C1] 淘汰标志、零 atomic；
+  - OpMissCumsum：两级 warp 扫描（[P3]，v2 未改动，原样回归）；
+  - OpAllocPop + OpFifoAvailUpdate：直读 freeIdx + 老栈等价（[P4] 原样回归）；
+    fifo 两次自增合并为 +2（[v2]）。
 
 依赖 Python 标准库和支持 C++20 的 g++；启用 AddressSanitizer/UBSan。
 这是 CPU 算法和索引检查，不能验证 Ascend 编译、GM D-cache 或 NPU 耗时。
@@ -21,13 +23,12 @@
 from pathlib import Path
 import tempfile, subprocess, re
 root=Path(__file__).resolve().parents[1]
-# 当前测试使用与设备一致的 64 路直方图线程（ARGTOPK_GROUP_THREADS），
 # 128 个 CPU 线程模拟一个 block（blockDim.x=128→4 warp；warp 协作辅助按
-# blockDim.x 运行时推导 warp 数）。
-# 断言模型常量与实际头文件一致，防止以后修改 tiling 后误用旧模型。
+# blockDim.x 运行时推导 warp 数）。断言模型常量与实际头文件一致，防止以后
+# 修改 tiling 后误用旧模型。
 tiling=(root/'csrc/echo/echo_lru_tiling.h').read_text()
 for name,value in [('ARGTOPK_GROUP_THREADS',64),('ARGTOPK_UB_NPAD_MAX',8192),
-                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',28)]:
+                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',26)]:
     match=re.search(r'constexpr uint32_t '+name+r'\s*=\s*(\d+)\s*;',tiling)
     assert match and int(match.group(1))==value, f'{name} 已改变，请同步调整 CPU 模型'
 src=(root/'csrc/echo/echo_lru_kernel.h').read_text()
@@ -39,8 +40,9 @@ def extract(name):
             end=src.index('\n}\n',start)+3
             return src[start:end]
     raise KeyError(name)
-functions=(extract('PackedBlockScan')+'\n'+extract('OpHitMiss')+'\n'+extract('OpArgtopkRow')
-           +'\n'+extract('OpMissCumsum')+'\n'+extract('OpAllocPop')+'\n'+extract('OpFifoAvailUpdate'))
+functions=(extract('PackedBlockScan')+'\n'+extract('OpHitMiss')+'\n'+extract('OpEvictScanRow')
+           +'\n'+extract('OpLruRebuildRow')+'\n'+extract('OpMissCumsum')+'\n'+extract('OpAllocPop')
+           +'\n'+extract('OpFifoAvailUpdate'))
 preamble=r'''
 #include <algorithm>
 #include <atomic>
@@ -95,145 +97,211 @@ harness=r'''
 int main(){
 try{
     int checks=0;
-    // ---- 1) OpArgtopkRow: 逐字节基数选择 (含 [方向1] 自适应跳趟与回退) ----
-    // fifo 变体: 0x40000000 → z=0 全趟 (含 dbg 全量直方图 golden);
-    //   4097 → z=2 跳 2 趟; 65536 → z=1; 100 → z=3 只跑 byte0。
-    //   跳趟/回退路径的输出 golden 与全趟完全一致 (选择结果与起跑趟无关)。
-    for(uint32_t B:{1u,8u,31u,63u,64u,127u,128u,255u,256u,4096u}){
-        uint32_t n=1;while(n<B+1)n*=2;
-        for(uint32_t pattern=0;pattern<4;++pattern){
-         for(uint32_t fifoVal:{0x40000000u,4097u,65536u,100u}){
-            std::mt19937 rng(B*13+pattern);
-            std::vector<int32_t> pri(B+1);
-            for(auto& p:pri){
-                if(pattern==0)p=(rng()%9==0)?-1:static_cast<int32_t>(rng()&0x7fffffff);
-                if(pattern==1)p=(rng()%5==0)?-1:static_cast<int32_t>(rng()%4);
-                if(pattern==2)p=-1;
-                if(pattern==3)p=-1;
+    // ---- 1) OpEvictScanRow: 位置序淘汰扫描 (跳过本步 hit, 输出序 = (pri,slot) 序) ----
+    // hitMode: 0=随机分布 hit; 1=hit 集中在最旧端 (必须跳过, 选中靠后的非 hit 槽)。
+    //   fsClamp ≥ 1 (fs=0 行由调用方 wrapper 跳过, 不进入本函数)。
+    {
+        struct EvictCase { uint32_t B, occ, fsClamp, hitMode, seed; };
+        const EvictCase cases[]={
+            {64,40,10,0,1},{64,40,30,1,2},{31,31,7,0,3},{256,200,64,1,4},
+            {4096,4096,512,0,5},{4096,3000,512,1,6},{64,40,40,0,7},   // fs=全部非 hit
+            {64,10,20,0,8},                                            // fs>非 hit 总数 → padding
+            {128,128,64,1,9},{1024,513,100,0,10},{64,1,1,0,11},{512,0,1,0,12},  // occ=0 全 padding
+            {4096,2048,1,0,13},{96,95,48,1,14},{2048,2000,777,0,15},  // fs 超大 → 大量 padding
+        };
+        for(const auto& c:cases){
+            uint32_t B=c.B,occ=c.occ,fsClamp=c.fsClamp,topkDim=B;
+            std::mt19937 rng(c.seed);
+            std::vector<int32_t> lruRow(B+1,0),flagsRow(B+1,0);
+            std::vector<int32_t> slots(B);std::iota(slots.begin(),slots.end(),1);
+            std::shuffle(slots.begin(),slots.end(),rng);
+            for(uint32_t p=0;p<occ;++p)lruRow[p]=slots[p];
+            std::vector<int32_t> hitFlags(B+1,0);
+            uint32_t hitCount=0;
+            if(occ>0){
+                hitCount=(c.hitMode==1)?std::min<uint32_t>(occ,occ/3):occ/4;
+                for(uint32_t k=0;k<hitCount;++k){
+                    uint32_t p=(c.hitMode==1)?k:(rng()%occ);
+                    hitFlags[lruRow[p]]=1;
+                }
             }
-            // topkDim=B; freeSize 混合 0 / B / 越界值, 覆盖 fsClamp 钳位与提前返回.
-            int32_t freeSize=pattern==2?0:(pattern==1?static_cast<int32_t>(rng()%B):static_cast<int32_t>(B));
-            if(pattern==0&&B>4)freeSize=static_cast<int32_t>(rng()%B);
-            uint32_t fsClamp=freeSize<0?0u:(freeSize>(int32_t)B?B:(uint32_t)freeSize);
-            // 打包 golden: key[i]=I32_MAX 当 i==0 || i>B || pri[i]<0.
-            std::vector<int32_t> packed(n,I32_MAX);
-            for(uint32_t i=1;i<=B;++i)packed[i]=pri[i]<0?I32_MAX:pri[i];
-            // 缓冲: 单大 UB 数组分段 (key/hist/globalCnt/segLocal/segBase/scalar), 越界哨兵.
-            constexpr uint32_t G=ARGTOPK_GROUP_THREADS;
-            uint32_t footprint=n+G*256u+256u+G*2u+G*2u+8u;
-            std::vector<int32_t> ub(32768+16,-777),out(B+16,-777),dbgKey(n,-777);
-            std::vector<uint32_t> dbgCount(256,0x7fffffff);
-            int32_t *key=ub.data(),*hist=ub.data()+n,*globalCnt=hist+G*256u;
-            int32_t *segLocal=globalCnt+256u,*segBase=segLocal+G*2u,*scalar=segBase+G*2u;
-            // 跳趟路径 (fifoVal 小) 的 dbgCount 是首趟过滤直方图, 语义随起跑趟变化 → 不验证;
-            //   全趟路径 (z=0) 保持旧版 pass0 全量 golden。dbgKey 与起跑趟无关, 恒验证。
-            uint32_t startPass=3u;
-            if((fifoVal>>24)!=0u)startPass=0u;else if((fifoVal>>16)!=0u)startPass=1u;else if((fifoVal>>8)!=0u)startPass=2u;
-            bool const fullPass=(startPass==0u);
-            launch([&]{OpArgtopkRow(B,n,B,G,fifoVal,pri.data(),0,out.data(),freeSize,true,
-                key,hist,globalCnt,segLocal,segBase,scalar,
-                dbgCount.data(),dbgKey.data());});
-            if(fsClamp==0u){
-                // 提前返回: 不写任何输出/UB/dbg.
-                for(uint32_t i=0;i<out.size();++i)require(out[i]==-777,"free output written on early return");
-                for(uint32_t i=0;i<ub.size();++i)require(ub[i]==-777,"UB written on early return");
-                for(uint32_t i=0;i<n;++i)require(dbgKey[i]==-777,"dbgKey written on early return");
-                ++checks;continue;
+            for(uint32_t s=1;s<=B;++s)flagsRow[s]=hitFlags[s];   // bit0
+            // golden: 位置序非 hit 槽; 前 fsClamp 个被淘汰; 不够补 [B+1,..); 尾零。
+            std::vector<int32_t> nonHit;
+            for(uint32_t p=0;p<occ;++p)if(!hitFlags[lruRow[p]])nonHit.push_back(lruRow[p]);
+            std::vector<int32_t> expected(nonHit.begin(),nonHit.begin()+std::min<uint32_t>(fsClamp,(uint32_t)nonHit.size()));
+            for(uint32_t k=0;expected.size()<fsClamp;++k)expected.push_back((int32_t)(B+1+k));
+            std::vector<int32_t> expFlags=flagsRow;
+            for(uint32_t j=0;j<fsClamp&&j<(uint32_t)nonHit.size();++j)expFlags[nonHit[j]]=2;
+            std::vector<int32_t> lruGm=lruRow,flagsGm=flagsRow;
+            std::vector<int32_t> freeIdx(topkDim+8,-777);
+            std::vector<int32_t> flagsUb(B+1+8,-777),scan(64+8,-777);
+            launch([&]{OpEvictScanRow(B,topkDim,fsClamp,occ,lruGm.data(),0,
+                                      flagsGm.data(),0,freeIdx.data(),flagsUb.data(),scan.data());});
+            for(uint32_t j=0;j<topkDim;++j){
+                int32_t e=(j<(uint32_t)expected.size())?expected[j]:0;
+                require(freeIdx[j]==e,"evict freeIdx mismatch");
             }
-            // 选择 golden: T = fsClamp-th 小 key, quota = fsClamp - |{key<T}|.
-            std::vector<int32_t> keys=packed;
-            std::sort(keys.begin(),keys.end());
-            uint32_t T=(uint32_t)keys[fsClamp-1];
-            uint32_t lessCount=(uint32_t)(std::lower_bound(keys.begin(),keys.end(),(int32_t)T)-keys.begin());
-            uint32_t quota=fsClamp-lessCount;
-            std::vector<int32_t> expected;
-            for(uint32_t i=0;i<n;++i)if((uint32_t)packed[i]<T)expected.push_back((int32_t)i);
-            for(uint32_t i=0;i<n&&expected.size()<fsClamp;++i)
-                if((uint32_t)packed[i]==T)expected.push_back((int32_t)i);
-            require(expected.size()==fsClamp,"golden selection size mismatch");
-            // 交叉验证: 选择集合 == 稳定排序 (key, slot) 前 fsClamp 个 (顺序无关).
-            std::vector<int32_t> order(n);std::iota(order.begin(),order.end(),0);
-            std::stable_sort(order.begin(),order.end(),[&](int32_t a,int32_t b){return packed[a]<packed[b];});
-            std::vector<int32_t> topk(order.begin(),order.begin()+fsClamp);
-            std::sort(topk.begin(),topk.end());
-            std::vector<int32_t> selected=expected;   // expected 按 <T/==T 分组构造, 不保证槽号升序
-            std::sort(selected.begin(),selected.end());
-            require(selected==topk,"selected set differs from stable-sort golden");
-            for(uint32_t i=0;i<B;++i)
-                require(out[i]==(i<fsClamp?expected[i]:0),"free output mismatch");
-            for(uint32_t i=B;i<out.size();++i)require(out[i]==-777,"free output overrun");
-            // [B] key 只写有效区 [0, B+1); padding 区不再打包 (选择时解析式计入)。
-            for(uint32_t i=0;i<=B;++i)require(ub[i]==packed[i],"key region permuted or corrupted");
-            for(uint32_t i=B+1;i<n;++i)require(ub[i]==-777,"padding region must stay untouched");
-            for(uint32_t i=footprint;i<ub.size();++i)require(ub[i]==-777,"UB overrun past footprint");
-            for(uint32_t i=0;i<=B;++i)require(dbgKey[i]==packed[i],"debug packed key mismatch");
-            for(uint32_t i=B+1;i<n;++i)require(dbgKey[i]==-777,"dbgKey padding region untouched");
-            // [方向1] dbgCount 仅在全趟路径 (startPass==0) 验证: golden 为完整打包键的
-            //   高字节直方图 (含 padding, 由 merge 解析式计入)。跳趟路径首趟带
-            //   prefix=0 过滤, 直方图语义不同, 不做断言 (输出 golden 已覆盖正确性)。
-            if(fullPass){
-                std::vector<uint32_t> expectedHist(256,0);
-                for(uint32_t i=0;i<n;++i)++expectedHist[(static_cast<uint32_t>(packed[i])>>24)&255u];
-                require(dbgCount==expectedHist,"debug high-byte histogram mismatch");
-            }
+            for(uint32_t j=topkDim;j<freeIdx.size();++j)require(freeIdx[j]==-777,"freeIdx overrun");
+            for(uint32_t s=0;s<=B;++s)require(flagsGm[s]==expFlags[s],"evict flags mismatch");
+            for(uint32_t i=B+1;i<flagsUb.size();++i)require(flagsUb[i]==-777,"flagsUb staging overrun");
+            for(uint32_t p=0;p<=B;++p)require(lruGm[p]==lruRow[p],"lru must not be written by EvictScan");
             ++checks;
-         }
         }
     }
-    // ---- 1b) [P-C] freeIdx 走 UB 路径 (freeIdxIsGm=false): 输出与 GM 路径 golden 一致 ----
+    // ---- 2) OpLruRebuildRow: 顺序重建 golden ----
+    // hitMode: 0=随机 hit; 1=头部 hit。evictMode: 0=不淘汰; 1=随机淘汰 1/3;
+    //   2=淘汰数=分配数且分配列表 = 被淘汰槽 (淘汰后重分配同槽: 旧位置丢弃 + 尾部追加)。
     {
-        const uint32_t B=64u;
-        uint32_t n=1;while(n<B+1)n*=2;
-        std::mt19937 rng(4242);
-        std::vector<int32_t> pri(B+1);
-        for(auto& q:pri) q=(rng()%5==0)?-1:static_cast<int32_t>(rng()%4);
-        int32_t freeSize=static_cast<int32_t>(rng()%B);
-        uint32_t fsClamp=freeSize<0?0u:(freeSize>(int32_t)B?B:(uint32_t)freeSize);
-        std::vector<int32_t> packed(n,I32_MAX);
-        for(uint32_t i=1;i<=B;++i)packed[i]=pri[i]<0?I32_MAX:pri[i];
-        constexpr uint32_t G=ARGTOPK_GROUP_THREADS;
-        uint32_t footprint=n+G*256u+256u+G*2u+G*2u+8u;
-        std::vector<int32_t> ub(32768+16,-777),outUB(B+16,-777),outGM(B+16,-777),dbgKey(n,-777);
-        std::vector<uint32_t> dbgCount(256,0x7fffffff);
-        int32_t *key=ub.data(),*hist=ub.data()+n,*globalCnt=hist+G*256u;
-        int32_t *segLocal=globalCnt+256u,*segBase=segLocal+G*2u,*scalar=segBase+G*2u;
-        uint32_t const fifoVal=4097u;
-        launch([&]{OpArgtopkRow(B,n,B,G,fifoVal,pri.data(),0,outGM.data(),freeSize,true,
-            key,hist,globalCnt,segLocal,segBase,scalar,dbgCount.data(),dbgKey.data());});
-        std::fill(ub.begin(),ub.end(),-777); std::fill(outUB.begin(),outUB.end(),-777);
-        std::fill(dbgKey.begin(),dbgKey.end(),-777); std::fill(dbgCount.begin(),dbgCount.end(),0x7fffffff);
-        launch([&]{OpArgtopkRow(B,n,B,G,fifoVal,pri.data(),0,outUB.data(),freeSize,false,
-            key,hist,globalCnt,segLocal,segBase,scalar,dbgCount.data(),dbgKey.data());});
-        // golden: 与 GM 路径逐位一致 (同一选择语义)
-        require(outUB==outGM,"[P-C] UB-path output differs from GM-path");
+        struct RbCase { uint32_t B, occ, hitMode, evictMode, allocCount, seed; };
+        const RbCase cases[]={
+            {64,40,0,0,8,21},{64,40,1,1,8,22},{4096,4096,0,1,512,23},
+            {64,64,1,0,0,24},{64,0,0,0,16,25},{128,96,1,1,32,26},
+            {31,31,0,0,4,27},{256,128,1,1,64,28},{64,40,0,2,8,29},
+            {2048,1500,1,1,300,30},{96,0,0,0,96,31},
+        };
+        for(const auto& c:cases){
+            uint32_t B=c.B,occ=c.occ,topkDim=B;
+            std::mt19937 rng(c.seed);
+            std::vector<int32_t> lruRow(B+1,0);
+            std::vector<int32_t> slots(B);std::iota(slots.begin(),slots.end(),1);
+            std::shuffle(slots.begin(),slots.end(),rng);
+            for(uint32_t p=0;p<occ;++p)lruRow[p]=slots[p];
+            std::vector<int32_t> hitFlags(B+1,0),evictFlags(B+1,0);
+            uint32_t hitCount=(occ>0)?((c.hitMode==1)?std::min<uint32_t>(occ,occ/2):occ/4):0;
+            for(uint32_t k=0;k<hitCount;++k){
+                uint32_t p=(c.hitMode==1)?k:(rng()%occ);
+                hitFlags[lruRow[p]]=1;
+            }
+            std::vector<int32_t> nonHit;
+            for(uint32_t p=0;p<occ;++p)if(!hitFlags[lruRow[p]])nonHit.push_back(lruRow[p]);
+            uint32_t evCount=0;
+            if(c.evictMode==1)evCount=(uint32_t)nonHit.size()/3;
+            if(c.evictMode==2)evCount=std::min<uint32_t>((uint32_t)nonHit.size(),c.allocCount);
+            for(uint32_t j=0;j<evCount;++j)evictFlags[nonHit[j]]=1;
+            std::vector<int32_t> flagsRow(B+1,0);
+            for(uint32_t s=1;s<=B;++s)flagsRow[s]=(hitFlags[s]?1:0)|(evictFlags[s]?2:0);
+            // 分配列表: 前 evCount 个复用被淘汰槽, 其余从空槽池取 (顺序任意, Rebuild 按槽号排)。
+            std::vector<int32_t> inLru(B+1,0);for(uint32_t p=0;p<occ;++p)inLru[lruRow[p]]=1;
+            std::vector<int32_t> freePool;for(uint32_t s=1;s<=B;++s)if(!inLru[s])freePool.push_back((int32_t)s);
+            std::shuffle(freePool.begin(),freePool.end(),rng);
+            std::vector<int32_t> allocList;
+            for(uint32_t j=0;j<evCount&&allocList.size()<c.allocCount;++j)allocList.push_back(nonHit[j]);
+            for(uint32_t j=0;allocList.size()<c.allocCount&&j<(uint32_t)freePool.size();++j)allocList.push_back(freePool[j]);
+            uint32_t nm=(uint32_t)allocList.size();
+            // golden: K(位置序幸存者) ++ H(槽号升序) ++ A(槽号升序) ++ 尾零
+            std::vector<int32_t> K,H;
+            for(uint32_t p=0;p<occ;++p){
+                int32_t s=lruRow[p];
+                if(hitFlags[s])H.push_back(s);
+                else if(!evictFlags[s])K.push_back(s);
+            }
+            std::vector<int32_t> A=allocList;
+            std::sort(H.begin(),H.end());std::sort(A.begin(),A.end());
+            std::vector<int32_t> expected=K;
+            expected.insert(expected.end(),H.begin(),H.end());
+            expected.insert(expected.end(),A.begin(),A.end());
+            expected.resize(B+1,0);
+            std::vector<int32_t> lruGm=lruRow,flagsGm=flagsRow,raw(topkDim+8,-777);
+            for(uint32_t j=0;j<nm;++j)raw[j]=allocList[j];
+            std::vector<int32_t> flagsUb(B+1+8,-777),aAt(B+1+8,-777),lruUb(B+1+8,-777),
+                                  hExcl(B+1+8,-777),aExcl(B+1+8,-777),scan(64+8,-777);
+            launch([&]{OpLruRebuildRow(B,topkDim,occ,nm,lruGm.data(),0,
+                                       flagsGm.data(),0,raw.data(),0,
+                                       flagsUb.data(),aAt.data(),lruUb.data(),
+                                       hExcl.data(),aExcl.data(),scan.data());});
+            for(uint32_t p=0;p<=B;++p)require(lruGm[p]==expected[p],"rebuild lru mismatch");
+            for(uint32_t s=0;s<=B;++s)require(flagsGm[s]==flagsRow[s],"rebuild must not write flags");
+            require(raw[nm]==-777,"rawSlots overrun");
+            for(uint32_t i=B+1;i<flagsUb.size();++i){
+                require(flagsUb[i]==-777&&aAt[i]==-777&&lruUb[i]==-777&&hExcl[i]==-777&&aExcl[i]==-777,"UB overrun");
+            }
+            ++checks;
+        }
+    }
+    // ---- 3) 跨验证: v1 pri 语义独立 golden vs v2 链 (EvictScan + Rebuild) ----
+    // v1 仿真: pri = rank+1 (位置序, 无平局); hit 盖 f0; 淘汰 = 非 hit 按 (pri,slot)
+    //   升序前 fsClamp 个 (== 位置序非 hit 前 fsClamp); 分配盖 f0+1; 步末 lru =
+    //   全部占用槽 stable_sort by (pri,slot)。fsClamp=0 时跳过 EvictScan (wrapper 语义)。
+    for(uint32_t trial=0;trial<12;++trial){
+        std::mt19937 rng(1000+trial);
+        uint32_t B=(trial%3==0)?4096u:((trial%3==1)?64u:1024u);
+        uint32_t occ=rng()%(B+1);
+        std::vector<int32_t> lruRow(B+1,0);
+        std::vector<int32_t> slots(B);std::iota(slots.begin(),slots.end(),1);
+        std::shuffle(slots.begin(),slots.end(),rng);
+        for(uint32_t p=0;p<occ;++p)lruRow[p]=slots[p];
+        std::vector<int32_t> hitFlags(B+1,0);
+        for(uint32_t p=0;p<occ;++p)if(rng()%4==0)hitFlags[lruRow[p]]=1;
+        std::vector<int32_t> nonHit;
+        for(uint32_t p=0;p<occ;++p)if(!hitFlags[lruRow[p]])nonHit.push_back(lruRow[p]);
+        uint32_t fsClamp=nonHit.empty()?0u:(rng()%(uint32_t)nonHit.size()+1u)/2u;
+        std::vector<int32_t> inLru(B+1,0);for(uint32_t p=0;p<occ;++p)inLru[lruRow[p]]=1;
+        std::vector<int32_t> freePool;for(uint32_t s=1;s<=B;++s)if(!inLru[s])freePool.push_back((int32_t)s);
+        std::shuffle(freePool.begin(),freePool.end(),rng);
+        uint32_t maxAlloc=fsClamp+(uint32_t)freePool.size();
+        uint32_t nm=maxAlloc?rng()%maxAlloc:0u;
+        // 分配列表 = 淘汰槽 (v1 AllocPop 先弹 freeIdx 新段) + 老栈空槽
+        std::vector<int32_t> allocList;
+        for(uint32_t j=0;j<fsClamp&&allocList.size()<nm;++j)allocList.push_back(nonHit[j]);
+        for(uint32_t j=0;allocList.size()<nm&&j<(uint32_t)freePool.size();++j)allocList.push_back(freePool[j]);
+        nm=(uint32_t)allocList.size();
+        // v1 golden: pri 仿真 + stable_sort
+        const int32_t f0=50000;
+        std::vector<int32_t> pri(B+1,-1);pri[0]=I32_MAX;
+        for(uint32_t p=0;p<occ;++p)pri[lruRow[p]]=(int32_t)p+1;
+        for(uint32_t p=0;p<occ;++p)if(hitFlags[lruRow[p]])pri[lruRow[p]]=f0;
+        std::vector<int32_t> expectedEvict(nonHit.begin(),nonHit.begin()+fsClamp);
+        for(uint32_t j=0;j<fsClamp;++j)pri[nonHit[j]]=-1;
+        for(uint32_t j=0;j<nm;++j)pri[allocList[j]]=f0+1;
+        std::vector<int32_t> order;
+        for(uint32_t s=1;s<=B;++s)if(pri[s]>=0)order.push_back((int32_t)s);
+        std::stable_sort(order.begin(),order.end(),[&](int32_t a,int32_t b){
+            if(pri[a]!=pri[b])return pri[a]<pri[b];
+            return a<b;
+        });
+        std::vector<int32_t> expectedLru=order;expectedLru.resize(B+1,0);
+        // v2 链
+        std::vector<int32_t> lruGm=lruRow,flagsGm(B+1,0),freeIdx(B+8,-777),raw(B+8,-777);
+        for(uint32_t s=1;s<=B;++s)flagsGm[s]=hitFlags[s];   // OpHitMiss 的 bit0
+        std::vector<int32_t> flagsUb(B+1+8,-777),aAt(B+1+8,-777),lruUb(B+1+8,-777),
+                              hExcl(B+1+8,-777),aExcl(B+1+8,-777),scan(64+8,-777);
+        if(fsClamp>0u){
+            launch([&]{OpEvictScanRow(B,B,fsClamp,occ,lruGm.data(),0,flagsGm.data(),0,
+                                      freeIdx.data(),flagsUb.data(),scan.data());});
+            for(uint32_t j=0;j<fsClamp;++j)require(freeIdx[j]==expectedEvict[j],"cross: evicted list mismatch (v1 vs v2)");
+            for(uint32_t j=fsClamp;j<B;++j)require(freeIdx[j]==0,"cross: freeIdx tail zero mismatch");
+        }
+        for(uint32_t j=0;j<nm;++j)raw[j]=allocList[j];
+        launch([&]{OpLruRebuildRow(B,B,occ,nm,lruGm.data(),0,flagsGm.data(),0,raw.data(),0,
+                                   flagsUb.data(),aAt.data(),lruUb.data(),hExcl.data(),aExcl.data(),scan.data());});
+        for(uint32_t p=0;p<=B;++p)require(lruGm[p]==expectedLru[p],"cross: rebuilt lru mismatch (v1 vs v2)");
         ++checks;
     }
-
-    // ---- 2) OpHitMiss: warp 归约计数 + [P4] freeSize 折叠 + [protect 折叠], 无 atomic ----
+    // ---- 4) OpHitMiss: warp 归约计数 + freeSize 折叠 + [v2] flags bit0, 无 atomic ----
     for(uint32_t eff:{4u,1536u,2048u}){
         constexpr uint32_t R=3,L=4096,T=2048,B=4096;
         std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),misses(R,-777),fsOut(R,-777),scratch(65,-777);
-        std::vector<int32_t> avail(R),fifo(R),pri(R*(B+1),-777);
-        for(uint32_t r=0;r<R;++r){avail[r]=static_cast<int32_t>(r*700+13);fifo[r]=static_cast<int32_t>(1000+r);}
+        std::vector<int32_t> avail(R),flags(R*(B+1),0);   // [v2] flags (prologue 已清零)
+        for(uint32_t r=0;r<R;++r)avail[r]=static_cast<int32_t>(r*700+13);
         for(uint32_t i=0;i<R*L;++i)htd[i]=(i%4==0)?I32_MAX:static_cast<int32_t>(i%4096);
         for(uint32_t i=0;i<R*T;++i)pos[i]=(i%7==0)?-1:static_cast<int32_t>((i*5)%(L+100));
         atomicCalls=0;
-        int32_t anyFs=0;   // [C1] 淘汰标志 golden: 本核任一行 fs>0
+        int32_t anyFs=0;   // [C1] 淘汰标志 golden
         launch([&]{OpHitMiss(R,T,eff,L,B,R,R,htd.data(),pos.data(),out.data(),
-                             misses.data(),avail.data(),fsOut.data(),pri.data(),fifo.data(),scratch.data());});
+                             misses.data(),avail.data(),fsOut.data(),flags.data(),scratch.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t expectedMisses=0;
-            std::vector<int32_t> expectPri(R==0?B+1:B+1,-777);   // 本行 protect 期望
-            std::vector<int32_t> goldenPri(B+1,-777);
+            std::vector<int32_t> goldenFlags(B+1,0);
             for(uint32_t j=0;j<T;++j){
                 int32_t expectedSlot=j>=eff?0:htd[r*L+std::clamp(pos[r*T+j],0,static_cast<int32_t>(L-1))];
                 require(out[r*T+j]==expectedSlot,"hit slot mismatch");
                 if(j<eff&&expectedSlot==I32_MAX)++expectedMisses;
                 if(j<eff&&expectedSlot!=I32_MAX&&expectedSlot>=0&&expectedSlot<=static_cast<int32_t>(B))
-                    goldenPri[expectedSlot]=fifo[r];   // distinct token → distinct slot, 直接覆盖即期望
+                    goldenFlags[expectedSlot]=1;   // [v2] distinct token → distinct slot
             }
             for(uint32_t s2=0;s2<=B;++s2)
-                require(pri[r*(B+1)+s2]==goldenPri[s2],"[protect] pri timestamp mismatch");
+                require(flags[r*(B+1)+s2]==goldenFlags[s2],"[v2] hit flags bit0 mismatch");
             require(misses[r]==expectedMisses,"miss count mismatch");
             int32_t expectedFs=expectedMisses-avail[r];
             if(expectedFs<0)expectedFs=0;
@@ -244,18 +312,14 @@ try{
         require(atomicCalls==0,"[P0] OpHitMiss must not use atomics");
         ++checks;
     }
-    // ---- 3) OpMissCumsum: 并行扫描与串行回退 ----
-    // blockDim=128: topk ≤ 256 (且 2*topk ≤ 8192) 走 2 元素并行路径;
-    //   300/512 走 4 元素两次链式扫描路径 (topk ≤ 4*blockDim=512 且 4*topk ≤ 8192);
-    //   2048 走 t0 串行回退。golden (串行参考) 逻辑不变。
+    // ---- 5) OpMissCumsum: 并行扫描与串行回退 (v2 未改动, 原样回归) ----
     for(uint32_t topk:{4u,64u,129u,256u,300u,512u,2048u}){
         constexpr uint32_t R=3;
-        uint32_t eff=topk>7?topk-3:topk;   // 尾部留 inactive 区
+        uint32_t eff=topk>7?topk-3:topk;
         std::mt19937 rng(topk*7+1);
         std::vector<int32_t> cur(R*topk),pos(R*topk),rank(R*topk,-777),mpos(R*topk,-777);
         for(uint32_t i=0;i<R*topk;++i){cur[i]=(rng()%3==0)?I32_MAX:static_cast<int32_t>(rng()%4097);pos[i]=static_cast<int32_t>(rng()%9000);}
-        // [P3] 只需 warp scratch (warpTotals[32]+warpBases[32]+ctrlA/ctrlB 两个控制槽 = 66) + 哨兵余量
-        std::vector<int32_t> scan(std::max<uint32_t>(2*topk+16,160),-777);  // [Scan-v2] 四缓冲 128 槽+余量
+        std::vector<int32_t> scan(std::max<uint32_t>(2*topk+16,160),-777);
         launch([&]{OpMissCumsum(R,topk,eff,R,R,cur.data(),pos.data(),rank.data(),mpos.data(),scan.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t serial=0;
@@ -269,21 +333,19 @@ try{
         }
         ++checks;
     }
-    // ---- 4) [P4] OpAllocPop 直读 freeIdx + OpFifoAvailUpdate 折叠: 与旧栈语义逐值等价 ----
+    // ---- 6) [P4] OpAllocPop 直读 freeIdx + OpFifoAvailUpdate (fifo+=2): 与旧栈语义逐值等价 ----
     {
-        constexpr uint32_t R=4,T=64,FS=96;   // T=topkDim, FS=freeStackSize
-        // 覆盖 nm<fs / nm==fs / nm>fs / nm=0 / fs=0 组合 (fs 由 avail/nm 推出)。
-        const int32_t nmList[R]={20,30,10,0}, availList[R]={40,10,50,25};
+        constexpr uint32_t R=4,T=64,FS=96;
+        const int32_t nmList[R]={20,30,10,0},availList[R]={40,10,50,25};
         std::vector<int32_t> nm(nmList,nmList+R),avail(availList,availList+R),fs(R);
         for(uint32_t r=0;r<R;++r){fs[r]=nm[r]-avail[r];if(fs[r]<0)fs[r]=0;}
         std::mt19937 rng(99);
         std::vector<int32_t> freeIdx(R*T),free(R*FS,-777),raw(R*T,-777);
         for(uint32_t i=0;i<R*T;++i)freeIdx[i]=static_cast<int32_t>(rng()%(FS-1)+1);
-        for(uint32_t i=0;i<R*FS;++i)free[i]=static_cast<int32_t>(rng()%1000+1);   // 老栈随机内容
+        for(uint32_t i=0;i<R*FS;++i)free[i]=static_cast<int32_t>(rng()%1000+1);
         launch([&]{OpAllocPop(R,T,FS,R,R,nm.data(),fs.data(),avail.data(),
                               freeIdx.data(),true,free.data(),raw.data());});
         for(uint32_t r=0;r<R;++r){
-            // 旧版 golden: 先 push (free[avail+k]=freeIdx[k]) 再从栈尾弹 nm 个。
             std::vector<int32_t> stack(free.begin()+r*FS,free.begin()+(r+1)*FS);
             for(int32_t k=0;k<fs[r];++k)stack[avail[r]+k]=freeIdx[r*T+k];
             for(uint32_t j=0;j<T;++j){
@@ -297,13 +359,13 @@ try{
                 require(raw[r*T+j]==expected,"[P4] alloc pop mismatch with stack golden");
             }
         }
-        // fifo/avail 折叠更新: 终值与旧两步序列 (+=fs 后 -=nm) 恒等且 ≥0。
+        // [v2] fifo 两次自增合并为 +2; avail 折叠不变。
         std::vector<int32_t> fifo(R),avail2(avail);
         for(uint32_t r=0;r<R;++r)fifo[r]=static_cast<int32_t>(100+r);
         launch([&]{OpFifoAvailUpdate(R,R,R,fifo.data(),avail2.data(),fs.data(),nm.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t expectedAvail=avail[r]+fs[r]-nm[r];
-            require(fifo[r]==101+r,"fifo increment mismatch");
+            require(fifo[r]==102+r,"[v2] fifo must increment by 2");
             require(avail2[r]==expectedAvail,"[P4] folded avail mismatch");
             require(avail2[r]>=0,"[P4] folded avail must stay non-negative");
         }
@@ -313,9 +375,9 @@ try{
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
 }
 '''
-with tempfile.TemporaryDirectory(prefix='echo_author_check_') as directory:
+with tempfile.TemporaryDirectory(prefix='echo_v2_check_') as directory:
     tmp=Path(directory)
     cpp=tmp/'check.cpp'; exe=tmp/'check'
     cpp.write_text(preamble+functions+harness)
     subprocess.run(['g++','-std=c++20','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-pthread',str(cpp),'-o',str(exe)],check=True)
-    subprocess.run([str(exe)],check=True,timeout=180)
+    subprocess.run([str(exe)],check=True,timeout=300)

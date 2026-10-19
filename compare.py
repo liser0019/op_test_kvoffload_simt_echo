@@ -29,7 +29,7 @@ SCENARIOS = {
 }
 SIMT_STATE = ("last_req_ids", "slot_to_token", "lru_slots")
 SIMT_OUTPUT = ("current_slots", "miss_count", "miss_tokens", "miss_slots")
-ECHO_STATE = ("htd", "dth", "pri", "free_slots", "avail", "fifo")
+ECHO_STATE = ("htd", "dth", "lru", "free_slots", "avail", "fifo")
 ECHO_OUTPUT = ("current_slots", "miss_host_pos", "miss_alloc_flat", "miss_mask")
 
 
@@ -81,27 +81,27 @@ def make_echo_initial(case):
     """同一初始历史转换为 Echo 状态。SIMT 的槽从 0 开始，Echo 从 1 开始。
 
     Echo 的 token 0 / slot 0 是保留项，因此共同 query 不使用 token 0。
-    lru_slots 最旧→最新；对应 pri 必须递增，不能使用 capacity-rank。
+    [v2] lru 为秩→槽位顺序数组：初始序 = SIMT lru_slots 序（最旧→最新）中
+    占用槽的 1 基槽号，与 v1 pri=rank+1（无平局）的 (pri,slot) 排序逐位等价；
+    有效区 [0, occ)、尾部恒 0。
     """
     rows, topk, capacity, max_token = (case[k] for k in ("rows", "topk", "capacity", "max_token"))
     initial = {
         "htd": np.full((rows, max_token), I32_MAX, np.int32),
         "dth": np.full((rows, capacity + 1), I32_MAX, np.int32),
-        "pri": np.full((rows, capacity + 1), -1, np.int32),
+        "lru": np.zeros((rows, capacity + 1), np.int32),
         "free_slots": np.zeros((rows, capacity + topk), np.int32),
         "avail": np.zeros(rows, np.int32),
         "fifo": np.full(rows, capacity + 1, np.int32),
     }
     initial["htd"][:, 0] = 0
-    initial["pri"][:, 0] = I32_MAX
     for row in range(rows):
         resident = case["slot_to_token"][row]
         occupied = np.flatnonzero(resident >= 0)
         initial["dth"][row, occupied + 1] = resident[occupied]
         initial["htd"][row, resident[occupied]] = occupied + 1
-        rank = np.empty(capacity, np.int32)
-        rank[case["lru_slots"][row]] = np.arange(capacity, dtype=np.int32)
-        initial["pri"][row, occupied + 1] = rank[occupied] + 1
+        order = [int(s) + 1 for s in case["lru_slots"][row] if resident[s] >= 0]
+        initial["lru"][row, :len(order)] = order
         empty_slots = np.flatnonzero(resident < 0) + 1
         initial["free_slots"][row, :len(empty_slots)] = empty_slots[::-1]
         initial["avail"][row] = len(empty_slots)
@@ -157,22 +157,29 @@ def reference_simt(case):
 
 
 def reference_echo(case, initial):
-    """Echo：hit 提升时间戳，必要时淘汰最低优先级，最后从 free 栈尾分配。
+    """Echo v2：内部按 v1 的 pri 时间戳语义仿真（久经验证），步末推导 lru 状态。
 
-    CPU 用排序表达淘汰语义；作者新版设备实现即使无需淘汰仍执行完整 radix 排序。
-    CPU 参考可以省掉无效计算，因为参考只验证结果，不参与 NPU 计时。
+    pri 不再是状态字段，仅作内部仿真变量：占用槽按 (pri, slot) 稳定排序得到 lru
+    （秩→槽位，尾部恒 0）——这正是 v2 维护序与 v1 语义逐位等价的 golden 证明。
+    全部输出与 v1 逐位一致；设备实现改为增量维护 lru（不再做基数选择）。
     """
     rows, topk, capacity = (case[k] for k in ("rows", "topk", "capacity"))
     out = {key: initial[key].copy() for key in ECHO_STATE}
     out.update({key: np.zeros((rows, topk), np.uint8 if key == "miss_mask" else np.int32)
                 for key in ECHO_OUTPUT})
     for row in range(rows):
-        htd, dth, pri, free = (out[key][row] for key in ("htd", "dth", "pri", "free_slots"))
+        htd, dth, lru, free = (out[key][row] for key in ("htd", "dth", "lru", "free_slots"))
         avail, fifo = int(out["avail"][row]), int(out["fifo"][row])
+        # [v2] 内部 pri 仿真：从 initial lru 重建 rank+1（与 v1 make_echo_initial 同构）
+        pri = np.full(capacity + 1, -1, np.int32)
+        pri[0] = I32_MAX
+        for p in range(int((lru > 0).sum())):
+            pri[int(lru[p])] = p + 1
         if case["reset_mask"][row]:
             htd.fill(I32_MAX)
             htd[0] = 0
             dth.fill(I32_MAX)
+            lru.fill(0)
             pri.fill(-1)
             pri[0] = I32_MAX
             free.fill(0)
@@ -207,6 +214,11 @@ def reference_echo(case, initial):
         out["miss_host_pos"][row] = np.where(misses, tokens, 0)
         out["miss_alloc_flat"][row] = np.where(misses, row * capacity + htd[tokens], 0)
         out["miss_mask"][row] = misses
+        # [v2] 步末推导 lru 状态：占用槽 (pri≥0, 不含 slot 0) 按 (pri, slot) 稳定排序
+        order = sorted((slot for slot in range(1, capacity + 1) if pri[slot] >= 0),
+                       key=lambda slot: (int(pri[slot]), slot))
+        lru[:len(order)] = order
+        lru[len(order):] = 0
         out["avail"][row], out["fifo"][row] = avail, fifo
     return out
 
@@ -282,10 +294,11 @@ def prepare_npu(torch, case, echo_initial, device, blocks_override=None):
         rows_per_core = (rows + blocks_override - 1) // blocks_override
         blocks = (rows + rows_per_core - 1) // rows_per_core  # 向上取整可能小于请求值，正常
     npad = 1 << capacity.bit_length()  # next_pow2(capacity+1)，4096→8192。
-    base = rows * (capacity + 1 + 4 + 3 * topk)
-    # 有意按旧版 kernel 的上界公式分配（含 GM ping-pong/直方图占位段）。
-    # 新版 radix-select kernel 每核只用 256+8192（ECHO_PERF_STEP 构建再加 31（ECHO_PERF_NUM_STEPS））个元素，
-    # 本公式严格大于两种布局的 plugin 侧 required，因此同一份测试可同时跑普通/打点两种构建。
+    # [v2] 新版 workspace 上界：每行 wsCumsum(B+1) + 4 标量 + 3*topk 向量
+    #   + flags(B+1)（分类位）；每核仅打点构建的 stepCycles（26）。有意按上界
+    #   多分配（每核 4*npad+2*64*256+256+8192 是 v1 argtopk 时代的超大余量，
+    #   保留兼容任何布局微调；严格大于新版 plugin 所需）。
+    base = rows * (2 * (capacity + 1) + 4 + 3 * topk)
     elements = ((base + 1) & ~1) + blocks * (4 * npad + 64 * 256 + 64 * 256 + 256 + 8192)
     if elements > I32_MAX:
         raise ValueError("Echo workspace 超过 int32 索引范围")
@@ -315,7 +328,7 @@ def invoke(torch, name, case, inputs, state):
     else:
         torch.ops.sparse_kv_plan_op.echo_lru(
             inputs["topk_indices"], inputs["stable_prefix_lens"], inputs["reset_mask"],
-            state["htd"], state["dth"], state["pri"], state["free_slots"],
+            state["htd"], state["dth"], state["lru"], state["free_slots"],
             state["avail"], state["fifo"], state["current_slots"],
             state["miss_host_pos"], state["miss_alloc_flat"], state["miss_mask"],
             state["workspace"], state["blocks"], False)  # 所有 stable_prefix 都是 max_token。

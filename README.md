@@ -60,11 +60,11 @@ warm 与 full 场景的 `last_req_ids` 和 `req_ids` 相同，所以预埋状态
 - 普通槽从 1 开始；slot 0 / token 0 保留。
 - `htd[rows,max_token]`：token → 槽，未驻留是 `INT32_MAX`。
 - `dth[rows,capacity+1]`：槽 → token，空槽是 `INT32_MAX`。
-- `pri`：历史时间戳，越小越先淘汰；相同时间戳按槽号排序。
+- `lru`：[v2 维护序] 秩→槽位顺序数组（`lru[p]` = 第 p 旧的占用槽），有效区 `[0, occ)`、尾部恒 0；淘汰 = 顺序扫描跳过本步 hit 取前 fs 个，每步末重建（幸存者旧序 + hit 槽号升序 + 新分配槽号升序），与 v1 的 (pri,slot) 稳定排序逐位等价。
 - `free_slots` / `avail`：空闲栈及有效长度；`fifo` 提供本轮时间戳。
 - 输出每个 query 的 miss_mask 与地址，格式没有压缩。
 
-转换时，SIMT 槽 s 对应 Echo 槽 s+1。历史 LRU 中 rank 越小越旧，所以赋 `pri=rank+1`；`fifo=capacity+1`，让当前轮的 hit 时间戳高于所有初始历史值。
+转换时，SIMT 槽 s 对应 Echo 槽 s+1。[v2] 初始 `lru` 直接取 SIMT lru_slots 序（最旧→最新）中占用槽的 1 基槽号；`fifo=capacity+1` 保留（v2 中为无 kernel 内读者的死状态，按 golden 语义 +2/步维护）。
 
 **不能要求两种实现分配相同槽号。** Echo 使用栈，SIMT 按已有 LRU 分配；槽的分配顺序与多轮时间戳平局策略不同。我们分别检查各自的完整结果，再核对共同查询、miss 数和历史淘汰 token 集合。
 
@@ -179,7 +179,7 @@ python3 checks/check_echo_kernel_host.py
 2. `echo_lru_launch.cpp`：`<<<blockNum, ECHO_LRU_THREAD_NUM, 0, stream>>>`；线程数由 `echo_lru_tiling.h` 定义，目前为 1024。
 3. `echo_lru_kernel.h` 尾部的 `echo_lru_kernel`：分配单块 128 KiB UB，初始化 `EchoLruKernel` 并调用 `Process`。
 4. `EchoLruKernel::Process`：按阶段读 reset、hit/miss（含 warp 归约 miss 计数）、protect、free、alloc、priority 和映射更新（含最终槽位回写）；每核处理自己的连续行段。`ECHO_PERF_STEP` 构建下每步由 `PerfBegin/PerfEnd` 打点。warp 协作辅助 `PackedBlockScan`（两级：warp shuffle + t0 扫 warp total）见文件头部；块内求和已内联进 OpHitMiss 的归约段。
-5. `ArgtopkAllRows` → `OpArgtopkRow`：pass 0 单相位完成 pack（全员写各自 key 切片）与直方图（G 路直读 priGm）；每趟 `[clear+hist] → [merge] → [t0 决策]` 三栅栏，merge 为 256 桶并行并把 padding 键解析式计入；全部扫描只走有效区 `[0, B+1)`；emission 全员连续切片 + `PackedBlockScan` 并行写出并按需补 padding 索引。`freeSize=0` 提前返回；全核无淘汰行时 Process 整段跳过（见 [C1]）。
+5. [v2 维护序] `EvictScanAllRows` → `OpEvictScanRow`：顺序扫 lru 跳过本步 hit（flags bit0，v1 protect 语义等价物）取前 fsClamp 个非 hit 槽写 freeIdx（输出序 = (pri,slot) 字典序，与 v1 逐位一致）；`LruRebuildAllRows` → `OpLruRebuildRow`：每步重建顺序数组（K 位置序 + H 槽号升序 + A 槽号升序 + 尾零），5 栅栏/行。v1 的 7 栅栏基数选择已删除；全核无淘汰行时 Step2 仍按 [C1] 跳过（Rebuild 每步必执行——hit 挪尾是常态成本）。
 
 Echo 文件仍保留少量早期注释，涉及 512 线程、bitonic 或 grid sync 的历史描述；这些文字与当前有效代码不同。阅读时以 `ECHO_LRU_THREAD_NUM=1024`、有效的 `OpArgtopkRow`（radix select）、顶层 `argtopkUb` 单大 UB 分段和 `Process` 内实际调用为准。
 
