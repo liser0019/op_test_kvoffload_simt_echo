@@ -593,6 +593,13 @@ __aicore__ inline void OpLruRebuildRow(
     for (uint32_t p = t; p <= B; p += blockDim.x) {
         lruGm[lruRowOff + p] = 0;
     }
+#elif defined(ECHO_V2_RB_ONEONLY)
+    // [debug] RB_ONEONLY: 全行写常量 1 (升序非零) —— 判别触发器是 "零值"
+    //   (memset/MTE fill 惯用语) 还是 "升序模式" 本身。golden 必挂, 只看 trap。
+    (void)baseK;
+    for (uint32_t p = t; p <= B; p += blockDim.x) {
+        lruGm[lruRowOff + p] = 1;
+    }
 #else
     int32_t runK = baseK;
     for (uint32_t p = lo; p < hi; ++p) {
@@ -616,9 +623,20 @@ __aicore__ inline void OpLruRebuildRow(
     // 尾部清零: occNew = totalK + totalH + nm = occ − fsClamp' + nm ≤ B (avail' ≥ 0 恒等式)
     uint32_t occNew = totalK + totalH + nm;
 #ifndef ECHO_V2_RB_NOTAIL
+#ifdef ECHO_V2_RB_ZLOAD
+    // [debug/候选修复] 零值从内存装入 (flagsUb[0] 恒 0 —— slot 0 永不 hit/被淘汰/
+    //   spec 移除, 且 prologue 已清零; phase A staging 后无写者): 寄存器值存储
+    //   破坏 "纯常量零递增 GM 写" 的 memset 惯用语形态 (疑被降级为 MTE fill,
+    //   该路径在重 UB 写之后 fault, -O0 仍触发 → 前端/中端惯用语识别)。
+    int32_t zeroV = flagsUb[0];
+    for (uint32_t p = occNew + t; p <= B; p += blockDim.x) {
+        lruGm[lruRowOff + p] = zeroV;
+    }
+#else
     for (uint32_t p = occNew + t; p <= B; p += blockDim.x) {
         lruGm[lruRowOff + p] = 0;
     }
+#endif
 #endif
 #endif
     asc_syncthreads();                       // B4: flagsUb/aAtUb/lruUb/hExclUb/aExclUb 下一行 phase A 复用保护
