@@ -21,6 +21,7 @@ V2_RBNOTAIL="${ECHO_V2_RB_NOTAIL:-OFF}"
 V2_RBZERO="${ECHO_V2_RB_ZEROONLY:-OFF}"
 V2_RBDCCI="${ECHO_V2_RB_DCCI:-OFF}"
 V2_RBSYNC="${ECHO_V2_RB_SYNC:-OFF}"
+V2_KOPT="${ECHO_V2_KOPT:--O3}"
 for arg in "$@"; do
     case "$arg" in
         --soc=*) SOC_VERSION="${arg#*=}" ;;
@@ -49,6 +50,10 @@ if ! [[ "$ECHO_THREADS" =~ ^[0-9]+$ ]] || (( ECHO_THREADS % 32 != 0 || ECHO_THRE
     echo "--threads / ECHO_LRU_THREADS 必须是 32 的倍数且在 [64,1024]: $ECHO_THREADS" >&2
     exit 2
 fi
+if ! [[ "$V2_KOPT" =~ ^-O[0123]$ ]]; then
+    echo "ECHO_V2_KOPT 必须是 -O0/-O1/-O2/-O3: $V2_KOPT" >&2
+    exit 2
+fi
 if ! [[ "$V2_CUTOFF" =~ ^[0-9]$ ]]; then
     echo "ECHO_V2_DEBUG_CUTOFF 必须是 0..9 (0=正式构建产物build/; 1..9=调试构建产物build_v2dbg/, 阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7=MisssCumsum后 8=Step5.SyncGrid后 9=全程): $V2_CUTOFF" >&2
     exit 2
@@ -59,7 +64,7 @@ BUILD_DIR="$SCRIPT_DIR/build"
 if [[ "$PERF_STEP" == "ON" ]]; then
     BUILD_DIR="$SCRIPT_DIR/build_perf"
 fi
-if [[ "$V2_CUTOFF" != "0" || "$V2_SKIPRB" != "OFF" || "$V2_RBSER" != "OFF" || "$V2_RBNOD" != "OFF" || "$V2_RBNOTAIL" != "OFF" || "$V2_RBZERO" != "OFF" || "$V2_RBDCCI" != "OFF" || "$V2_RBSYNC" != "OFF" ]]; then
+if [[ "$V2_CUTOFF" != "0" || "$V2_SKIPRB" != "OFF" || "$V2_RBSER" != "OFF" || "$V2_RBNOD" != "OFF" || "$V2_RBNOTAIL" != "OFF" || "$V2_RBZERO" != "OFF" || "$V2_RBDCCI" != "OFF" || "$V2_RBSYNC" != "OFF" ]]; t || "$V2_KOPT" != "-O3" ]]; then
     # v2 调试构建 (截断/跳重建) 使用独立目录, 不覆盖正式产物。
     BUILD_DIR="$SCRIPT_DIR/build_v2dbg"
 fi
@@ -75,6 +80,7 @@ CMAKE_ARGS=(
     -S "$SCRIPT_DIR" -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release -DNPU_ARCH="$SOC_VERSION"
     -DECHO_PERF_STEP="$PERF_STEP" -DECHO_LRU_THREADS="$ECHO_THREADS" -DECHO_V2_DEBUG_CUTOFF="$V2_CUTOFF" -DECHO_V2_SKIP_REBUILD="$V2_SKIPRB" -DECHO_V2_RB_SERIAL="$V2_RBSER" -DECHO_V2_RB_NOD="$V2_RBNOD" -DECHO_V2_RB_NOTAIL="$V2_RBNOTAIL" -DECHO_V2_RB_ZEROONLY="$V2_RBZERO" -DECHO_V2_RB_DCCI="$V2_RBDCCI" -DECHO_V2_RB_SYNC="$V2_RBSYNC"
+    -DECHO_KERNEL_OPT_LEVEL="$V2_KOPT"
     -DPython3_EXECUTABLE="$BUILD_PYTHON")
 for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
     if [[ -n "${!name:-}" ]]; then

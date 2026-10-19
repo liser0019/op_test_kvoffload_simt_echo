@@ -154,10 +154,15 @@ option(ECHO_V2_RB_SYNC "echo_lru v2 debug: bare syncthreads between Step4 and St
 if(ECHO_V2_RB_SYNC)
     list(APPEND ECHO_FLAGS -DECHO_V2_RB_SYNC)
 endif()
+
+# [v2 debug] Echo kernel 的 bisheng 优化级别 (默认 -O3)。v2 trap 排查: 同源码不同
+#   优化级别 = 零语义改动的 codegen 判别实验 (§7.9 先例: 本栈存在编译单元整体
+#   属性触发的设备 fault)。
+set(ECHO_KERNEL_OPT_LEVEL "-O3" CACHE STRING "bisheng optimization level for echo kernel (-O0/-O1/-O2/-O3)")
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(KERNEL_OPT_FLAGS -O0 -g)
+    set(KERNEL_OPT_FLAGS ${ECHO_KERNEL_OPT_LEVEL})
 else()
-    set(KERNEL_OPT_FLAGS -O3)
+    set(KERNEL_OPT_FLAGS ${ECHO_KERNEL_OPT_LEVEL})
 endif()
 set(OP_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/csrc/simt" "${CMAKE_CURRENT_SOURCE_DIR}/csrc/echo")
 set(KERNEL_INCLUDE_ARGS "")
