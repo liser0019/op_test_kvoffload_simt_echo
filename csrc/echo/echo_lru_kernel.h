@@ -523,8 +523,11 @@ __aicore__ inline void OpLruRebuildRow(
     uint32_t shi = (slo >= cols || slo + slotChunk > cols) ? cols : (slo + slotChunk);
     int32_t haCnt = 0;
     for (uint32_t s = slo; s < shi; ++s) {
-        if (flagsUb[s] & 1) haCnt |= 1;
-        if (aAtUb[s]) haCnt |= (1 << 16);
+        // ⚠ 计数必须用加法: 切片可含多个 hit/alloc (B=4096/blockDim=128 时 33 槽/线程),
+        //   首版误用 |= (塌缩成至多 1) → hExcl/aExcl 秩错 → H/A 段错位
+        //   (CPU 回归 group2 B=4096 用例抓获, 2026-10-19)。
+        if (flagsUb[s] & 1) haCnt += 1;
+        if (aAtUb[s]) haCnt += (1 << 16);
     }
     int32_t excl2 = PackedBlockScan(haCnt, scanScratch + 32);           // B3
     int32_t runH = excl2 & 0xFFFF;

@@ -109,8 +109,10 @@ try{
             {128,128,64,1,9},{1024,513,100,0,10},{64,1,1,0,11},{512,0,1,0,12},  // occ=0 全 padding
             {4096,2048,1,0,13},{96,95,48,1,14},{2048,2000,777,0,15},  // fs 超大 → 大量 padding
         };
-        for(const auto& c:cases){
+        for(size_t ci=0;ci<sizeof(cases)/sizeof(cases[0]);++ci){
+            const auto& c=cases[ci];
             uint32_t B=c.B,occ=c.occ,fsClamp=c.fsClamp,topkDim=B;
+            printf("[evict %zu] B=%u occ=%u fs=%u hitMode=%u\n",ci,B,occ,fsClamp,c.hitMode);fflush(stdout);
             std::mt19937 rng(c.seed);
             std::vector<int32_t> lruRow(B+1,0),flagsRow(B+1,0);
             std::vector<int32_t> slots(B);std::iota(slots.begin(),slots.end(),1);
@@ -160,8 +162,10 @@ try{
             {31,31,0,0,4,27},{256,128,1,1,64,28},{64,40,0,2,8,29},
             {2048,1500,1,1,300,30},{96,0,0,0,96,31},
         };
-        for(const auto& c:cases){
+        for(size_t ci=0;ci<sizeof(cases)/sizeof(cases[0]);++ci){
+            const auto& c=cases[ci];
             uint32_t B=c.B,occ=c.occ,topkDim=B;
+            printf("[rebuild %zu] B=%u occ=%u hit=%u evict=%u nm=%u\n",ci,B,occ,c.hitMode,c.evictMode,c.allocCount);fflush(stdout);
             std::mt19937 rng(c.seed);
             std::vector<int32_t> lruRow(B+1,0);
             std::vector<int32_t> slots(B);std::iota(slots.begin(),slots.end(),1);
@@ -224,6 +228,7 @@ try{
     //   升序前 fsClamp 个 (== 位置序非 hit 前 fsClamp); 分配盖 f0+1; 步末 lru =
     //   全部占用槽 stable_sort by (pri,slot)。fsClamp=0 时跳过 EvictScan (wrapper 语义)。
     for(uint32_t trial=0;trial<12;++trial){
+        printf("[cross %u]\n",trial);fflush(stdout);
         std::mt19937 rng(1000+trial);
         uint32_t B=(trial%3==0)?4096u:((trial%3==1)?64u:1024u);
         uint32_t occ=rng()%(B+1);
