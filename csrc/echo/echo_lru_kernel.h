@@ -393,8 +393,10 @@ __aicore__ inline void OpFifoAvailUpdate(
 //   串行决策 + scalar 广播 → 每趟 3→2 栅栏 ([clear+hist]→B1→[merge]→B2→[本地决策]
 //   →下一趟)。scalar 不再有读者 (emission 直接用寄存器 T/quota), 栅栏间无任何
 //   跨线程写。快路径+全趟合计 ([P-E] 后): B0 1 + 基准 2 趟 × 2 栅栏 + emission
-//   扫描 1 (PackedBlockScan 内) + 尾 2 = 8 次栅栏/行 (B 前为 16; Scan-v2+[P-C]
-//   后曾为 7, [P-E] 的 B0 +1)。
+//   扫描 1 (PackedBlockScan 内) + 尾栅栏 1 = 7 次栅栏/行 (UB 路径; 函数尾栅栏 2
+//   仅 GM 路径保留 → GM 路径 8 次/行) (B 前为 16; Scan-v2+[P-C] 后曾为 7, [P-E]
+//   的 B0 +1)。Process 侧 Step2.SyncGrid 槽 UB 路径同步跳过 (末行尾栅栏 1 已
+//   排空 freeIdx 写 → OpFreeRelease 读), GM 路径保守保留完整 SyncGrid。
 // 不变量 (计数含 padding): |{key < T}| + quota == fsClamp; remaining' ≥ 1 恒成立
 //   (b-loop 在 cum+c ≥ remaining 时 break, cum < remaining)。
 // 输出: 先全部 key<T (槽号升序), 再前 quota 个 key==T (槽号升序, 有效区优先,
@@ -431,8 +433,9 @@ __aicore__ inline void OpArgtopkRow(
     //   此后 hist 各趟一律读 key[]（UB），pass1 的 GM 依赖链消除。
     //   必须放在 fsClamp==0 早退之后（checks 断言早退时输出/UB/dbg 全不写）。
     //   priGm 的上一个写者是 Step1 OpHitMiss（protect），可见性由 Step1 尾 SyncGrid
-    //   （Process）保证；上一行 emission 对 key 的读已由其尾部两栅栏排空（行间
-    //   复用同一 key UB 区，§9.13 教训：key 无行索引）。
+    //   （Process）保证；上一行 emission 对 key 的读已由其尾栅栏 1 排空（行间
+    //   复用同一 key UB 区，§9.13 教训：key 无行索引；GM 路径尾栅栏 2 仅服务
+    //   dcci 三明治，排序上栅栏 1 已足够）。
     for (uint32_t i = t; i < validN; i += blockDim.x) {
         int32_t p = priGm[rowOff + i];
         key[i] = (int32_t)((p < 0 || i == 0) ? I32_MAX : p);
@@ -606,12 +609,19 @@ __aicore__ inline void OpArgtopkRow(
         for (uint32_t i = fsClamp + t; i < topkDim; i += blockDim.x) {
             freeIdxOut[i] = 0;
         }
-        asc_syncthreads();
-        // [P-C] freeIdx 在 UB 时块内 syncthreads 即可见, 免 dcci; GM 路径由函数尾
-        //   栅栏保证 dcci 完成后才返回。
+        asc_syncthreads();                       // 尾栅栏 1（emission 块内）
+        // [P-C] freeIdx 在 UB 时块内 syncthreads 即可见, 免 dcci; GM 路径需 dcci
+        //   三明治（emission 写 → 栅栏 1 → t0 dcci → 尾栅栏 2 → 后续读者）。
         if (freeIdxIsGm && t == 0) asc_dcci_entire((void*)freeIdxOut);
     }
-    asc_syncthreads();
+    // [尾栅栏去重] 函数尾栅栏仅 GM 路径保留：尾栅栏 1 已完成全部所需排序——
+    //   emission 的 key 重扫读 + freeIdx 写 → 之后的一切（下一行 pack 写 key /
+    //   OpFreeRelease 读 freeIdx）；尾栅栏 2 的唯一作用是 GM 路径 dcci 三明治的
+    //   后半（t0 dcci 后全员再同步，后续读者排在 dcci 之后），UB 路径 dcci 跳过
+    //   → 栅栏 1 之后无任何新增排序需求；下一行无论如何有新同步点（fsClamp==0
+    //   早退 barrier 或 pack 后的 B0），行循环栅栏配平不受影响。freeIdxIsGm 是
+    //   全块一致的函数参数 → 分支统一，无栅栏发散。
+    if (freeIdxIsGm) asc_syncthreads();
     (void)segLocal;  // 预留分段 scatter 缓冲, 基数选择路径未使用
     (void)segBase;   // 同上
     (void)scalar;    // [方向2] 决策本地化后无读者, 槽位保留防 UB 布局漂移
@@ -1145,8 +1155,13 @@ public:
         //   (记录 ≈0 周期, 步数/步名不变), 条件对全块统一, 栅栏无发散。
         bool needFree = (argtopkKeyUb_[64] != 0);
         PerfBegin(); if (needFree) ArgtopkAllRows(); PerfEnd();   // radix select
-        // [P-C] freeIdx RAW → OpFreeRelease: UB 路径普通栅栏即可 (免 dcci)。
-        PerfBegin(); if (needFree) { if (freeIdxInUb_) asc_syncthreads(); else SyncGrid(); } PerfEnd();
+        // [P-C+尾栅栏去重] freeIdx 写 (末行 emission) → OpFreeRelease 读的排序:
+        //   UB 路径已由 ArgtopkAllRows 末行函数内尾栅栏 1 提供 (全员经过该栅栏才
+        //   离开 ArgtopkAllRows), 本槽 UB 路径整段跳过; GM 路径保守保留完整
+        //   SyncGrid (大 batch 回退形态, 不在基准覆盖内, 不冒险)。needFree 为 C1
+        //   块统一标志、freeIdxInUb_ 为 Init 后不变的成员 → 条件块统一, 无栅栏
+        //   发散。打点槽保持原位 (UB 路径记录 ≈0 周期, 同 C1 惯例)。
+        PerfBegin(); if (needFree && !freeIdxInUb_) SyncGrid(); PerfEnd();
         PerfBegin(); if (needFree) OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, priGm_, dthGm_, htdGm_); PerfEnd();
         PerfBegin(); if (needFree) OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
 
