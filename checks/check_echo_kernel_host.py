@@ -196,12 +196,14 @@ try{
             for(uint32_t j=0;j<evCount;++j)evictFlags[nonHit[j]]=1;
             std::vector<int32_t> flagsRow(B+1,0);
             for(uint32_t s=1;s<=B;++s)flagsRow[s]=(hitFlags[s]?1:0)|(evictFlags[s]?2:0);
-            // 分配列表: 前 evCount 个复用被淘汰槽, 其余从空槽池取 (顺序任意, Rebuild 按槽号排)。
+            // 分配列表: 先包含全部被淘汰槽, 再从空槽池补足 —— 尊重真实管线不变量
+            //   evicted(=fs) ≤ nm (fs = max(nm-avail,0)); 该不变量是 v2 尾零删除
+            //   (occNew ≥ occOld ⟹ 尾区 ⊆ 旧零尾) 的前提 (2026-10-19 [rebuild 2] 抓获)。
             std::vector<int32_t> inLru(B+1,0);for(uint32_t p=0;p<occ;++p)inLru[lruRow[p]]=1;
             std::vector<int32_t> freePool;for(uint32_t s=1;s<=B;++s)if(!inLru[s])freePool.push_back((int32_t)s);
             std::shuffle(freePool.begin(),freePool.end(),rng);
             std::vector<int32_t> allocList;
-            for(uint32_t j=0;j<evCount&&allocList.size()<c.allocCount;++j)allocList.push_back(nonHit[j]);
+            for(uint32_t j=0;j<evCount;++j)allocList.push_back(nonHit[j]);
             for(uint32_t j=0;allocList.size()<c.allocCount&&j<(uint32_t)freePool.size();++j)allocList.push_back(freePool[j]);
             uint32_t nm=(uint32_t)allocList.size();
             // golden: K(位置序幸存者) ++ H(槽号升序) ++ A(槽号升序) ++ 尾零
@@ -224,7 +226,7 @@ try{
             launch([&]{OpLruRebuildRow(B,topkDim,occ,nm,lruGm.data(),0,
                                        flagsGm.data(),0,raw.data(),0,
                                        flagsUb.data(),aAt.data(),lruUb.data(),
-                                       hExcl.data(),aExcl.data(),scan.data());});
+                                       hExcl.data(),aExcl.data(),scan.data(),0u);});
             for(uint32_t p=0;p<=B;++p)require(lruGm[p]==expected[p],"rebuild lru mismatch");
             for(uint32_t s=0;s<=B;++s)require(flagsGm[s]==flagsRow[s],"rebuild must not write flags");
             require(raw[nm]==-777,"rawSlots overrun");
@@ -255,11 +257,11 @@ try{
         std::vector<int32_t> inLru(B+1,0);for(uint32_t p=0;p<occ;++p)inLru[lruRow[p]]=1;
         std::vector<int32_t> freePool;for(uint32_t s=1;s<=B;++s)if(!inLru[s])freePool.push_back((int32_t)s);
         std::shuffle(freePool.begin(),freePool.end(),rng);
-        uint32_t maxAlloc=fsClamp+(uint32_t)freePool.size();
-        uint32_t nm=maxAlloc?rng()%maxAlloc:0u;
-        // 分配列表 = 淘汰槽 (v1 AllocPop 先弹 freeIdx 新段) + 老栈空槽
+        // nm ≥ fsClamp (真实不变量 fs ≤ nm); 分配 = 全部淘汰槽 + 老栈补足
+        uint32_t extra=(uint32_t)freePool.size()?(rng()%((uint32_t)freePool.size()+1u)):0u;
+        uint32_t nm=fsClamp+extra;
         std::vector<int32_t> allocList;
-        for(uint32_t j=0;j<fsClamp&&allocList.size()<nm;++j)allocList.push_back(nonHit[j]);
+        for(uint32_t j=0;j<fsClamp;++j)allocList.push_back(nonHit[j]);
         for(uint32_t j=0;allocList.size()<nm&&j<(uint32_t)freePool.size();++j)allocList.push_back(freePool[j]);
         nm=(uint32_t)allocList.size();
         // v1 golden: pri 仿真 + stable_sort
@@ -290,10 +292,48 @@ try{
         }
         for(uint32_t j=0;j<nm;++j)raw[j]=allocList[j];
         launch([&]{OpLruRebuildRow(B,B,occ,nm,lruGm.data(),0,flagsGm.data(),0,raw.data(),0,
-                                   flagsUb.data(),aAt.data(),lruUb.data(),hExcl.data(),aExcl.data(),scan.data());});
+                                   flagsUb.data(),aAt.data(),lruUb.data(),hExcl.data(),aExcl.data(),scan.data(),0u);});
         for(uint32_t p=0;p<=B;++p)require(lruGm[p]==expectedLru[p],"cross: rebuilt lru mismatch (v1 vs v2)");
         ++checks;
     }
+    // ---- 3b) 尾零 spec 门控: specOn=1 清垃圾尾; specOn=0 尾原样 (不变量: 调用前尾已为零) ----
+    {
+        const uint32_t B=64u,occ=40u;
+        std::mt19937 rng(777);
+        std::vector<int32_t> slots(B);std::iota(slots.begin(),slots.end(),1);
+        std::shuffle(slots.begin(),slots.end(),rng);
+        std::vector<int32_t> lruRow(B+1,-777);      // 垃圾尾 (模拟 spec 后残留)
+        for(uint32_t p=0;p<occ;++p)lruRow[p]=slots[p];
+        std::vector<int32_t> hitFlags(B+1,0);
+        for(uint32_t k=0;k<10;++k)hitFlags[lruRow[rng()%occ]]=1;
+        std::vector<int32_t> flagsRow(B+1,0);
+        for(uint32_t s=1;s<=B;++s)flagsRow[s]=hitFlags[s];
+        std::vector<int32_t> inLru(B+1,0);for(uint32_t p=0;p<occ;++p)inLru[p]=lruRow[p];  // 零尾版
+        std::vector<int32_t> raw(B+16,-777);        // nm=0
+        auto mk=[&](std::vector<int32_t> l0){return l0;};
+        auto run=[&](std::vector<int32_t>& lruGm,uint32_t specOn){
+            std::vector<int32_t> flagsGm=flagsRow;
+            std::vector<int32_t> flagsUb(B+1+8,-777),aAt(B+1+8,-777),lruUb(B+1+8,-777),
+                                  hExcl(B+1+8,-777),aExcl(B+1+8,-777),scan(64+8,-777);
+            launch([&]{OpLruRebuildRow(B,B,occ,0,lruGm.data(),0,flagsGm.data(),0,raw.data(),0,
+                                       flagsUb.data(),aAt.data(),lruUb.data(),hExcl.data(),aExcl.data(),scan.data(),specOn);});
+        };
+        // specOn=1: 垃圾尾被清零; 期望 = K+H(尾零)
+        std::vector<int32_t> K,H;
+        for(uint32_t p=0;p<occ;++p){int32_t v=lruRow[p];if(hitFlags[v])H.push_back(v);else K.push_back(v);}
+        std::sort(H.begin(),H.end());
+        std::vector<int32_t> expected=K;expected.insert(expected.end(),H.begin(),H.end());
+        expected.resize(B+1,0);
+        std::vector<int32_t> g1=lruRow;run(g1,1u);
+        for(uint32_t p=0;p<=B;++p)require(g1[p]==expected[p],"spec tail zero (specOn=1) mismatch");
+        // specOn=0: 尾原样传递 (非 spec 契约: 调用前尾已为零, kernel 不写尾)
+        std::vector<int32_t> g2=mk(inLru);run(g2,0u);
+        std::vector<int32_t> expected2=K;expected2.insert(expected2.end(),H.begin(),H.end());
+        expected2.resize(B+1,0);   // 输入尾为零 → 输出尾保持零
+        for(uint32_t p=0;p<=B;++p)require(g2[p]==expected2[p],"non-spec tail passthrough mismatch");
+        ++checks;
+    }
+
     // ---- 4) OpHitMiss: warp 归约计数 + freeSize 折叠 + [v2] flags bit0, 无 atomic ----
     for(uint32_t eff:{4u,1536u,2048u}){
         constexpr uint32_t R=3,L=4096,T=2048,B=4096;

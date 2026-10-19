@@ -479,7 +479,8 @@ __aicore__ inline void OpLruRebuildRow(
     int32_t* flagsGm, uint32_t flagsRowOff,
     int32_t* rawSlotsGm, uint32_t rawRowOff,
     int32_t* flagsUb, int32_t* aAtUb, int32_t* lruUb,
-    int32_t* hExclUb, int32_t* aExclUb, int32_t* scanScratch) {
+    int32_t* hExclUb, int32_t* aExclUb, int32_t* scanScratch,
+    uint32_t specOn) {
     uint32_t t = threadIdx.x;
     uint32_t warpCount = blockDim.x >> 5;
     uint32_t cols = B + 1u;
@@ -620,24 +621,24 @@ __aicore__ inline void OpLruRebuildRow(
         int32_t ac = a < 0 ? 0 : (a > (int32_t)B ? (int32_t)B : a);
         lruGm[lruRowOff + totalK + totalH + (uint32_t)aExclUb[ac]] = ac;
     }
-    // 尾部清零: occNew = totalK + totalH + nm = occ − fsClamp' + nm ≤ B (avail' ≥ 0 恒等式)
-    uint32_t occNew = totalK + totalH + nm;
-#ifndef ECHO_V2_RB_NOTAIL
-#ifdef ECHO_V2_RB_ZLOAD
-    // [debug/候选修复] 零值从内存装入 (flagsUb[0] 恒 0 —— slot 0 永不 hit/被淘汰/
-    //   spec 移除, 且 prologue 已清零; phase A staging 后无写者): 寄存器值存储
-    //   破坏 "纯常量零递增 GM 写" 的 memset 惯用语形态 (疑被降级为 MTE fill,
-    //   该路径在重 UB 写之后 fault, -O0 仍触发 → 前端/中端惯用语识别)。
-    int32_t zeroV = flagsUb[0];
-    for (uint32_t p = occNew + t; p <= B; p += blockDim.x) {
-        lruGm[lruRowOff + p] = zeroV;
+    // [尾零删除 2026-10-19] 非 spec 路径的尾零循环数学上冗余, 已删除:
+    //   ① K/H/A 散射目标恒 < occNew (K < totalK; H < totalK+totalH; A < occNew);
+    //   ② 尾区 [occNew, B] ⊆ [occOld, B] (fs>0 ⟹ nm>availOld ⟹ availNew=0 ⟹
+    //      occNew=B 尾空; fs=0 ⟹ occNew=occOld+nm);
+    //   ③ [occOld, B] 调用前已为零 (restore 的 initial 尾零 / reset 的全行清零 /
+    //      上一 invocation 的尾零 —— 不变量归纳; host 侧需保证首次分配后 lru 清零,
+    //      compare.py 的 make_echo_initial 已满足)。
+    //   删除同时消除设备 trap 触发源: "升序可合并 GM 写循环"(值无关、-O0 亦然)
+    //   在重 UB 写之后触发 507035 (§9.18 调试: NOTAIL clean / ZEROONLY+ONEONLY
+    //   trap / ZLOAD trap / 散射 A-append clean)。
+    //   spec 路径例外: avail 动态增加 → [occNew, occOld) 可能残留旧序值 → 保留
+    //   尾零 (spec 无基准覆盖, 语义按此维护; 若上板触发同类 trap 需另行处理)。
+    if (specOn != 0u) {
+        uint32_t occNew = totalK + totalH + nm;
+        for (uint32_t p = occNew + t; p <= B; p += blockDim.x) {
+            lruGm[lruRowOff + p] = 0;
+        }
     }
-#else
-    for (uint32_t p = occNew + t; p <= B; p += blockDim.x) {
-        lruGm[lruRowOff + p] = 0;
-    }
-#endif
-#endif
 #endif
     asc_syncthreads();                       // B4: flagsUb/aAtUb/lruUb/hExclUb/aExclUb 下一行 phase A 复用保护
 }
@@ -1316,7 +1317,8 @@ private:
                             flagsGm_, row * (B + 1u),
                             rawSlotsGm_, row * topkDim,
                             flagsUb_, aAtUb_, lruUb_,
-                            hExclUb_, aExclUb_, rbScanUb_);
+                            hExclUb_, aExclUb_, rbScanUb_,
+                            tiling_.specEnabled);
         }
     }
 
