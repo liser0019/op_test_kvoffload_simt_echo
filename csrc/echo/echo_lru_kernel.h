@@ -510,10 +510,29 @@ __aicore__ inline void OpLruRebuildRow(
         if (v & 1) ++hCnt;
         else if ((v & 2) == 0) ++kCnt;       // bit1 (淘汰/spec 移除) → 丢弃不计
     }
+#ifdef ECHO_V2_RB_SERIAL
+    // [debug] 串行替代 PackedBlockScan (判别 codegen 嫌疑): 切片计数写缓冲 → 栅栏 →
+    //   t0 串行 exclusive 前缀 + grand → 栅栏 → 读回。语义与 PackedBlockScan 逐位一致。
+    scanScratch[t] = kCnt | (hCnt << 16);
+    asc_syncthreads();
+    if (t == 0u) {
+        int32_t run = 0;
+        for (uint32_t i = 0; i < blockDim.x; ++i) {
+            int32_t v = scanScratch[i];
+            scanScratch[i] = run;
+            run += v;
+        }
+        scanScratch[blockDim.x] = run;   // grand (打包)
+    }
+    asc_syncthreads();
+    int32_t excl = scanScratch[t];
+    int32_t grandP = scanScratch[blockDim.x];
+#else
     int32_t excl = PackedBlockScan(kCnt | (hCnt << 16), scanScratch);   // B2
-    int32_t baseK = excl & 0xFFFF;
     int32_t grandP = 0;
     for (uint32_t w = 0; w < warpCount; ++w) grandP += scanScratch[w];
+#endif
+    int32_t baseK = excl & 0xFFFF;
     uint32_t totalK = (uint32_t)grandP & 0xFFFFu;
     uint32_t totalH = (uint32_t)grandP >> 16;
     // ---- phase C: 槽域联合扫描 (hitBit | allocBit<<16) 产出 hExcl[s]/aExcl[s]
@@ -529,7 +548,24 @@ __aicore__ inline void OpLruRebuildRow(
         if (flagsUb[s] & 1) haCnt += 1;
         if (aAtUb[s]) haCnt += (1 << 16);
     }
+#ifdef ECHO_V2_RB_SERIAL
+    int32_t* buf2s = scanScratch + 1024;   // 串行模式独立半区 (rbScan 段已扩容)
+    buf2s[t] = haCnt;
+    asc_syncthreads();
+    if (t == 0u) {
+        int32_t run = 0;
+        for (uint32_t i = 0; i < blockDim.x; ++i) {
+            int32_t v = buf2s[i];
+            buf2s[i] = run;
+            run += v;
+        }
+        buf2s[blockDim.x] = run;
+    }
+    asc_syncthreads();
+    int32_t excl2 = buf2s[t];
+#else
     int32_t excl2 = PackedBlockScan(haCnt, scanScratch + 32);           // B3
+#endif
     int32_t runH = excl2 & 0xFFFF;
     int32_t runA = excl2 >> 16;
     for (uint32_t s = slo; s < shi; ++s) {
@@ -546,6 +582,8 @@ __aicore__ inline void OpLruRebuildRow(
     asc_syncthreads();
     // ---- phase D: 散射写回 GM lru。K: 切片基址+片内运行前缀 (位置序); H: totalK +
     //      hExcl[slot] (槽号升序); A: totalK+totalH + aExcl[aslot]; 尾 [occNew, B] 清零。 ----
+#ifndef ECHO_V2_RB_NOD
+    // [debug] RB_NOD: 跳过 phase D 的 GM 写 (栅栏配平保留) —— 判别 GM 写是否为 trap 触发源。
     int32_t runK = baseK;
     for (uint32_t p = lo; p < hi; ++p) {
         int32_t slot = lruUb[p];
@@ -570,6 +608,9 @@ __aicore__ inline void OpLruRebuildRow(
     for (uint32_t p = occNew + t; p <= B; p += blockDim.x) {
         lruGm[lruRowOff + p] = 0;
     }
+#else
+    (void)baseK;   // [debug] RB_NOD: phase D 跳过 (防未用告警)
+#endif
     asc_syncthreads();                       // B4: flagsUb/aAtUb/lruUb/hExclUb/aExclUb 下一行 phase A 复用保护
 }
 
@@ -1017,8 +1058,10 @@ public:
         //   PackedBlockScan warpTotals 也写 [0,wc)/[32,32+wc) —— 与 MissCumsum 的
         //   缓冲同址重写, 该序列在设备上触发 trap (507035, skip-rebuild 实验隔离)。
         uo = (uo + 255u) & ~255u;
-        if (uo + 128u <= ARGTOPK_UB_ELEMS) {
-            rbScanUb_ = ubPool + uo; uo += 128u;
+        // 段容量 2*ECHO_LRU_THREAD_NUM+64: 正常路径只用 [0,64); ECHO_V2_RB_SERIAL
+        //   串行判别模式需 2*(blockDim+1) ≤ 2050 槽。
+        if (uo + 2u * ECHO_LRU_THREAD_NUM + 64u <= ARGTOPK_UB_ELEMS) {
+            rbScanUb_ = ubPool + uo; uo += 2u * ECHO_LRU_THREAD_NUM + 64u;
         } else {
             rbScanUb_ = ubPool;   // 超预算时回退共享 (大 batch 回退形态, 不在基准覆盖)
         }
