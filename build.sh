@@ -64,7 +64,7 @@ BUILD_DIR="$SCRIPT_DIR/build"
 if [[ "$PERF_STEP" == "ON" ]]; then
     BUILD_DIR="$SCRIPT_DIR/build_perf"
 fi
-if [[ "$V2_CUTOFF" != "0" || "$V2_SKIPRB" != "OFF" || "$V2_RBSER" != "OFF" || "$V2_RBNOD" != "OFF" || "$V2_RBNOTAIL" != "OFF" || "$V2_RBZERO" != "OFF" || "$V2_RBDCCI" != "OFF" || "$V2_RBSYNC" != "OFF" ]]; t || "$V2_KOPT" != "-O3" ]]; then
+if [[ "$V2_CUTOFF" != "0" || "$V2_SKIPRB" != "OFF" || "$V2_RBSER" != "OFF" || "$V2_RBNOD" != "OFF" || "$V2_RBNOTAIL" != "OFF" || "$V2_RBZERO" != "OFF" || "$V2_RBDCCI" != "OFF" || "$V2_RBSYNC" != "OFF" || "$V2_KOPT" != "-O3" ]]; then
     # v2 调试构建 (截断/跳重建) 使用独立目录, 不覆盖正式产物。
     BUILD_DIR="$SCRIPT_DIR/build_v2dbg"
 fi
