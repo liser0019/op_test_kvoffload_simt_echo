@@ -279,20 +279,12 @@ __attribute__((noinline)) __aicore__ void OpSpecAvailAdd(
 //   (等效 v1 的 pri 抬新 —— EvictScan 跳过 bit0 槽 = v1 "hit 不可被本步淘汰")。
 //   distinct token → distinct slot, 线程间无写冲突; 纯 store (prologue 已清零,
 //   bit1 只写非 hit 槽 —— EvictScan 选中的必非 hit)。
-// [v2-opt3 2026-10-19] t0 汇总段顺带预置 fifo/avail 终值 stash (faStash, 每行
-//   2 int): fifo 冷读紧邻既有 avail 冷读之前发出 (两读同时在途, t0 等待≈不变),
-//   终值 fifoOld+2 / availOld+fs-nm 此刻完全确定 (Step1→Step4 间 fifo/avail 无
-//   别的写者), 写入 UB 专段供 Step4 尾 OpFifoAvailUpdate 纯存储摊开 (§9.20)。
-//   avail 的读者 OpFreePush/OpAllocPop (Step2/3) 必须读旧值 → 此处只算不写
-//   (早算晚写); faStashInUb 为假 (UB 放不下的回退形态) 时本段不读 fifo 不写
-//   stash, 回退路径由 OpFifoAvailUpdate 自行 RMW。
 __attribute__((noinline)) __aicore__ void OpHitMiss(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t maxModelLenP1,
     uint32_t B, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* htdGm, int32_t* posGm, int32_t* curSlotsGm,
     int32_t* numMissesGm, int32_t* availGm, int32_t* freeSizeGm,
     int32_t* flagsGm,
-    int32_t* fifoGm, int32_t* faStash, bool faStashInUb,   // [v2-opt3] 终值 stash
     int32_t* warpScratch) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
@@ -334,22 +326,10 @@ __attribute__((noinline)) __aicore__ void OpHitMiss(
             int32_t nm = 0;
             for (uint32_t w = 0; w < warpCount; ++w) nm += warpScratch[(r & 1u) * 32u + w];
             numMissesGm[row] = nm;
-            // [v2-opt3] fifo 冷读紧邻 avail 冷读之前发出, 两读同时在途, t0 等待≈不变
-            //   (仅 stash 路径需要; 回退路径 OpFifoAvailUpdate 自读, 不必预读)。
-            int32_t fifoOld = faStashInUb ? fifoGm[row] : 0;
-            int32_t availOld = availGm[row];
-            int32_t fs = nm - availOld;
+            int32_t fs = nm - availGm[row];
             if (fs < 0) fs = 0;
             freeSizeGm[row] = fs;
             if (fs != 0) fsAny = 1;
-            // [v2-opt3] 终值早算入 UB stash: Step1→Step4 间 fifo/avail 无别的写者
-            //   (reset Step0 / spec Step0.5 均在本段之前), 终值此刻完全确定;
-            //   但 avail 的读者 OpFreePush/OpAllocPop (Step2/3) 必须读旧值,
-            //   故只算不写, 写留 Step4 尾 (早算晚写)。
-            if (faStashInUb) {
-                faStash[2u * r] = fifoOld + 2;
-                faStash[2u * r + 1u] = availOld + fs - nm;
-            }
         }
     }
     // [C1] 淘汰流水线整段跳过标志: 全行 fs==0 时 Argtopk/FreeRelease/FreePush 对
@@ -374,36 +354,14 @@ __attribute__((noinline)) __aicore__ void OpHitMiss(
 //   avail 的全员读者 (OpFreePush/OpAllocPop) 已被 Step3 尾 SyncGrid 排空。
 // [v2] fifo 无 kernel 内读者 (OpAllocPriority 已删, 其读 fifo 写 pri 的竞争与
 //   Bug2 栅栏随之消失) → 两次 +1 合并为一次 +2, t0 串行 GM 往返再减半。
-// [v2-opt3 2026-10-19] FifoAvail 预置摊销: 实测 6.2K 周期 (warm 口径) 的构成是
-//   rowsPerCore=1 + 打点只记 t0 (PerfBegin/PerfEnd 只采 t0 的 clock) → 6.2K ≈
-//   t0 的单次冷 GM RMW 链 (fifo/avail 的上一写者是上一 invocation, 且紧邻的
-//   LruRebuild 刚做完大量散射写); "把行摊给更多线程"字面在每核 1 行时无事可摊
-//   —— 改为 Step1 OpHitMiss t0 段早算终值入 UB stash (见其注释), 本步行摊全
-//   线程做两次独立纯 GM store (无依赖链 fire-and-forget), 打点窗口 ~百周期级。
-//   回退: UB 放不下 stash 段 (超大 batch) 时 faStashInUb=false, 走原 t0/t1 串行
-//   RMW 老路 (freeIdxInUb_ 同型回退)。
 __attribute__((noinline)) __aicore__ void OpFifoAvailUpdate(
     uint32_t R, uint32_t rowsPerCore, uint32_t tailRows,
-    int32_t* fifoGm, int32_t* availGm, int32_t* freeSizeGm, int32_t* numMissesGm,
-    int32_t* faStash, bool faStashInUb) {   // [v2-opt3] 终值 stash (放不下回退 RMW)
+    int32_t* fifoGm, int32_t* availGm, int32_t* freeSizeGm, int32_t* numMissesGm) {
     uint32_t startRow = blockIdx.x * rowsPerCore;
     uint32_t rowCount = (blockIdx.x == gridDim.x - 1) ? tailRows : rowsPerCore;
-    if (faStashInUb) {
-        // [v2-opt3] 纯存储路径: 终值已在 Step1 t0 段写入 UB stash, 本步无 GM 读。
-        //   行摊给全线程 (每线程至多一行/pass), 两次独立 GM store 无依赖链,
-        //   打点窗口 ~百周期级 (原 6.2K = t0 单次冷 GM RMW 链)。
-        //   stash 可见性: t0 Step1 写 → Step1 尾 SyncGrid → 此处全员读
-        //   (先例: freeIdx UB 路径)。row 单调递增, break 语义与原版一致。
-        for (uint32_t r = threadIdx.x; r < rowCount; r += blockDim.x) {
-            uint32_t row = startRow + r;
-            if (row >= R) break;
-            fifoGm[row] = faStash[2u * r];
-            availGm[row] = faStash[2u * r + 1u];
-        }
-    } else if (threadIdx.x == 0) {
-        // [FifoAvail 拆分] fifo 与 avail 无数据依赖, t0/t1 各管一个。t1 读的 fs/nm
-        //   由 t0 在 Step1 写入、经 Step1 尾 SyncGrid dcci 可见; 两写地址不同无冲突。
-        // [v2-opt3 回退] UB 放不下 stash 段的形态走原 t0/t1 串行 RMW (freeIdxInUb_ 同型回退)。
+    // [FifoAvail 拆分] fifo 与 avail 无数据依赖, t0/t1 各管一个。t1 读的 fs/nm
+    //   由 t0 在 Step1 写入、经 Step1 尾 SyncGrid dcci 可见; 两写地址不同无冲突。
+    if (threadIdx.x == 0) {
         for (uint32_t r = 0; r < rowCount; ++r) {
             uint32_t row = startRow + r;
             if (row >= R) break;
@@ -1113,17 +1071,13 @@ public:
         //   +B+1              lruUb    (Rebuild 的旧序 staging, 防 lruGm 同数组读写竞争);
         //   +B+1              hExclUb  (槽域 hit exclusive 前缀);
         //   +B+1              aExclUb  (槽域 alloc exclusive 前缀);
-        //   (其后 256 对齐追加段: freeIdx → rbScan → [v2-opt3] faStash —— 每行 2 int
-        //    的 fifo/avail 终值 stash, Step1 t0 写、Step4 尾全员读, 见落点注释)
         //   基准形态合计 128 + 5*4097 = 20613 ≤ ARGTOPK_UB_ELEMS=32768 (余 12155)。
         scanScratchUb_ = ubPool;
         // [对齐 2026-10-19] 每段基址向上取整到 256 元素 (1KB) 边界: 对齐 v1 已验证
         //   的 UB 布局形态 (v1 全部分段偏移均为 256 元素倍数, 内部子缓冲 128B 对齐);
         //   v2 首版奇数偏移 (4225/8322/..., 仅 4B 对齐) 是 cold_reset 上板 trap
-        //   (507035) 的头号嫌疑 —— CPU mock 无法覆盖硬件对齐行为。基准形态逐段
-        //   实算 (v2-opt3 后): 5 大段尾 21761 → freeIdx@21761+2048 → rbScan@24064
-        //   +2112 → faStash@26368, 峰值 26370 ≤ 32768 (余 6398)。(旧注 "22016+2048
-        //   =24064" 为尺寸取整近似且漏计 rbScan, 已订正。)
+        //   (507035) 的头号嫌疑 —— CPU mock 无法覆盖硬件对齐行为。基准形态峰值
+        //   22016 + 2048 = 24064 ≤ 32768。
         uint32_t uo = 128u;
         uo = (uo + 255u) & ~255u;
         flagsUb_  = ubPool + uo; uo += B + 1u;
@@ -1159,18 +1113,6 @@ public:
         } else {
             rbScanUb_ = ubPool;   // 超预算时回退共享 (大 batch 回退形态, 不在基准覆盖)
         }
-        // [v2-opt3] FifoAvail 预置摊销 stash 段: 每行 2 int (fifo+2, avail+fs-nm),
-        //   Step1 t0 写、Step4 尾全员读。放不下 (超大 batch) 回退老 RMW 路径。
-        //   专段专用, 不与 freeIdx/rbScan/scanScratch 分时复用 (避开 EvictScan/
-        //   Rebuild/RB_SERIAL 的生命周期交叠)。rbScan 超预算回退不推进 uo (现状),
-        //   本段接在其后不受影响。
-        uo = (uo + 255u) & ~255u;
-        faStashUb_ = nullptr;   // 回退时指针恒为 null (调用点无条件传参, 不会被解引用)
-        faStashInUb_ = false;
-        if (uo + 2u * tiling_.rowsPerCore <= ARGTOPK_UB_ELEMS) {
-            faStashUb_ = ubPool + uo; uo += 2u * tiling_.rowsPerCore;
-            faStashInUb_ = true;
-        }
     }
 
     // Process: 各步顺序执行, 步间 SyncGrid() (块内 syncthreads + dcci) 解决行内跨线程 RAW.
@@ -1180,13 +1122,11 @@ public:
     //   prologue(无打点): OpZeroFlags(+spec OpFillZero) + SyncGrid
     //   Step0 (anyReset 门控): OpResetRows / OpResetDthLru / OpResetFree /
     //     OpResetAvailFifo + SyncGrid —— 5 槽
-    //   Step1: OpHitMiss (hit→flags bit0; [v2-opt3] t0 段顺带写 fifo/avail 终值 stash)
-    //     + SyncGrid —— 2 槽
+    //   Step1: OpHitMiss (hit→flags bit0) + SyncGrid —— 2 槽
     //   Step2 ([C1] needFree 门控): EvictScanAllRows / SyncGrid(仅 GM freeIdx
     //     回退) / OpFreeRelease / OpFreePush —— 4 槽
     //   Step3: OpAllocPop + SyncGrid (OpFifoInc 已并入 Step4) —— 2 槽
-    //   Step4: LruRebuildAllRows + OpFifoAvailUpdate (fifo+=2, avail+=fs-nm;
-    //     [v2-opt3] stash 纯存储摊开 / 回退 RMW) —— 2 槽
+    //   Step4: LruRebuildAllRows + OpFifoAvailUpdate (fifo+=2, avail+=fs-nm) —— 2 槽
     //   Step5: OpMissCumsum + SyncGrid + OpSetUpdate —— 3 槽
     __aicore__ inline void Process() {
         uint32_t R = tiling_.numTokens;
@@ -1240,7 +1180,7 @@ public:
         // ---- Step 1: hit/miss + hit 标记 + miss 计数 + freeSize ----
         PerfBegin(); OpHitMiss(R, topkDim, effTopk, maxModelLenP1, B, rowsPerCore, tailRows,
                      htdGm_, posGm_, curSlotsGm_, numMissesGm_, availGm_, freeSizeGm_,
-                     flagsGm_, fifoGm_, faStashUb_, faStashInUb_, scanScratchUb_); PerfEnd();
+                     flagsGm_, scanScratchUb_); PerfEnd();
         PerfBegin(); SyncGrid(); PerfEnd();  // flags/curSlots (全员写) 经 dcci 对后续全员读可见;
                                             // numMisses/freeSize (t0 写) 同点可见。
         if (ECHO_V2_DEBUG_CUTOFF_V == 3u) return;   // [v2 debug] 阶段 3 截断
@@ -1270,8 +1210,7 @@ public:
 
         // ---- Step 4: lru 重建 (每步必执行) + fifo/avail 折叠更新 ----
         PerfBegin(); LruRebuildAllRows(); PerfEnd();
-        PerfBegin(); OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_,
-                     faStashUb_, faStashInUb_); PerfEnd();
+        PerfBegin(); OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_); PerfEnd();
 #if defined(ECHO_V2_RB_DCCI)
         // [debug/候选修复] Step4→Step5 之间补回栅栏: 重 UB 写 (rebuild A-C) 之后的
         //   可合并递增 GM 写 (phase D 尾零) 会毒化紧随的访存 —— MissCumsum trap。
@@ -1442,8 +1381,6 @@ private:
     int32_t* freeIdxUb_;    // [P-C] freeIdx 的 UB 落点 (放得下时启用)
     int32_t* freeIdxPtr_;   // freeIdx 实际指针: UB 或 GM
     bool freeIdxInUb_;
-    int32_t* faStashUb_;    // [v2-opt3] fifo/avail 终值 stash 的 UB 落点 (放得下时启用, 否则 Init 置 null)
-    bool faStashInUb_;      // 放不下 (超大 batch) 时 OpFifoAvailUpdate 回退 t0/t1 老 RMW 路径
 };
 
 // 纯 SIMT 入口: __global__ (无 __vector__), 裸指针参数, host 四参 <<<blockNum, 512, 0, stream>>>.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Echo v2（维护序）回归（52 项）：提取实际 C++ 函数，g++/128 个 CPU 线程检查淘汰扫描与顺序重建。
+"""Echo v2（维护序）回归：提取实际 C++ 函数，g++/128 个 CPU 线程检查淘汰扫描与顺序重建。
 
 覆盖 v2 的设备算法改动（详见 kernel 头注释与 deep_dive §9.17）：
   - OpEvictScanRow：位置序扫 lru、跳过本步 hit（v1 protect 语义等价物）取前 fs 个
@@ -11,13 +11,10 @@
   - 跨验证组：随机场景下按 v1 pri 语义独立推导 golden（stable_sort by (pri,slot)），
     与 v2 链（EvictScan+Rebuild）逐位比对——v2 与 v1 语义等价性的 CPU 级证明；
   - OpHitMiss：hit → flags bit0（v2 替代 pri 时间戳）、warp 归约计数、[P4] freeSize
-    折叠、[C1] 淘汰标志、零 atomic；[v2-opt3] t0 段 fifo/avail 终值 stash 内容断言；
+    折叠、[C1] 淘汰标志、零 atomic；
   - OpMissCumsum：两级 warp 扫描（[P3]，v2 未改动，原样回归）；
   - OpAllocPop + OpFifoAvailUpdate：直读 freeIdx + 老栈等价（[P4] 原样回归）；
-    fifo 两次自增合并为 +2（[v2]），此组走 faStashInUb=false 回退 RMW 路径；
-  - [v2-opt3] FifoAvail 预置摊销：stash 链（OpHitMiss 早算 → OpFifoAvailUpdate
-    纯存储摊开）与回退 RMW 链的 fifo/avail 终值逐位等价（覆盖 nm>avail / nm<avail /
-    nm=0 三类值）；多行摊开的行→线程映射与尾核守卫（守卫行零写）。
+    fifo 两次自增合并为 +2（[v2]）。
 
 依赖 Python 标准库和支持 C++20 的 g++；启用 AddressSanitizer/UBSan。
 这是 CPU 算法和索引检查，不能验证 Ascend 编译、GM D-cache 或 NPU 耗时。
@@ -340,23 +337,17 @@ try{
     }
 
     // ---- 4) OpHitMiss: warp 归约计数 + freeSize 折叠 + [v2] flags bit0, 无 atomic ----
-    // [v2-opt3] faStashInUb=true: 顺势断言 t0 段写入的 fifo/avail 终值 stash
-    //   (fifoNew=fifoOld+2, availNew=availOld+fs-nm, 与 Step4 尾 OpFifoAvailUpdate
-    //   的老 RMW 公式逐位一致 —— 两路径等价性的第一半)。
     for(uint32_t eff:{4u,1536u,2048u}){
         constexpr uint32_t R=3,L=4096,T=2048,B=4096;
         std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),misses(R,-777),fsOut(R,-777),scratch(65,-777);
         std::vector<int32_t> avail(R),flags(R*(B+1),0);   // [v2] flags (prologue 已清零)
-        std::vector<int32_t> fifo(R),stash(2*R+8,-777);   // [v2-opt3] 终值 stash (每行 2 int)
         for(uint32_t r=0;r<R;++r)avail[r]=static_cast<int32_t>(r*700+13);
-        for(uint32_t r=0;r<R;++r)fifo[r]=static_cast<int32_t>(1000+r);
         for(uint32_t i=0;i<R*L;++i)htd[i]=(i%4==0)?I32_MAX:static_cast<int32_t>(i%4096);
         for(uint32_t i=0;i<R*T;++i)pos[i]=(i%7==0)?-1:static_cast<int32_t>((i*5)%(L+100));
         atomicCalls=0;
         int32_t anyFs=0;   // [C1] 淘汰标志 golden
         launch([&]{OpHitMiss(R,T,eff,L,B,R,R,htd.data(),pos.data(),out.data(),
-                             misses.data(),avail.data(),fsOut.data(),flags.data(),
-                             fifo.data(),stash.data(),true,scratch.data());});
+                             misses.data(),avail.data(),fsOut.data(),flags.data(),scratch.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t expectedMisses=0;
             std::vector<int32_t> goldenFlags(B+1,0);
@@ -374,13 +365,9 @@ try{
             if(expectedFs<0)expectedFs=0;
             require(fsOut[r]==expectedFs,"[P4] folded free size mismatch");
             if(expectedFs>0)anyFs=1;
-            require(fifo[r]==1000+r,"[v2-opt3] OpHitMiss must not write fifo");
-            require(stash[2*r]==1002+r,"[v2-opt3] stash fifo content mismatch");
-            require(stash[2*r+1]==avail[r]+expectedFs-expectedMisses,"[v2-opt3] stash avail content mismatch");
         }
         require(scratch[64]==anyFs,"[C1] eviction flag mismatch");
         require(atomicCalls==0,"[P0] OpHitMiss must not use atomics");
-        for(uint32_t i=2*R;i<stash.size();++i)require(stash[i]==-777,"[v2-opt3] stash overrun");
         ++checks;
     }
     // ---- 5) OpMissCumsum: 并行扫描与串行回退 (v2 未改动, 原样回归) ----
@@ -430,108 +417,16 @@ try{
                 require(raw[r*T+j]==expected,"[P4] alloc pop mismatch with stack golden");
             }
         }
-        // [v2] fifo 两次自增合并为 +2; avail 折叠不变。[v2-opt3] 本组走
-        //   faStashInUb=false 的回退 RMW 路径 (老路径原样回归), stash 槽必须零触碰。
-        std::vector<int32_t> fifo(R),avail2(avail),stashDummy(2*R,-777);
+        // [v2] fifo 两次自增合并为 +2; avail 折叠不变。
+        std::vector<int32_t> fifo(R),avail2(avail);
         for(uint32_t r=0;r<R;++r)fifo[r]=static_cast<int32_t>(100+r);
-        launch([&]{OpFifoAvailUpdate(R,R,R,fifo.data(),avail2.data(),fs.data(),nm.data(),
-                                     stashDummy.data(),false);});
-        for(uint32_t i=0;i<2*R;++i)require(stashDummy[i]==-777,"[v2-opt3] fallback RMW must not touch stash");
+        launch([&]{OpFifoAvailUpdate(R,R,R,fifo.data(),avail2.data(),fs.data(),nm.data());});
         for(uint32_t r=0;r<R;++r){
             int32_t expectedAvail=avail[r]+fs[r]-nm[r];
             require(fifo[r]==102+r,"[v2] fifo must increment by 2");
             require(avail2[r]==expectedAvail,"[P4] folded avail mismatch");
             require(avail2[r]>=0,"[P4] folded avail must stay non-negative");
         }
-        ++checks;
-    }
-    // ---- 6b) [v2-opt3] FifoAvail 预置摊销: stash 链 vs 回退 RMW 链, 终值逐位等价 ----
-    // 三类值覆盖: nm>avail (fs>0, avail 终值 0) / nm<avail (fs=0) / nm=0。
-    // htd 构造使 nm 精确可控: 行 r 前 nm[r] 个 token 查 I32_MAX (miss), 其余 hit
-    //   (槽号 j+1 ≤ B, distinct token → distinct slot, flags 无写冲突)。
-    //   两条链各自从同一组初值出发 (run 间重置全部 GM 状态向量), 终值必须等于
-    //   公式且两链相等 —— stash 路径与老 RMW 路径语义等价性的 CPU 级证明。
-    {
-        constexpr uint32_t R=3,T=64,B=64,L=128;
-        const int32_t nmList[R]={10,3,0},availList[R]={4,20,7};
-        std::vector<int32_t> nm(nmList,nmList+R),avail0(availList,availList+R),fs(R);
-        for(uint32_t r=0;r<R;++r){fs[r]=nm[r]-avail0[r];if(fs[r]<0)fs[r]=0;}
-        std::vector<int32_t> htd(R*L),pos(R*T),scratch(65,-777);
-        for(uint32_t r=0;r<R;++r){
-            for(uint32_t j=0;j<L;++j)htd[r*L+j]=(j<(uint32_t)nm[r])?I32_MAX:static_cast<int32_t>(j+1);
-            for(uint32_t j=0;j<T;++j)pos[r*T+j]=static_cast<int32_t>(j);
-        }
-        std::vector<int32_t> expFifo(R),expAvail(R);
-        for(uint32_t r=0;r<R;++r){expFifo[r]=100+r+2;expAvail[r]=avail0[r]+fs[r]-nm[r];}
-        // (a) stash 链: OpHitMiss(true) 早算 → OpFifoAvailUpdate(stash 纯存储)
-        std::vector<int32_t> outA(R*T,-777),missesA(R,-777),fsOutA(R,-777),flagsA(R*(B+1),0);
-        std::vector<int32_t> fifoA(R),availA(avail0),stashA(2*R+8,-777);
-        for(uint32_t r=0;r<R;++r)fifoA[r]=100+r;
-        launch([&]{OpHitMiss(R,T,T,L,B,R,R,htd.data(),pos.data(),outA.data(),
-                             missesA.data(),availA.data(),fsOutA.data(),flagsA.data(),
-                             fifoA.data(),stashA.data(),true,scratch.data());});
-        for(uint32_t r=0;r<R;++r){
-            require(missesA[r]==nm[r],"[v2-opt3] constructed nm mismatch");
-            require(fsOutA[r]==fs[r],"[v2-opt3] constructed fs mismatch");
-            require(fifoA[r]==100+r,"[v2-opt3] OpHitMiss must not write fifo");
-            require(stashA[2*r]==expFifo[r],"[v2-opt3] stash fifo content mismatch");
-            require(stashA[2*r+1]==expAvail[r],"[v2-opt3] stash avail content mismatch");
-        }
-        for(uint32_t i=2*R;i<stashA.size();++i)require(stashA[i]==-777,"[v2-opt3] stash overrun");
-        launch([&]{OpFifoAvailUpdate(R,R,R,fifoA.data(),availA.data(),fsOutA.data(),missesA.data(),
-                                     stashA.data(),true);});
-        // (b) 回退 RMW 链: 同初值重置 GM 状态向量 → OpHitMiss(false) → 老 RMW
-        std::vector<int32_t> outB(R*T,-777),missesB(R,-777),fsOutB(R,-777),flagsB(R*(B+1),0);
-        std::vector<int32_t> fifoB(R),availB(avail0),stashB(2*R+8,-777);
-        for(uint32_t r=0;r<R;++r)fifoB[r]=100+r;
-        launch([&]{OpHitMiss(R,T,T,L,B,R,R,htd.data(),pos.data(),outB.data(),
-                             missesB.data(),availB.data(),fsOutB.data(),flagsB.data(),
-                             fifoB.data(),stashB.data(),false,scratch.data());});
-        for(uint32_t i=0;i<stashB.size();++i)require(stashB[i]==-777,"[v2-opt3] fallback must not write stash");
-        launch([&]{OpFifoAvailUpdate(R,R,R,fifoB.data(),availB.data(),fsOutB.data(),missesB.data(),
-                                     stashB.data(),false);});
-        for(uint32_t r=0;r<R;++r){
-            require(fifoA[r]==expFifo[r]&&fifoB[r]==expFifo[r],"[v2-opt3] fifo final mismatch");
-            require(availA[r]==expAvail[r]&&availB[r]==expAvail[r],"[v2-opt3] avail final mismatch");
-            require(fifoA[r]==fifoB[r]&&availA[r]==availB[r],"[v2-opt3] stash path must equal RMW path");
-        }
-        ++checks;
-    }
-    // ---- 6c) [v2-opt3] stash 路径多行摊开: 单 block rowsPerCore=4 的行→线程映射 + 尾核守卫 ----
-    // R=3 而 rowsPerCore=tailRows=4: r=3 时 row>=R 触发 break (防御语义) ——
-    //   stash [2R, 2*rowsPerCore) 与 fifo/avail 下标 R 必须保持哨兵 (守卫行零写)。
-    //   行 r 由线程 r 认领 (for r=threadIdx.x; r<rowCount; r+=blockDim.x 的
-    //   基准形态映射: 每线程至多一行)。
-    {
-        constexpr uint32_t R=3,RP=4,T=64,B=64,L=128;
-        const int32_t nmList[R]={7,0,20},availList[R]={3,12,20};
-        std::vector<int32_t> nm(nmList,nmList+R),fs(R);
-        std::vector<int32_t> avail(R+1,-777),fifo(R+1,-777),stash(2*RP+8,-777);
-        for(uint32_t r=0;r<R;++r)avail[r]=availList[r];
-        for(uint32_t r=0;r<R;++r){fs[r]=nm[r]-availList[r];if(fs[r]<0)fs[r]=0;}
-        std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),misses(R,-777),fsOut(R,-777),scratch(65,-777);
-        std::vector<int32_t> flags(R*(B+1),0);
-        for(uint32_t r=0;r<R;++r){
-            for(uint32_t j=0;j<L;++j)htd[r*L+j]=(j<(uint32_t)nm[r])?I32_MAX:static_cast<int32_t>(j+1);
-            for(uint32_t j=0;j<T;++j)pos[r*T+j]=static_cast<int32_t>(j);
-            fifo[r]=50+r;
-        }
-        launch([&]{OpHitMiss(R,T,T,L,B,RP,RP,htd.data(),pos.data(),out.data(),
-                             misses.data(),avail.data(),fsOut.data(),flags.data(),
-                             fifo.data(),stash.data(),true,scratch.data());});
-        for(uint32_t r=0;r<R;++r){
-            require(stash[2*r]==52+r,"[v2-opt3] multirow stash fifo mismatch");
-            require(stash[2*r+1]==availList[r]+fs[r]-nm[r],"[v2-opt3] multirow stash avail mismatch");
-        }
-        launch([&]{OpFifoAvailUpdate(R,RP,RP,fifo.data(),avail.data(),fsOut.data(),misses.data(),
-                                     stash.data(),true);});
-        for(uint32_t r=0;r<R;++r){
-            require(fifo[r]==52+r,"[v2-opt3] multirow fifo final mismatch");
-            require(avail[r]==availList[r]+fs[r]-nm[r],"[v2-opt3] multirow avail final mismatch");
-        }
-        require(fifo[R]==-777,"[v2-opt3] guard row must not be written (fifo)");
-        require(avail[R]==-777,"[v2-opt3] guard row must not be written (avail)");
-        for(uint32_t i=2*R;i<stash.size();++i)require(stash[i]==-777,"[v2-opt3] guard row stash must stay sentinel");
         ++checks;
     }
     std::cout<<"PASS: "<<checks<<" checks of extracted C++ functions with 128 host threads; not NPU execution\n";
