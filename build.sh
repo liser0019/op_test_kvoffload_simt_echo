@@ -43,7 +43,7 @@ if ! [[ "$ECHO_THREADS" =~ ^[0-9]+$ ]] || (( ECHO_THREADS % 32 != 0 || ECHO_THRE
     exit 2
 fi
 if ! [[ "$V2_CUTOFF" =~ ^[0-7]$ ]]; then
-    echo "ECHO_V2_DEBUG_CUTOFF 必须是 0..7 (0=关闭; 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7=全程): $V2_CUTOFF" >&2
+    echo "ECHO_V2_DEBUG_CUTOFF 必须是 0..7 (0=正式构建产物build/; 1..7=调试构建产物build_v2dbg/, 阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7=完整流水线): $V2_CUTOFF" >&2
     exit 2
 fi
 # 使用激活环境中的确切解释器，也让 CMake 使用同一个解释器。
