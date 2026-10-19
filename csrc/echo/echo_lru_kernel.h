@@ -1011,6 +1011,17 @@ public:
             freeIdxPtr_ = freeIdxUb_;
             freeIdxInUb_ = true;
         }
+        // [scan 分离 2026-10-19] Step2/Step4 的扫描缓冲独立成段 (freeIdx 之后, 256 对齐):
+        //   不再与 scanScratch [0,128) 分时复用。v1 里 [0,128) 的写者序列是
+        //   OpHitMiss warpScratch → MissCumsum (已验证); v2 首版让 rebuild 的
+        //   PackedBlockScan warpTotals 也写 [0,wc)/[32,32+wc) —— 与 MissCumsum 的
+        //   缓冲同址重写, 该序列在设备上触发 trap (507035, skip-rebuild 实验隔离)。
+        uo = (uo + 255u) & ~255u;
+        if (uo + 128u <= ARGTOPK_UB_ELEMS) {
+            rbScanUb_ = ubPool + uo; uo += 128u;
+        } else {
+            rbScanUb_ = ubPool;   // 超预算时回退共享 (大 batch 回退形态, 不在基准覆盖)
+        }
     }
 
     // Process: 各步顺序执行, 步间 SyncGrid() (块内 syncthreads + dcci) 解决行内跨线程 RAW.
@@ -1193,7 +1204,7 @@ private:
                            lruGm_, row * (B + 1u),
                            flagsGm_, row * (B + 1u),
                            fiRow,
-                           flagsUb_, scanScratchUb_);
+                           flagsUb_, rbScanUb_);
         }
     }
 
@@ -1225,7 +1236,7 @@ private:
                             flagsGm_, row * (B + 1u),
                             rawSlotsGm_, row * topkDim,
                             flagsUb_, aAtUb_, lruUb_,
-                            hExclUb_, aExclUb_, scanScratchUb_);
+                            hExclUb_, aExclUb_, rbScanUb_);
         }
     }
 
@@ -1254,7 +1265,8 @@ private:
     int32_t* missAllocFlatGm_;
     uint8_t* missMaskGm_;
     int32_t* flagsGm_;    // [v2] workspace 分类位: bit0=hit, bit1=淘汰/spec 移除
-    int32_t* scanScratchUb_;   // [UB v2] [0,128) 分时复用扫描缓冲 (见 Init 注释)
+    int32_t* scanScratchUb_;   // [UB v2] [0,128) Step1 warp 归约/C1 与 Step5 MissCumsum 专用 (v1 已验证序列)
+    int32_t* rbScanUb_;        // [scan 分离] Step2 EvictScan / Step4 Rebuild 的扫描缓冲 (独立段, 不与 [0,128) 复用)
     int32_t* flagsUb_;
     int32_t* aAtUb_;
     int32_t* lruUb_;
