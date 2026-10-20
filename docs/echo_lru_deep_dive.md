@@ -1955,14 +1955,39 @@ v2.0 快照 tag `v2.0`（§9.17-§9.21）；v1 终版 tag `v1-argtopk-final`。
      demo 二进制/aclnn 单算子的还原-重放工具，对 torch 负载不适配（2026-10-20
      实测：抓错 kernel（TensorMove）且重放通道起不来，0/5 成功）。采集时去掉
      --verify-each-sample（读回改变缓存条件且引入 TensorMove 噪声）。
+   - **首轮实测结论（2026-10-20，full_cache_75pct，PipeUtilization task-based
+     + sample-based 各一轮）**：①**主频 1.58-1.59 GHz**（aiv_total_cycles
+     为全核和：4.22M/32 核/83.5 μs；DVFS 无降频，与历史 ~1.6 GHz 交叉吻合，
+     §9.22 口径注记的"频率悬案"关闭——echo_perf_step 的 141-245 MHz 纯属
+     Event 标定污染）；②**分步对账闭合**：单核平均 ~131.5K 周期 = 分步 Σ
+     121.7K（94%）+ 未打点的 prologue（OpZeroFlags + SyncGrid）/进出/槽间隙
+     ~10K（~6 μs）——"分步偏大"是 μs 换算坏 + prologue 未打点两件事叠加，
+     周期数本身无恙；③**管线结构**：aiv_vec_ratio 0.97-0.99 / scalar ~1% /
+     MTE2+MTE3 <0.5%——纯 SIMT 的访存不走 MTE 管线，经典 "MTE2 BOUND"
+     判据对本 kernel 不适用，瓶颈全在 vec 管线内部的发射/延迟/栅栏自旋
+     （SIMT 基线同型：vec 0.92-0.95，我们 cycle 数少 12% 且 icache miss 0.20
+     vs 0.153 均非信号）；④**cold 数据注脚**：restore 的 TensorMove（32 MiB
+     拷贝）MTE2 段 ~13 μs（~4.7 TB/s r+w 合并）vs 我们 OpResetRows 32 MiB
+     纯写 20.6 μs（1.6 TB/s）——SIMT store 路径写带宽约为 MTE 引擎一半，
+     更快写路径存在物理空间但 kernel 内不可用 MTE（混合范式的具体候选点，
+     parked 记录）。
    - **kernel 内时间戳升级**（参考专家提供的 AddTimePoint 方案，映射到纯
      SIMT）：每核绝对时间戳（现在只存 t0 差值→核间 skew 可见，即参考文档
      "每条横线一个核"图）；可选排空模式（PipeBarrier 等价物=SyncGrid，编译
-     开关默认关，测"真实边界" vs "记账边界"差）；
+     开关默认关，测"真实边界" vs "记账边界"差）；**prologue 纳入打点**（对账
+     显示 ~6 μs 未覆盖，OpZeroFlags 是主要成分）；
    - **echo_perf_step.py 标定修正**：接受 --p50-us 外部锚点（来自
-     profile_kernel.sh）替代 Event 标定。
+     profile_kernel.sh）替代 Event 标定；1.58 GHz 实测值已可作默认常数。
    msprof **不含** kernel 内函数级拆解（op_summary 均为 op 级）——函数级仍靠
-   时间戳方案，两者互补。
+   时间戳方案，两者互补。待补采：L2Cache / ResourceConflictRatio / Memory
+   三组 + Run A 的 aicore.db 逐核 task_cyc 抽取（核间均衡）。
+   - **[新候选 2026-10-20] flags 世代号化**：对账暴露 prologue ~10K cyc/步
+     （OpZeroFlags 全量清零 4097×32 int32 + SyncGrid）。flags[s] 改存每步
+     +1 的世代号 gen（hit 判定 = `flags[s]==gen`）可**删 OpZeroFlags 与
+     prologue SyncGrid**（世代号天然防 audit 污染/跨 invocation 残留；WAW
+     消失；int32 回绕 2^31 步不现实）。预计全场景 −5~8K（full ~4-6%）。
+     风险中：spec bit1 语义需一并世代化、ClassifyEvict 判定改等值比较。
+     与时间戳升级正交，可并行评估。
 2. **ClassifyEvict 再削**（full 29K = 3 栅栏 ~11K + staging/两遍走查/散射
    ~18K）：候选 = 尾栅栏与后续 Op 的依赖重审（freeIdx 读者是 FreeRelease 而
    非 AllocPop，B3 能否并入 FreeRelease 前提）、staging 读的合并（flags 与
