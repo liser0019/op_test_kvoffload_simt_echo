@@ -1946,18 +1946,22 @@ v2.0 快照 tag `v2.0`（§9.17-§9.21）；v1 终版 tag `v1-argtopk-final`。
    与 kernel P50 绝对值对不上——①频率标定被 Event P50 污染（§7.8，输出里
    141-245 MHz 是假数，Σ/P50 交叉 ≈1.4-1.5 GHz 才自洽）；②t0-only 口径看不见
    核间/线程间偏差；③步边界无排空，边界归属模糊。计划三件套：
-   - **msprof op 一轮**（skill: ops-profiling/msprof-op-guide）：torch_npu
-     profiler 只给 kernel 级时长；msprof op 另给 Current/Rated Freq（DVFS
-     直读，校准周期→μs）、逐核 aiv_time（核间均衡）、PipeUtilization
-     （MTE/Vector/Scalar 占比→判定访存/计算受限）、Memory/UB 带宽、L2 命中、
-     Bank Conflict——全部是我们周期计数器看不到的硬件侧视角；
+   - **msprof 应用级采集一轮**（skill: ops-profiling/msprof-guide）：torch_npu
+     profiler 只给 kernel 级时长；原生 msprof 另给逐核 cycle（sample-based
+     aicore.db 的 task_cyc + aicore_time/max_cycles 反推主频——解决频率悬案
+     与核间均衡）、task-based `--aic-metrics`（一次一组：PipeUtilization/
+     Memory/L2Cache/ResourceConflictRatio/MemoryUB 等，per-launch 行）——全部
+     是周期计数器看不到的硬件侧视角。**不要用 `msprof op`（msopprof）**：它是
+     demo 二进制/aclnn 单算子的还原-重放工具，对 torch 负载不适配（2026-10-20
+     实测：抓错 kernel（TensorMove）且重放通道起不来，0/5 成功）。采集时去掉
+     --verify-each-sample（读回改变缓存条件且引入 TensorMove 噪声）。
    - **kernel 内时间戳升级**（参考专家提供的 AddTimePoint 方案，映射到纯
      SIMT）：每核绝对时间戳（现在只存 t0 差值→核间 skew 可见，即参考文档
      "每条横线一个核"图）；可选排空模式（PipeBarrier 等价物=SyncGrid，编译
      开关默认关，测"真实边界" vs "记账边界"差）；
    - **echo_perf_step.py 标定修正**：接受 --p50-us 外部锚点（来自
      profile_kernel.sh）替代 Event 标定。
-   msprof op **不含** kernel 内函数级拆解（8 份 CSV 均为 op 级）——函数级仍靠
+   msprof **不含** kernel 内函数级拆解（op_summary 均为 op 级）——函数级仍靠
    时间戳方案，两者互补。
 2. **ClassifyEvict 再削**（full 29K = 3 栅栏 ~11K + staging/两遍走查/散射
    ~18K）：候选 = 尾栅栏与后续 Op 的依赖重审（freeIdx 读者是 FreeRelease 而
