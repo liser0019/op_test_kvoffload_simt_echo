@@ -16,6 +16,15 @@
 //   维护以保持 golden 语义); 查询路径 (htd 直查表) 原样保留 —— v2 = SIMT 的
 //   维护序 + Echo 的直查表。
 //
+// [v2.1 单趟分类 2026-10-20] 重建序平局松弛 (owner 2026-10-20 批准): hit 段改
+//   旧位置序、alloc 段改分配序 (rawSlots j 序) —— 同年龄组内的排列与 LRU 语义
+//   无差别 (淘汰集合/hit-miss 判定/年龄分层全部不变):
+//     新 lru = [幸存者(保持旧序)] ++ [本步 hit 槽(按旧位置序)] ++ [新分配槽(按分配序)]
+//   淘汰集合与 v1/v2.0 恒等 (幸存者 pri 无平局且严格分层, 论证见 deep-dive §9.22)。
+//   结构: Step2 OpClassifyEvictRow 单趟分类 (融合旧 EvictScan 与旧 Rebuild 的
+//   位置域扫描; 三产出 freeIdx/K 段/H 段+rbBase; 每步每行必跑, fs=0 不再跳行);
+//   Step4 退化为 OpAllocAppendRow 尾段追加 (零栅栏零 staging 零扫描)。
+//
 // 纯 SIMT 范式 (对照 examples/03_simt_api gather_2d / grid_config):
 //   - 不 include kernel_operator.h (那是 SIMD 头树, 纯 SIMT 后端找不到 kernel_tpipe.h).
 //   - kernel 参数与设备指针都用裸指针 (float*/int32_t*), 不用 GM_ADDR / __gm__.
@@ -28,10 +37,10 @@
 //   线程 grid-stride 扫列. 每核读/写的都是自己负责的行 → 无跨核写后读.
 // ⚠ [栈上限 2026-10-19] 设备 VEC SIMT 每线程栈有硬上限 (errcode 354 "VEC SIMT
 //   stack overflow", 全核同 PC trap): Process 的全部内联代码共用一个栈帧, 帧大小
-//   = 所有内联函数溢出槽之和; 重型 Op (EvictScan/LruRebuild 等) 必须 noinline,
+//   = 所有内联函数溢出槽之和; 重型 Op (ClassifyEvict/AllocAppend 等) 必须 noinline,
 //   新增内联大函数前先想栈。v1 帧恰好在上限下, v2 +2 Op 即越界。
 // 同步: 步间用块内 asc_syncthreads (解决行内跨线程 RAW, 如 OpHitMiss 以 topkDim
-//   步长写 flags[row,slot]、OpEvictScanRow/OpLruRebuildRow 以 B+1 步长读写
+//   步长写 flags[row,slot]、OpClassifyEvictRow/OpAllocAppendRow 以 B+1 步长读写
 //   同行状态, 同地址被不同线程访问);
 //   asc_dcci_entire 刷本核 D-cache 防单核内写后读 stale. 行间零依赖故无需跨核栅栏.
 
@@ -85,8 +94,9 @@ __aicore__ inline int32_t PackedBlockScan(int32_t packedValue, int32_t* warpTota
 }
 
 // ---- UB 缓冲池 (定义见 echo_lru_tiling.h, host/device 共享) ----
-// [v2] 单大 __ubuf__ 数组分段作 scanScratch/flags/aAt/lru/hExcl/aExcl/freeIdx
-//   (见 EchoLruKernel::Init)。GM workspace 另有 flags[R][B+1] 分类位数组
+// [v2.1] 单大 __ubuf__ 数组分段作 scanScratch/flags/lru/freeIdx
+//   (见 EchoLruKernel::Init; v2.0 的 aAt/hExcl/aExcl 段随槽号域秩扫描删除)。
+//   GM workspace 另有 flags[R][B+1] 分类位数组
 //   + [ECHO_PERF_STEP] 分步周期区。
 
 // ===========================================================================
@@ -167,7 +177,7 @@ __attribute__((noinline)) __aicore__ void OpResetAvailFifo(
 }
 
 // ---- Step 0.5: invalidate speculative suffix ----
-// [v2] pri 写改为 flags 位 1 (被淘汰/移除标记): LruRebuild 的分类据此把
+// [v2] pri 写改为 flags 位 1 (spec 移除标记): ClassifyEvict 的分类据此把
 //   spec 驱逐槽从 lru 丢弃 (v1 写 pri=-1 的等价物)。spec 路径无基准覆盖
 //   (compare.py 的 spl 恒为 max_token), 语义按此维护。
 __attribute__((noinline)) __aicore__ void OpInvalidateSpecSuffix(
@@ -189,7 +199,7 @@ __attribute__((noinline)) __aicore__ void OpInvalidateSpecSuffix(
             wsCumsumGm[rowOff + slot] = spec ? 1 : 0;
             if (spec) {
                 dthGm[rowOff + slot] = I32_MAX;
-                flagsGm[rowOff + slot] = 2;   // [v2] bit1: LruRebuild 分类丢弃
+                flagsGm[rowOff + slot] = 2;   // [v2] bit1: ClassifyEvict 分类丢弃
                 int32_t tokSafe = tok < 0 ? 0 : (tok > (int32_t)(maxModelLenP1 - 1) ? (int32_t)(maxModelLenP1 - 1) : tok);
                 htdGm[htdRowOff + tokSafe] = I32_MAX;
             }
@@ -275,10 +285,10 @@ __attribute__((noinline)) __aicore__ void OpSpecAvailAdd(
 // [C1/C2 2026-10-13] 栅栏 2 次/行 → 末行省 1 次 (复用保护); t0 另在 warpScratch[64]
 //   写淘汰标志, 供 Process 整段跳过 fs 全 0 的淘汰流水线。
 // [v2 2026-10-19] hit 分支从写 pri[slot]=fifo (protect 时间戳) 改为写
-//   flags[row][slot] = 1 (bit0 hit 标记): LruRebuild 据此把 hit 槽挪到 lru 尾部
-//   (等效 v1 的 pri 抬新 —— EvictScan 跳过 bit0 槽 = v1 "hit 不可被本步淘汰")。
+//   flags[row][slot] = 1 (bit0 hit 标记): ClassifyEvict 据此把 hit 槽散射进
+//   lru 的 H 段 (等效 v1 的 pri 抬新 —— 分类时 hit 槽不可被本步淘汰)。
 //   distinct token → distinct slot, 线程间无写冲突; 纯 store (prologue 已清零,
-//   bit1 只写非 hit 槽 —— EvictScan 选中的必非 hit)。
+//   bit1 只写非 hit 槽 —— Step0.5 的 spec 移除先于本步)。
 __attribute__((noinline)) __aicore__ void OpHitMiss(
     uint32_t R, uint32_t topkDim, uint32_t effTopk, uint32_t maxModelLenP1,
     uint32_t B, uint32_t rowsPerCore, uint32_t tailRows,
@@ -309,8 +319,8 @@ __attribute__((noinline)) __aicore__ void OpHitMiss(
                 localMiss++;
             } else {
                 // [v2] hit 标记: flags bit0 (v1 protect 的等价物)。distinct token →
-                //   distinct slot, 线程间无写冲突; flags 写 → EvictScan/Rebuild 读
-                //   的 RAW 由 Step1 尾 SyncGrid (dcci) 保证。clamp 语义与原版一致。
+                //   distinct slot, 线程间无写冲突; flags 写 → ClassifyEvict staging
+                //   读的 RAW 由 Step1 尾 SyncGrid (dcci) 保证。clamp 语义与原版一致。
                 int32_t sp = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
                 flagsGm[flagsRowOff + sp] = 1;
             }
@@ -332,8 +342,11 @@ __attribute__((noinline)) __aicore__ void OpHitMiss(
             if (fs != 0) fsAny = 1;
         }
     }
-    // [C1] 淘汰流水线整段跳过标志: 全行 fs==0 时 Argtopk/FreeRelease/FreePush 对
-    //   状态零影响 (freeIdx 无读者 —— fs=0 时 OpAllocPop 恒走老栈路径), 见 Process。
+    // [C1] 淘汰流水线标志: 全行 fs==0 时 Step2 的 [needFree] 子段 (GM 回退
+    //   SyncGrid / FreeRelease / FreePush) 对状态零影响 (fs=0 行不发 freeIdx ——
+    //   OpAllocPop 恒走老栈路径, FreeRelease/FreePush 的 j<fs 循环体不执行)。
+    //   [v2.1] ClassifyEvict 本身每步必跑 (fs=0 行也要散射 K/H 段 + 写 rbBase),
+    //   不受此标志门控 —— flags bit0 的读者从"淘汰跳过"变为"分类散射"。
     //   槽位 64 与双缓冲 [0,64) 不冲突; 经 Step1 尾 SyncGrid 对全员可见。
     if (t == 0u) warpScratch[64] = fsAny;
 }
@@ -377,11 +390,12 @@ __attribute__((noinline)) __aicore__ void OpFifoAvailUpdate(
 }
 
 // ---- prologue (v2): flags 清零 ----
-// [v2 2026-10-19] flags 是 EvictScan/Rebuild 的分类输入 (bit0=本步 hit, bit1=
-//   本步被淘汰/spec 移除), 每次 invocation 必须从全零起 —— audit 用 I32_MAX
-//   污染 workspace, 残留位会被误判 hit/evicted。清零后的 SyncGrid (dcci) 同时
-//   排空写缓冲, 保证同核 WAW (清零写 → Step1 scatter 写同地址) 的顺序 ——
-//   写滞留线程 store buffer 而他人写已落地会反超覆盖 (fifo 事件同型教训)。
+// [v2] flags 是 ClassifyEvict 的分类输入 (bit0=本步 hit; bit1=spec 移除, 由
+//   Step0.5 写 —— [v2.1] 受害者不再标 bit1, 融合后无读者), 每次 invocation 必须
+//   从全零起 —— audit 用 I32_MAX 污染 workspace, 残留位会被误判 hit/移除。
+//   清零后的 SyncGrid (dcci) 同时排空写缓冲, 保证同核 WAW (清零写 → Step1
+//   scatter 写同地址) 的顺序 —— 写滞留线程 store buffer 而他人写已落地会反超
+//   覆盖 (fifo 事件同型教训)。
 __attribute__((noinline)) __aicore__ void OpZeroFlags(
     uint32_t R, uint32_t B, uint32_t rowsPerCore, uint32_t tailRows,
     int32_t* flagsGm) {
@@ -398,122 +412,82 @@ __attribute__((noinline)) __aicore__ void OpZeroFlags(
     }
 }
 
-// ---- Step 2 (v2): evict scan (淘汰扫描, 取代 v1 Argtopk 基数选择) ----
-// 淘汰 = 顺序扫 lru[row][0..occ), 跳过本步 hit (flags bit0; v1 protect 语义的
-//   等价物 —— hit 槽的 pri 已被抬到最新, 不可被本步淘汰), 取前 fsClamp 个非 hit
-//   槽写入 freeIdx (输出顺序 = 位置序 = (pri,slot) 字典序, 与 v1 emission 逐位
-//   一致)。O(occ) 平扫 (1 次 PackedBlockScan + 重扫) 取代 v1 的 7 栅栏多趟选择;
-//   每行栅栏 3: staging→扫描 1、scan 内部 1、尾 1 (freeIdx 写 → AllocPop 读 +
-//   flagsUb 行间复用)。
-// padding 边界 (仅 topk > B 的接口一般性触发): 非 hit 总数 < fsClamp 时按 v1
-//   语义补索引 [B+1, B+1+m)。
+// ---- Step 2 (v2.1): classify + evict (单趟分类, 融合旧 EvictScan 与旧 Rebuild
+//   的位置域扫描; 取代 v1 Argtopk 基数选择) ----
+// [v2.1 2026-10-20] 融合动机: 旧 v2 对同一条 lru 位置序链扫了两遍 —— EvictScan
+//   为取受害者 (计数扫描 + 发射扫描), Rebuild 的位置域相位又做一遍同型分类扫描
+//   (K/H 计数) 才散射; 两遍各自 staging flags、各带各的栅栏。两遍扫同一条链是
+//   Step 的顺序限制, 不是元数据限制 —— 本 Op 单趟完成, 三个产出:
+//     ① freeIdx: 前 victims=min(fsClamp,totalCand) 个候选 (位置序) + padding
+//        [B+1,..) + 尾零, 语义与旧 EvictScan 逐位一致 (victims 就是旧版取的
+//        "前 fsClamp 个非 hit 槽"; 候选=非 hit 且非 bit1);
+//     ② 新 lru 的 K 段 (幸存者, 保持旧序) 与 H 段 (本步 hit, 按旧位置序) 直接
+//        散射进 lruGm —— 旧 Rebuild 的槽号域相位 (hExcl/aExcl 秩扫描) 整体删除;
+//     ③ rbBase = totalK + totalH (t0 写 numHitsGm[row]), Step4 AllocAppend 的
+//        A 段基址。
+// [平局松弛 2026-10-20, owner 批准] H 段从 "hit 槽按槽号升序" (v1 (pri,slot)
+//   字典序的实现产物被固化进 golden) 改为 "hit 按旧位置序" —— 同年龄组内槽的
+//   先后在 LRU 语义上无差别 (淘汰集合、hit/miss 判定、年龄分层全部不变), 槽号
+//   域扫描因此可删; A 段的分配序松弛见 OpAllocAppendRow。
+// [occ==0 快路径] cold 红利: 旧 Rebuild 31.8K 几乎全是空位置域上的槽号域扫描 +
+//   staging + 栅栏白付。occ==0 ⟹ avail≥B ⟹ nm≤topk≤B ⟹ fs=0 (管线不变量),
+//   快路径仅覆盖 occ==0 && fsClamp==0 (零栅栏零 staging, t0 只落 rbBase=0);
+//   fsClamp>0 的 occ==0 组合 (管线内不可达, 仅防脏状态) 不走快路径 —— 快路径
+//   无栅栏, 而 freeIdx (UB) 写 → 后续 Op 读依赖本函数 B3 尾栅栏排序, 故落入
+//   正常路径 (空扫描循环 + padding + 尾零 + 全套栅栏), 逐位复刻旧 EvictScan
+//   的同边界行为。
+// 与旧 EvictScan 的两处语义差异 (对基准无影响):
+//   ① 不写受害者 flags bit1 —— 融合后无读者 (旧读者是 Rebuild 的分类; spec 的
+//     bit1 由 Step0.5 写, 本分类器照读照跳);
+//   ② 计数不含 bit1 条目 (旧 EvictScan 把 bit1 计为候选) —— 非 spec 下 [0,occ)
+//     内无 bit1 条目, 两者恒等; spec 下 bit1 槽已被释放, 不当候选反而正确。
+// 每行栅栏 3: staging→扫描 1、scan 内部 1、尾 1 (freeIdx 写 → OpAllocPop 读 +
+//   flagsUb/lruUb 行间复用; 末行也不可省 —— freeIdx 有跨 Op 读者, 与旧 Rebuild
+//   B4 的"行间复用保护"性质不同)。
+// padding 边界 (仅 topk > B 的接口一般性触发): 候选总数 < fsClamp 时按 v1 语义
+//   补索引 [B+1, B+1+m)。freeIdx 的全部写路径 (受害者/padding/尾零) 均由
+//   fsClamp>0 门控: fs=0 行不发 freeIdx (AllocPop 恒走老栈)。
 // ⚠ 切片必须连续 ([P1] 连续切片不变量): 扫描给出的是切片序前缀, grid-stride
 //   会得到"线程主序", 淘汰输出顺序就错了。
 // [noinline 2026-10-19] 设备 errcode 354 "VEC SIMT stack overflow": Process 若把
 //   全部 Op 内联为单一巨型栈帧 (帧 = 所有内联函数溢出槽之和, kernel 入口一次性
-//   分配, 与执行路径无关), 会越过设备每线程栈硬上限 —— v2 普通构建擦线通过后,
-//   打点构建 (ECHO_PERF_STEP 多几行代码) 再次越界即为实证。规则: **所有 Op 一律
-//   noinline** (帧峰值 = 单 Op 最大值, 余量充足); warp 协作辅助 PackedBlockScan
-//   保持 inline (并入宿主帧, 宿主帧已很小)。
-__attribute__((noinline)) __aicore__ void OpEvictScanRow(
+//   分配, 与执行路径无关), 会越过设备每线程栈硬上限 —— 规则: **所有 Op 一律
+//   noinline** (帧峰值 = 单 Op 最大值); warp 协作辅助 PackedBlockScan 保持
+//   inline (并入宿主帧, 宿主帧已很小)。详见 §9.18 与 stack-overflow 文档。
+__attribute__((noinline)) __aicore__ void OpClassifyEvictRow(
     uint32_t B, uint32_t topkDim, uint32_t fsClamp, uint32_t occ,
     int32_t* lruGm, uint32_t lruRowOff,
     int32_t* flagsGm, uint32_t flagsRowOff,
     int32_t* freeIdxOut,          // 本行切片基址 ([P-C]: UB 本地行 / GM 绝对行, 调用方算好)
-    int32_t* flagsUb, int32_t* scanScratch) {
+    int32_t* rbBaseOut,           // = &numHitsGm_[row] (单元素: t0 写 totalK+totalH)
+    int32_t* flagsUb, int32_t* lruUb, int32_t* scanScratch) {
     uint32_t t = threadIdx.x;
     uint32_t warpCount = blockDim.x >> 5;
     uint32_t cols = B + 1u;
-    // phase A: flags GM → UB staging (供两遍扫描的随机读; 位置序读 lruGm 保持 GM 连续读)
+    // ---- occ==0 且 fsClamp==0 快路径 (cold 的常态: occ=0 ⟹ avail≥B ⟹ fs=0
+    //      由不变量保证): 无 freeIdx 写、无扫描对象, 仅 t0 落 rbBase=0,
+    //      零栅栏直接返回。----
+    // fsClamp>0 的 occ==0 组合 (管线内不可达, 仅防脏状态) **不走快路径**:
+    //   快路径无栅栏, 而 freeIdx (UB) 写 → 后续 Op 读的排序依赖本函数 B3
+    //   尾栅栏 —— 走正常路径 (occ=0 时扫描循环为空 + padding + 尾零 + 全套
+    //   栅栏) 恰好逐位复刻旧 EvictScan 的同边界行为, 无 UB RAW 隐患。
+    if (occ == 0u && fsClamp == 0u) {
+        if (t == 0u) rbBaseOut[0] = 0;   // occ=0 ⟹ totalK=totalH=0
+        return;
+    }
+    // ---- phase A: staging (纯写): flags GM→UB [0,B+1); lru GM→UB [0,occ) ----
+    // lru staging (吸收旧 Rebuild 的同名相位): phase C 散射写 lruGm 的目标位置可
+    //   任意 (幸存者秩右移 / hit 挪 H 段), 同数组跨线程读写竞争 —— 必须先全体读入
+    //   UB 再写回 GM (栅栏保证全部 GM 读完成先于任何 GM 写发射)。
     for (uint32_t s = t; s < cols; s += blockDim.x) {
         flagsUb[s] = flagsGm[flagsRowOff + s];
-    }
-    asc_syncthreads();            // staging 写 → 扫描读 (跨线程 RAW, UB 块内栅栏即可)
-    // phase B: 切片非 hit 计数 → PackedBlockScan 得切片基址 (单字段, 和 ≤ occ ≤ 4096 < 2^16)
-    uint32_t chunk = (occ + blockDim.x - 1u) / blockDim.x;
-    uint32_t lo = t * chunk;
-    uint32_t hi = (lo >= occ || lo + chunk > occ) ? occ : (lo + chunk);
-    int32_t cnt = 0;
-    for (uint32_t p = lo; p < hi; ++p) {
-        int32_t slot = lruGm[lruRowOff + p];
-        int32_t sv = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
-        if ((flagsUb[sv] & 1) == 0) ++cnt;
-    }
-    int32_t base = PackedBlockScan(cnt, scanScratch);
-    int32_t grand = 0;
-    for (uint32_t w = 0; w < warpCount; ++w) grand += scanScratch[w];
-    // phase C: 重扫发射被淘汰槽 (位置序) + flags bit1
-    int32_t run = base;
-    for (uint32_t p = lo; p < hi; ++p) {
-        int32_t slot = lruGm[lruRowOff + p];
-        int32_t sv = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
-        if ((flagsUb[sv] & 1) == 0) {
-            if (run < (int32_t)fsClamp) {
-                freeIdxOut[run] = slot;
-                // bit1 纯 store: 该槽必非 hit (bit0==0) 且为该槽本步唯一写, 无 RMW 必要;
-                //   GM 写 → Rebuild staging 读的可见性由 Step3 尾 SyncGrid (dcci) 保证。
-                flagsGm[flagsRowOff + sv] = 2;
-            }
-            ++run;
-        }
-    }
-    // padding 补齐 (v1 语义: fsClamp 超出非 hit 总数时按序补 [B+1, ...) 索引)
-    if (grand < (int32_t)fsClamp) {
-        uint32_t m = fsClamp - (uint32_t)grand;
-        for (uint32_t k = t; k < m; k += blockDim.x) {
-            freeIdxOut[grand + k] = (int32_t)(B + 1u + k);
-        }
-    }
-    // 尾部补零 [fsClamp, topkDim) (v1 逐位一致约定)
-    for (uint32_t i = fsClamp + t; i < topkDim; i += blockDim.x) {
-        freeIdxOut[i] = 0;
-    }
-    asc_syncthreads();            // 尾栅栏: freeIdx (UB) 写 → OpAllocPop 读; flagsUb 下一行 staging 复用
-}
-
-// ---- Step 4 (v2): lru rebuild (顺序数组重建, 取代 v1 OpAllocPriority) ----
-// 每步必执行 (fs=0 时 hit 也要挪尾 —— "每种情况都需要维护序")。产出:
-//   新 lru = [幸存者(保持旧序)] ++ [本步 hit 槽按槽号升序] ++ [新分配槽按槽号升序],
-//   与 v1 步末 (pri, slot) 稳定排序逐位等价 (幸存者旧 pri < f < f+1 严格分层,
-//   同层平局按槽号)。分配列表来自 rawSlots (AllocPop 输出, 语义/顺序与 v1 全同)。
-// 每行栅栏 5: B1 staging→扫描; B2 位置域 classify 扫描内部; B3 槽域 hit|alloc
-//   联合扫描内部 (scan2 用 scanScratch+32 独立缓冲, [Scan-v2] 链式扫描不相交
-//   缓冲规则 —— scan1 的 grand Σ 读 [0,32) 与 scan2 的写 [32,64) 无冲突);
-//   B3.5 phase C 前缀存储 → phase D 散射读 (跨线程, 见函数内注释);
-//   B4 尾 (UB 五段行间复用保护)。
-// lru staging 进 UB 是 phase D 散射写 lruGm 的前置 (H 目标位置可 < p, 同数组
-//   跨线程读写竞争, 必须先全体读入 UB 再写回 GM)。
-__attribute__((noinline)) __aicore__ void OpLruRebuildRow(
-    uint32_t B, uint32_t topkDim, uint32_t occ, uint32_t nm,
-    int32_t* lruGm, uint32_t lruRowOff,
-    int32_t* flagsGm, uint32_t flagsRowOff,
-    int32_t* rawSlotsGm, uint32_t rawRowOff,
-    int32_t* flagsUb, int32_t* aAtUb, int32_t* lruUb,
-    int32_t* hExclUb, int32_t* aExclUb, int32_t* scanScratch,
-    uint32_t specOn, uint32_t lastRow) {
-    uint32_t t = threadIdx.x;
-    uint32_t warpCount = blockDim.x >> 5;
-    uint32_t cols = B + 1u;
-    // ---- phase A: staging + 清零 (纯写): flags GM→UB; lru GM→UB; aAt 清零 ----
-    // [v2 opt-1] nm=0 快路径: aAt 全链路 (清零/散射/槽域扫描的高字段/存储) 跳过
-    //   —— warm_all_hit 等零分配步省 ~4097 次 UB 写 + 2×4097 次读写; aExcl 届时
-    //   无读者 (A-append 的 j<nm 不执行), 不写不影响语义。
-    const bool hasAlloc = (nm != 0u);
-    for (uint32_t s = t; s < cols; s += blockDim.x) {
-        flagsUb[s] = flagsGm[flagsRowOff + s];
-        if (hasAlloc) aAtUb[s] = 0;
     }
     for (uint32_t p = t; p < occ; p += blockDim.x) {
         lruUb[p] = lruGm[lruRowOff + p];
     }
-    asc_syncthreads();                       // B1
-    // ---- phase B: aAt 散射 (rawSlots, Step3 尾 SyncGrid 后已可见) + 位置域分类扫描。
-    //      打包 (isK | isH<<16): 各切片和 ≤ occ ≤ 4096 < 2^16, 字段无跨位进位。 ----
-    for (uint32_t j = t; j < nm; j += blockDim.x) {
-        int32_t a = rawSlotsGm[rawRowOff + j];
-        int32_t ac = a < 0 ? 0 : (a > (int32_t)B ? (int32_t)B : a);
-        aAtUb[ac] = 1;
-    }
+    asc_syncthreads();            // B1: staging 写 → 扫描读 (跨线程 RAW, UB 块内栅栏即可)
+    // ---- phase B: 计数扫。打包 (kCnt | hCnt<<16): 各切片和 ≤ occ ≤ 4096 < 2^16,
+    //      字段无跨位进位。bit1 条目不计 (非候选非 hit, 见头注释 ②)。----
     uint32_t chunk = (occ + blockDim.x - 1u) / blockDim.x;
     uint32_t lo = t * chunk;
     uint32_t hi = (lo >= occ || lo + chunk > occ) ? occ : (lo + chunk);
@@ -523,146 +497,98 @@ __attribute__((noinline)) __aicore__ void OpLruRebuildRow(
         int32_t sv = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
         int32_t v = flagsUb[sv];
         if (v & 1) ++hCnt;
-        else if ((v & 2) == 0) ++kCnt;       // bit1 (淘汰/spec 移除) → 丢弃不计
+        else if ((v & 2) == 0) ++kCnt;
     }
-#ifdef ECHO_V2_RB_SERIAL
-    // [debug] 串行替代 PackedBlockScan (判别 codegen 嫌疑): 切片计数写缓冲 → 栅栏 →
-    //   t0 串行 exclusive 前缀 + grand → 栅栏 → 读回。语义与 PackedBlockScan 逐位一致。
-    scanScratch[t] = kCnt | (hCnt << 16);
-    asc_syncthreads();
-    if (t == 0u) {
-        int32_t run = 0;
-        for (uint32_t i = 0; i < blockDim.x; ++i) {
-            int32_t v = scanScratch[i];
-            scanScratch[i] = run;
-            run += v;
-        }
-        scanScratch[blockDim.x] = run;   // grand (打包)
-    }
-    asc_syncthreads();
-    int32_t excl = scanScratch[t];
-    int32_t grandP = scanScratch[blockDim.x];
-#else
-    int32_t excl = PackedBlockScan(kCnt | (hCnt << 16), scanScratch);   // B2
-    int32_t grandP = 0;
-    for (uint32_t w = 0; w < warpCount; ++w) grandP += scanScratch[w];
-#endif
-    int32_t baseK = excl & 0xFFFF;
-    uint32_t totalK = (uint32_t)grandP & 0xFFFFu;
-    uint32_t totalH = (uint32_t)grandP >> 16;
-    // ---- phase C: 槽域联合扫描 (hitBit | allocBit<<16) 产出 hExcl[s]/aExcl[s]
-    //      (exclusive 前缀: 槽 s 之前的 hit/alloc 数) —— H/A 段内槽号升序的秩。 ----
-    uint32_t slotChunk = (cols + blockDim.x - 1u) / blockDim.x;
-    uint32_t slo = t * slotChunk;
-    uint32_t shi = (slo >= cols || slo + slotChunk > cols) ? cols : (slo + slotChunk);
-    int32_t haCnt = 0;
-    for (uint32_t s = slo; s < shi; ++s) {
-        // ⚠ 计数必须用加法: 切片可含多个 hit/alloc (B=4096/blockDim=128 时 33 槽/线程),
-        //   首版误用 |= (塌缩成至多 1) → hExcl/aExcl 秩错 → H/A 段错位
-        //   (CPU 回归 group2 B=4096 用例抓获, 2026-10-19)。
-        if (flagsUb[s] & 1) haCnt += 1;
-        if (hasAlloc && aAtUb[s]) haCnt += (1 << 16);
-    }
-#ifdef ECHO_V2_RB_SERIAL
-    int32_t* buf2s = scanScratch + 1024;   // 串行模式独立半区 (rbScan 段已扩容)
-    buf2s[t] = haCnt;
-    asc_syncthreads();
-    if (t == 0u) {
-        int32_t run = 0;
-        for (uint32_t i = 0; i < blockDim.x; ++i) {
-            int32_t v = buf2s[i];
-            buf2s[i] = run;
-            run += v;
-        }
-        buf2s[blockDim.x] = run;
-    }
-    asc_syncthreads();
-    int32_t excl2 = buf2s[t];
-#else
-    int32_t excl2 = PackedBlockScan(haCnt, scanScratch + 32);           // B3
-#endif
-    int32_t runH = excl2 & 0xFFFF;
-    int32_t runA = excl2 >> 16;
-    for (uint32_t s = slo; s < shi; ++s) {
-        hExclUb[s] = runH;
-        if (hasAlloc) aExclUb[s] = runA;
-        if (flagsUb[s] & 1) ++runH;
-        if (hasAlloc && aAtUb[s]) ++runA;
-    }
-    // B3.5: phase C 的 hExcl/aExcl 存储发生在 B3 (scan2 内部栅栏) 之后, 而 phase D
-    //   要读任意槽的前缀 (写者与读者跨线程) —— 没有这道栅栏会读到未写的哨兵
-    //   (-777 → 转 uint32 野索引), CPU 回归实测 SEGV (2026-10-19, checks 组 2 抓获)。
-    //   对照: OpMissCumsum 的链式扫描无此问题, 其跨线程读 (warpTotals Σ) 的数据
-    //   在 PackedBlockScan 内部栅栏前已写好。
-    asc_syncthreads();
-    // ---- phase D: 散射写回 GM lru。K: 切片基址+片内运行前缀 (位置序); H: totalK +
-    //      hExcl[slot] (槽号升序); A: totalK+totalH + aExcl[aslot]; 尾 [occNew, B] 清零。 ----
-#if defined(ECHO_V2_RB_NOD)
-    // [debug] RB_NOD: 跳过 phase D 全部 GM 写 (栅栏配平保留)。
-    (void)baseK;
-#elif defined(ECHO_V2_RB_ZEROONLY)
-    // [debug] RB_ZEROONLY: phase D 换全行清零 (与 OpResetDthLru 的 lru 写同型 ——
-    //   该模式已在 Step0 被设备验证安全; 用于判别触发源是 "写容量/模式" 还是
-    //   "数据依赖散射")。
-    (void)baseK;
-    for (uint32_t p = t; p <= B; p += blockDim.x) {
-        lruGm[lruRowOff + p] = 0;
-    }
-#elif defined(ECHO_V2_RB_ONEONLY)
-    // [debug] RB_ONEONLY: 全行写常量 1 (升序非零) —— 判别触发器是 "零值"
-    //   (memset/MTE fill 惯用语) 还是 "升序模式" 本身。golden 必挂, 只看 trap。
-    (void)baseK;
-    for (uint32_t p = t; p <= B; p += blockDim.x) {
-        lruGm[lruRowOff + p] = 1;
-    }
-#else
-    int32_t runK = baseK;
+    int32_t excl = PackedBlockScan(kCnt | (hCnt << 16), scanScratch);   // B2 (栅栏在 scan 内部)
+    int32_t grand = 0;
+    for (uint32_t w = 0; w < warpCount; ++w) grand += scanScratch[w];
+    int32_t baseK = excl & 0xFFFF;          // 候选 exclusive 前缀 (本切片之前)
+    int32_t baseH = excl >> 16;             // hit exclusive 前缀 (本切片之前)
+    uint32_t totalCand = (uint32_t)grand & 0xFFFFu;
+    uint32_t totalH = (uint32_t)grand >> 16;
+    uint32_t victims = (fsClamp < totalCand) ? fsClamp : totalCand;
+    uint32_t totalK = totalCand - victims;  // 幸存者数 = 候选扣除受害者
+    uint32_t rbBase = totalK + totalH;      // A 段基址 (Step4 AllocAppend 读)
+    // ---- phase C: 发射扫 (重扫 [lo,hi), 读 lruUb/flagsUb, 写 GM lru + UB/GM freeIdx) ----
+    // 候选: 秩 < fsClamp → 受害者进 freeIdx (位置序); 否则 → 幸存者散射
+    //   lru[runCand − fsClamp] (候选全局序 − fsClamp = 幸存者秩, 旧序保持)。
+    //   totalCand < fsClamp 时 runCand 达不到 fsClamp, 幸存者分支天然不触发,
+    //   勿加特判 (此时 victims=totalCand, totalK=0, 亦自洽)。
+    // hit: 基址 totalK + hit 全局序 (baseH 起步) —— H 段 = 旧位置序 (平局松弛)。
+    int32_t runCand = baseK;
+    int32_t runH = baseH;
     for (uint32_t p = lo; p < hi; ++p) {
         int32_t slot = lruUb[p];
         int32_t sv = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
         int32_t v = flagsUb[sv];
         if (v & 1) {
-            lruGm[lruRowOff + totalK + (uint32_t)hExclUb[sv]] = slot;
+            lruGm[lruRowOff + totalK + (uint32_t)runH] = slot;
+            ++runH;
         } else if (v & 2) {
-            // 被淘汰 / spec 移除: 移出顺序 (v1 语义中其 pri 已无效)
+            // spec 移除 (Step0.5 bit1): 移出顺序 (v1 语义中其 pri 已无效)
         } else {
-            lruGm[lruRowOff + (uint32_t)runK] = slot;
-            ++runK;
+            if (runCand < (int32_t)fsClamp) {
+                freeIdxOut[runCand] = slot;   // 受害者 (位置序); fsClamp=0 时恒假 → 零写
+            } else {
+                lruGm[lruRowOff + (uint32_t)(runCand - (int32_t)fsClamp)] = slot;   // 幸存者
+            }
+            ++runCand;
         }
     }
-    for (uint32_t j = t; j < nm; j += blockDim.x) {
-        int32_t a = rawSlotsGm[rawRowOff + j];
-        int32_t ac = a < 0 ? 0 : (a > (int32_t)B ? (int32_t)B : a);
-        lruGm[lruRowOff + totalK + totalH + (uint32_t)aExclUb[ac]] = ac;
-    }
-    // [尾零删除 2026-10-19] 非 spec 路径的尾零循环数学上冗余, 已删除:
-    //   ① K/H/A 散射目标恒 < occNew (K < totalK; H < totalK+totalH; A < occNew);
-    //   ② 尾区 [occNew, B] ⊆ [occOld, B] (fs>0 ⟹ nm>availOld ⟹ availNew=0 ⟹
-    //      occNew=B 尾空; fs=0 ⟹ occNew=occOld+nm);
-    //   ③ [occOld, B] 调用前已为零 (restore 的 initial 尾零 / reset 的全行清零 /
-    //      上一 invocation 的尾零 —— 不变量归纳; host 侧需保证首次分配后 lru 清零,
-    //      compare.py 的 make_echo_initial 已满足)。
-    //   删除同时消除设备 trap 触发源: "升序可合并 GM 写循环"(值无关、-O0 亦然)
-    //   在重 UB 写之后触发 507035 (§9.18 调试: NOTAIL clean / ZEROONLY+ONEONLY
-    //   trap / ZLOAD trap / 散射 A-append clean)。
-    //   spec 路径例外: avail 动态增加 → [occNew, occOld) 可能残留旧序值 → 保留
-    //   尾零 (spec 无基准覆盖, 语义按此维护; 若上板触发同类 trap 需另行处理)。
-    if (specOn != 0u) {
-        uint32_t occNew = totalK + totalH + nm;
-        for (uint32_t p = occNew + t; p <= B; p += blockDim.x) {
-            lruGm[lruRowOff + p] = 0;
+    if (t == 0u) rbBaseOut[0] = (int32_t)rbBase;
+    // padding 补齐 (v1 语义: fsClamp 超出候选总数时按序补 [B+1, ...) 索引;
+    //   fsClamp>0 门控, 理由见头注释)
+    if (fsClamp != 0u && totalCand < fsClamp) {
+        uint32_t m = fsClamp - totalCand;
+        for (uint32_t k = t; k < m; k += blockDim.x) {
+            freeIdxOut[totalCand + k] = (int32_t)(B + 1u + k);
         }
     }
-#endif
-    // [v2 opt-2] B4 (UB 段行间复用保护) 仅非末行需要: 末行之后本 invocation 无
-    //   这些段的读者 (Step5 的 MissCumsum 用 scanScratch [0,128), 不同段;
-    //   lru 写 → 下一 invocation 由 kernel 边界保证)。lastRow 为块一致参数, 无发散。
-    if (lastRow == 0u) {
-        asc_syncthreads();                   // B4
+    // 尾部补零 [fsClamp, topkDim) (v1 逐位一致约定; fsClamp>0 门控, 同上)
+    if (fsClamp != 0u) {
+        for (uint32_t i = fsClamp + t; i < topkDim; i += blockDim.x) {
+            freeIdxOut[i] = 0;
+        }
     }
+    asc_syncthreads();            // B3 (尾栅栏): freeIdx (UB) 写 → OpAllocPop 读;
+                                   //   flagsUb/lruUb 下一行 staging 复用 (末行也不可省)
 }
 
-
+// ---- Step 4 (v2.1): alloc append (尾段追加, 退化自旧 Rebuild) ----
+// [v2.1 2026-10-20] 旧 OpLruRebuildRow 的位置域分类/K-H 散射已上移 Step2
+//   (ClassifyEvict 单趟融合), 本 Op 只剩最后一段: 把分配槽 (rawSlots = OpAllocPop
+//   输出) 按**分配序** (rawSlots 的 j 序 —— 平局松弛, 取代旧版的槽号升序) 追加到
+//   lru[rbBase, rbBase+nm)。零栅栏、零 staging、零扫描:
+//   - WAW: A 段 [base, base+nm) 与 Step2 的 K/H 段 [0, base) 区间不重叠
+//     (base = rbBase = totalK+totalH 恰是 K/H 段写满的长度);
+//   - 可见性: rawSlots 由 Step3 写、rbBase 由 Step2 的 t0 写 numHitsGm[row],
+//     均经 Step3 尾 SyncGrid (dcci) 对全员可见 —— 本 Op 内无需任何栅栏
+//     (rbBase 的跨线程可见性全靠 Step3 尾栅栏, 勿在 Op 内补);
+//   - Step2→Step4 之间 lruGm 无读者 (FreeRelease/Push 只碰 freeIdx/free 栈/
+//     dth/htd, AllocPop 只碰 freeIdx/free/rawSlots)。
+// [非 spec 尾零数学冗余, 沿用 v2 论证] A 段目标恒 < occNew; 尾区 [occNew, B] ⊆
+//   旧零尾 [occOld, B] (fs>0 ⟹ nm>availOld ⟹ availNew=0 ⟹ occNew=B 尾空;
+//   fs=0 ⟹ occNew=occOld+nm) —— 调用前 [occOld,B] 已为零 (restore 的 initial
+//   尾零 / reset 的全行清零 / 上一 invocation 不变量归纳)。spec 路径例外:
+//   avail 动态增加 → [occNew, occOld) 可能残留旧值 → 保留尾零 (spec 无基准
+//   覆盖, 语义按此维护)。
+__attribute__((noinline)) __aicore__ void OpAllocAppendRow(
+    uint32_t B, uint32_t nm,
+    int32_t* lruGm, uint32_t lruRowOff,
+    int32_t* rawSlotsGm, uint32_t rawRowOff,
+    int32_t* rbBaseGm, uint32_t row,       // rbBaseGm = numHitsGm_, 读 rbBaseGm[row]
+    uint32_t specOn) {
+    uint32_t base = (uint32_t)rbBaseGm[row];   // t0 Step2 写, Step3 尾 SyncGrid(dcci) 已保证可见
+    for (uint32_t j = threadIdx.x; j < nm; j += blockDim.x) {
+        int32_t a = rawSlotsGm[rawRowOff + j];
+        int32_t ac = a < 0 ? 0 : (a > (int32_t)B ? (int32_t)B : a);   // padding 索引防御性钳位, 行为对齐旧 Rebuild
+        lruGm[lruRowOff + base + j] = ac;
+    }
+    if (specOn != 0u) {   // spec 尾零: avail 动态增 → [occNew, B] 可能残留旧值 (语义同旧)
+        uint32_t occNew = base + nm;
+        for (uint32_t p = occNew + threadIdx.x; p <= B; p += blockDim.x) lruGm[lruRowOff + p] = 0;
+    }
+}
 
 __attribute__((noinline)) __aicore__ void OpFreeRelease(
     uint32_t R, uint32_t topkDim, uint32_t B, uint32_t maxModelLenP1,
@@ -685,7 +611,8 @@ __attribute__((noinline)) __aicore__ void OpFreeRelease(
             int32_t s = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
             uint32_t off = dthRowOff + s;
             int32_t tok = dthGm[off];
-            // [v2] pri=-1 写已删 (顺序维护移交 OpLruRebuild 的 bit1 丢弃路径)
+            // [v2.1] pri=-1 写已删 (v2.0 交给 Rebuild bit1 丢弃; 融合后受害者在
+            //   ClassifyEvict 的幸存者散射中天然不出现, 连 bit1 标记也不再需要)
             dthGm[off] = I32_MAX;
             if (tok != I32_MAX) {
                 int32_t tokSafe = tok < 0 ? 0 : (tok > (int32_t)(maxModelLenP1 - 1) ? (int32_t)(maxModelLenP1 - 1) : tok);
@@ -766,7 +693,8 @@ __attribute__((noinline)) __aicore__ void OpAllocPop(
 
 // ---- Step 4: alloc priority ----
 // [v2 2026-10-19] OpAllocPriority 已删除: v1 写 pri[aslot]=fifo+1 的等价物是
-//   OpLruRebuild 的 A 段追加 (新分配槽按槽号升序接到 lru 尾部)。
+//   尾段追加 —— [v2.1] 由 OpAllocAppendRow 承接 (新分配槽按分配序接到 lru 尾部,
+//   槽号升序已随平局松弛删除, 见该函数头注释)。
 
 // ---- Step 5: set_update ----
 // [P3 2026-10-13] miss 前缀和改两级 warp 扫描 (对照基线 BlockExclusiveScan), 替代
@@ -1040,13 +968,14 @@ public:
         uint32_t o = 0;
         wsCumsumGm_   = ws + o; o += R * (B + 1);       // spec 路径前缀和暂存
         pushCountGm_  = ws + o; o += R;                 // spec 路径释放计数
-        numHitsGm_    = ws + o; o += R;                 // [P0] 已无读写, 槽位保留防布局漂移
+        numHitsGm_    = ws + o; o += R;                 // [v2.1] 改作 rbBase: ClassifyEvict t0 写 totalK+totalH/行,
+                                                         //   AllocAppend 全员读 (Step3 尾 SyncGrid dcci 可见)。布局不漂移。
         numMissesGm_  = ws + o; o += R;
         freeIdxGm_    = ws + o; o += R * topkDim;       // row stride = topkDim ([P-C] GM 回退落点)
         freeSizeGm_   = ws + o; o += R;
         rawSlotsGm_   = ws + o; o += R * topkDim;       // row stride = topkDim
         wsMissRankGm_ = ws + o; o += R * topkDim;
-        flagsGm_      = ws + o; o += R * (B + 1);       // [v2] 分类位: bit0=hit, bit1=淘汰/spec 移除
+        flagsGm_      = ws + o; o += R * (B + 1);       // [v2] 分类位: bit0=hit; bit1=spec 移除 ([v2.1] 受害者不再标记)
 
         // GM workspace 尾部: [ECHO_PERF_STEP] 每核分步周期 [bn*ECHO_PERF_NUM_STEPS]。
         //   与 host 侧 EchoWorkspaceElements 公式逐项一致 (v1 的 argtopk 诊断 dump 区已随基数选择删除)。
@@ -1060,35 +989,35 @@ public:
 #endif
         perfStepIdx_ = 0u;
 
-        // [UB 布局 v2] 单大 __ubuf__ 数组分段 (probe_ub_size 实测多 __ubuf__ 数组会
-        //   别名互覆, 单大数组 32768 元素 PASS):
+        // [UB 布局 v2.1] 单大 __ubuf__ 数组分段 (probe_ub_size 实测多 __ubuf__ 数组会
+        //   别名互覆, 单大数组 32768 元素 PASS)。v2.0 的 aAt/hExcl/aExcl 三段随
+        //   槽号域秩扫描删除 (ClassifyEvict 平局松弛, §9.22):
         //   [0, 128)          scanScratch —— 分时复用: Step1 warp 归约+C1 槽 64
-        //                      → Step2 EvictScan 扫描 → Step4 Rebuild scan1[0,32)+scan2[32,64)
-        //                      → Step5 MissCumsum 扫描缓冲 [0,128) (各生命周期由其间
-        //                      SyncGrid/行内尾栅栏隔开, 详见各 Op 注释);
-        //   [128, +B+1)       flagsUb  (EvictScan/Rebuild 的 flags staging);
-        //   +B+1              aAtUb    (Rebuild 分配指示, 槽域);
-        //   +B+1              lruUb    (Rebuild 的旧序 staging, 防 lruGm 同数组读写竞争);
-        //   +B+1              hExclUb  (槽域 hit exclusive 前缀);
-        //   +B+1              aExclUb  (槽域 alloc exclusive 前缀);
-        //   基准形态合计 128 + 5*4097 = 20613 ≤ ARGTOPK_UB_ELEMS=32768 (余 12155)。
+        //                      → Step5 MissCumsum 扫描缓冲 [0,128) (v1 已验证序列,
+        //                      两处生命周期由 Step1 尾 SyncGrid 隔开);
+        //   +B+1 (256 对齐)   flagsUb  (ClassifyEvict 的 flags staging);
+        //   +B+1 (256 对齐)   lruUb    (ClassifyEvict 的旧序 staging, 防 lruGm
+        //                      同数组跨线程读写竞争);
+        //   freeIdx (不额外对齐, 同旧 [P-C]; 容纳 rowsPerCore*topkDim);
+        //   rbScan (256 对齐, freeIdx 之后) —— ClassifyEvict 的 PackedBlockScan
+        //   warpTotals 缓冲 (每行一次扫描, 行间隔着尾栅栏+staging 栅栏, 复用安全,
+        //   同旧 EvictScan)。
+        //   逐段实算基准形态峰值 (B=4096 ⟹ B+1=4097; rowsPerCore=1, topkDim=2048
+        //   ⟹ freeIdx=2048; rbScan 段容量 2*ECHO_LRU_THREAD_NUM+64=2112):
+        //     scanScratch [0,128) → flags@256 占 [256,4353) → lru@4608 占
+        //     [4608,8705) → freeIdx@8705 占 [8705,10753) → rbScan@11008 占
+        //     [11008,13120) ⟹ 峰值 13120 ≤ ARGTOPK_UB_ELEMS=32768 (余 19648;
+        //     v2.0 同径实算 26176, 删三段 B+1 及其 256 对齐垫零共省 13056)。
         scanScratchUb_ = ubPool;
         // [对齐 2026-10-19] 每段基址向上取整到 256 元素 (1KB) 边界: 对齐 v1 已验证
         //   的 UB 布局形态 (v1 全部分段偏移均为 256 元素倍数, 内部子缓冲 128B 对齐);
         //   v2 首版奇数偏移 (4225/8322/..., 仅 4B 对齐) 是 cold_reset 上板 trap
-        //   (507035) 的头号嫌疑 —— CPU mock 无法覆盖硬件对齐行为。基准形态峰值
-        //   22016 + 2048 = 24064 ≤ 32768。
+        //   (507035) 的头号嫌疑 —— CPU mock 无法覆盖硬件对齐行为。
         uint32_t uo = 128u;
         uo = (uo + 255u) & ~255u;
         flagsUb_  = ubPool + uo; uo += B + 1u;
         uo = (uo + 255u) & ~255u;
-        aAtUb_    = ubPool + uo; uo += B + 1u;
-        uo = (uo + 255u) & ~255u;
         lruUb_    = ubPool + uo; uo += B + 1u;
-        uo = (uo + 255u) & ~255u;
-        hExclUb_  = ubPool + uo; uo += B + 1u;
-        uo = (uo + 255u) & ~255u;
-        aExclUb_  = ubPool + uo; uo += B + 1u;
 
         // [P-C] freeIdx 迁 UB (语义沿用 v1): 仅本 kernel 内读者, 容纳 rowsPerCore*topkDim;
         //   放得下走 UB, 放不下 (大 batch 形态) 回退 GM。
@@ -1100,14 +1029,16 @@ public:
             freeIdxPtr_ = freeIdxUb_;
             freeIdxInUb_ = true;
         }
-        // [scan 分离 2026-10-19] Step2/Step4 的扫描缓冲独立成段 (freeIdx 之后, 256 对齐):
-        //   不再与 scanScratch [0,128) 分时复用。v1 里 [0,128) 的写者序列是
-        //   OpHitMiss warpScratch → MissCumsum (已验证); v2 首版让 rebuild 的
-        //   PackedBlockScan warpTotals 也写 [0,wc)/[32,32+wc) —— 与 MissCumsum 的
-        //   缓冲同址重写, 该序列在设备上触发 trap (507035, skip-rebuild 实验隔离)。
+        // [scan 分离 2026-10-19] 扫描缓冲独立成段 (freeIdx 之后, 256 对齐), 不与
+        //   scanScratch [0,128) 分时复用: v1 里 [0,128) 的写者序列是 OpHitMiss
+        //   warpScratch → MissCumsum (已验证); v2 首版让重建路径的 PackedBlockScan
+        //   warpTotals 也写 [0,wc)/[32,32+wc) —— 与 MissCumsum 的缓冲同址重写,
+        //   该序列在设备上触发 trap (507035, skip-rebuild 实验隔离)。[v2.1] 该段
+        //   的写者只剩 Step2 ClassifyEvict (Step4 AllocAppend 已零扫描)。
         uo = (uo + 255u) & ~255u;
-        // 段容量 2*ECHO_LRU_THREAD_NUM+64: 正常路径只用 [0,64); ECHO_V2_RB_SERIAL
-        //   串行判别模式需 2*(blockDim+1) ≤ 2050 槽。
+        // 段容量 2*ECHO_LRU_THREAD_NUM+64: 正常路径只用 [0,64); [v2.0 历史]
+        //   ECHO_V2_RB_SERIAL 串行判别模式曾需 2*(blockDim+1) ≤ 2050 槽 —— 旋钮
+        //   已随旧 Rebuild 删除 (§9.22), 容量保留以免布局漂移。
         if (uo + 2u * ECHO_LRU_THREAD_NUM + 64u <= ARGTOPK_UB_ELEMS) {
             rbScanUb_ = ubPool + uo; uo += 2u * ECHO_LRU_THREAD_NUM + 64u;
         } else {
@@ -1118,15 +1049,17 @@ public:
     // Process: 各步顺序执行, 步间 SyncGrid() (块内 syncthreads + dcci) 解决行内跨线程 RAW.
     //   ECHO_PERF_STEP 构建下 PerfBegin/PerfEnd 把每步 t0 的 clock() 周期写入 workspace
     //   尾部 (见 tiling.h ECHO_PERF_NUM_STEPS); 普通构建为空操作, 不改变行为.
-    // [v2 步表 (非 spec 18 步, v1 为 20)]:
+    // [v2 步表 (非 spec 18 步, v1 为 20; [v2.1] Step2/Step4 换 Op)]:
     //   prologue(无打点): OpZeroFlags(+spec OpFillZero) + SyncGrid
     //   Step0 (anyReset 门控): OpResetRows / OpResetDthLru / OpResetFree /
     //     OpResetAvailFifo + SyncGrid —— 5 槽
     //   Step1: OpHitMiss (hit→flags bit0) + SyncGrid —— 2 槽
-    //   Step2 ([C1] needFree 门控): EvictScanAllRows / SyncGrid(仅 GM freeIdx
-    //     回退) / OpFreeRelease / OpFreePush —— 4 槽
+    //   Step2 [v2.1]: ClassifyAllRows (单趟分类, **无条件** —— fs=0 行也要散射
+    //     K/H 段+写 rbBase; cold 走 occ==0 快路径) + [needFree] SyncGrid(仅 GM
+    //     freeIdx 回退) / OpFreeRelease / OpFreePush —— 4 槽
     //   Step3: OpAllocPop + SyncGrid (OpFifoInc 已并入 Step4) —— 2 槽
-    //   Step4: LruRebuildAllRows + OpFifoAvailUpdate (fifo+=2, avail+=fs-nm) —— 2 槽
+    //   Step4 [v2.1]: AllocAppendAllRows (尾段追加, 零栅栏) + OpFifoAvailUpdate
+    //     (fifo+=2, avail+=fs-nm) —— 2 槽
     //   Step5: OpMissCumsum + SyncGrid + OpSetUpdate —— 3 槽
     __aicore__ inline void Process() {
         uint32_t R = tiling_.numTokens;
@@ -1185,15 +1118,16 @@ public:
                                             // numMisses/freeSize (t0 写) 同点可见。
         if (ECHO_V2_DEBUG_CUTOFF_V == 3u) return;   // [v2 debug] 阶段 3 截断
 
-        // ---- Step 2: free ([C1] needFree 门控; v2 用 EvictScan 取代基数选择) ----
-        // [C1 2026-10-13] t0 在 Step1 写入"本核任一行 fs>0"标志 (UB 槽 64, 经 Step1
-        //   尾 SyncGrid 可见)。全 0 时 EvictScan/FreeRelease/FreePush 对状态零影响
-        //   (fs=0 行 OpEvictScanRow 整行跳过、freeIdx 无读者 —— OpAllocPop 恒走老栈
-        //   路径, FreeRelease/FreePush 的 j<fs 循环体不执行)。打点槽保留 (≈0 周期),
-        //   条件块统一, 栅栏无发散。
+        // ---- Step 2 [v2.1]: classify+evict (单趟分类) + [needFree] free 流水线 ----
+        // ClassifyAllRows 无条件执行: fs=0 行也要散射 K/H 段 + 写 rbBase (v2.0 的
+        //   "fs=0 跳行" 随融合删除 —— 分类就是重建, "每种情况都维护序")。
+        //   [C1 2026-10-13] needFree 仍由 t0 在 Step1 写入 (UB 槽 64, 经 Step1 尾
+        //   SyncGrid 可见), 全 0 时仅跳过后续 free 流水线 (fs=0 行不发 freeIdx ——
+        //   OpAllocPop 恒走老栈路径, FreeRelease/FreePush 的 j<fs 循环体不执行)。
+        //   打点槽保留 (≈0 周期), 条件块统一, 栅栏无发散。
         bool needFree = (scanScratchUb_[64] != 0);
-        PerfBegin(); if (needFree) EvictScanAllRows(); PerfEnd();
-        // [P-C+尾栅栏去重] freeIdx 写 (末行 EvictScan 尾栅栏) → OpFreeRelease 读:
+        PerfBegin(); ClassifyAllRows(); PerfEnd();
+        // [P-C+尾栅栏去重] freeIdx 写 (末行 ClassifyEvict 尾栅栏) → OpFreeRelease 读:
         //   UB 路径已排序, 本槽跳过; GM 回退路径保守保留完整 SyncGrid (大 batch
         //   形态不在基准覆盖, 不冒险)。
         PerfBegin(); if (needFree && !freeIdxInUb_) SyncGrid(); PerfEnd();
@@ -1204,22 +1138,19 @@ public:
         // ---- Step 3: alloc pop (OpFifoInc 已并入 Step4 的 fifo+=2) ----
         PerfBegin(); OpAllocPop(R, topkDim, freeStackSize, rowsPerCore, tailRows,
                      numMissesGm_, freeSizeGm_, availGm_, freeIdxPtr_, freeIdxInUb_, freeGm_, rawSlotsGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();  // rawSlots 跨线程 RAW → Rebuild/SetUpdate 读;
-                                             // flags bit1 (EvictScan 写) → Rebuild staging 读 (dcci)
+        PerfBegin(); SyncGrid(); PerfEnd();  // rawSlots 跨线程 RAW → AllocAppend/SetUpdate 读;
+                                             // rbBase (numHitsGm, ClassifyEvict t0 写) →
+                                             // AllocAppend 全员读 (dcci; v2.1 的 Step2→Step4
+                                             // 传递全靠本栅栏, Op 内不另设)
         if (ECHO_V2_DEBUG_CUTOFF_V == 5u) return;   // [v2 debug] 阶段 5 截断
 
-        // ---- Step 4: lru 重建 (每步必执行) + fifo/avail 折叠更新 ----
-        PerfBegin(); LruRebuildAllRows(); PerfEnd();
+        // ---- Step 4 [v2.1]: lru 尾段追加 + fifo/avail 折叠更新 ----
+        PerfBegin(); AllocAppendAllRows(); PerfEnd();
         PerfBegin(); OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_); PerfEnd();
-#if defined(ECHO_V2_RB_DCCI)
-        // [debug/候选修复] Step4→Step5 之间补回栅栏: 重 UB 写 (rebuild A-C) 之后的
-        //   可合并递增 GM 写 (phase D 尾零) 会毒化紧随的访存 —— MissCumsum trap。
-        //   v1 在此位置有 SyncBlock (v2 曾以竞争源删除为由去掉)。RB_DCCI = 完整
-        //   SyncGrid (dcci 三明治); RB_SYNC = 裸 syncthreads (最小修复对照)。
-        SyncGrid();
-#elif defined(ECHO_V2_RB_SYNC)
-        asc_syncthreads();
-#endif
+        // [v2.1] ECHO_V2_RB_DCCI/RB_SYNC 的 Step4→Step5 补栅栏块已删: 旋钮服务
+        //   旧 Rebuild 的 trap 排查 (§9.18, "重 UB 写后可合并递增 GM 写毒化紧随
+        //   访存"), 重建路径已不存在; 若上板复现同类 trap, 预案 = 本位置恢复一道
+        //   无条件 SyncGrid (见 §9.22 风险与预案)。
         if (ECHO_V2_DEBUG_CUTOFF_V == 6u) return;   // [v2 debug] 阶段 6 截断 (Step4 后)
         // [P4/v2] 尾 SyncGrid 已删: lru/fifo/avail 此后无本 kernel 内读者 (kernel
         //   结束即对 host/下一次调用可见); Bug2 栅栏随 OpAllocPriority 删除 (fifo
@@ -1279,11 +1210,14 @@ private:
 #endif
     }
 
-    // [v2] EvictScan 的行循环包装 (v1 ArgtopkAllRows 的位置)。fs=0 行整行跳过
-    //   (无栅栏无写; fs 为行级一致条件 —— 全员广播读同一 freeSizeGm[row])。
-    //   freeIdx 行切片基址沿用 [P-C] 语义: UB 路径按核内本地行索引 (缓冲仅容纳
-    //   rowsPerCore*topkDim), GM 路径按绝对行索引 (§9.13 教训)。
-    __aicore__ inline void EvictScanAllRows() {
+    // [v2.1] ClassifyEvict 的行循环包装 (v1 ArgtopkAllRows / v2.0 EvictScanAllRows
+    //   的位置)。**每步每行必跑** (v2.0 的 fs<=0 跳行已删: 分类就是重建, fs=0 行
+    //   也要散射 K/H 段 + 写 rbBase; occ==0 行走 Op 内快路径)。fs 为行级一致条件
+    //   —— 全员广播读同一 freeSizeGm[row]; fsClamp = clamp(fs,0,topkDim) 照算
+    //   (fs=0 ⟹ freeIdx 零写)。freeIdx 行切片基址沿用 [P-C] 语义: UB 路径按核内
+    //   本地行索引 (缓冲仅容纳 rowsPerCore*topkDim), GM 路径按绝对行索引
+    //   (§9.13 教训)。
+    __aicore__ inline void ClassifyAllRows() {
         uint32_t rowsPerCore = tiling_.rowsPerCore;
         uint32_t tailRows = tiling_.tailRows;
         uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -1295,23 +1229,27 @@ private:
             uint32_t row = startRow + r;
             if (row >= R) break;
             int32_t fs = freeSizeGm_[row];
-            if (fs <= 0) continue;          // 无淘汰行: 零写零栅栏 (v1 fsClamp==0 早退等价)
-            uint32_t fsClamp = (uint32_t)((fs > (int32_t)topkDim) ? topkDim : fs);
+            uint32_t fsClamp = (fs <= 0) ? 0u
+                             : ((fs > (int32_t)topkDim) ? topkDim : (uint32_t)fs);
             int32_t avail = availGm_[row];  // 恒为初值 availOld (更新在 Step4 尾)
             uint32_t occ = (avail >= (int32_t)B) ? 0u : ((uint32_t)B - (uint32_t)avail);
             int32_t* fiRow = freeIdxPtr_ + ((freeIdxInUb_ ? (row - startRow) : row) * topkDim);
-            OpEvictScanRow(B, topkDim, fsClamp, occ,
-                           lruGm_, row * (B + 1u),
-                           flagsGm_, row * (B + 1u),
-                           fiRow,
-                           flagsUb_, rbScanUb_);
+            OpClassifyEvictRow(B, topkDim, fsClamp, occ,
+                               lruGm_, row * (B + 1u),
+                               flagsGm_, row * (B + 1u),
+                               fiRow,
+                               numHitsGm_ + row,
+                               flagsUb_, lruUb_, rbScanUb_);
         }
     }
 
-    // [v2] LruRebuild 的行循环包装。每行必执行 (fs=0 时 hit 也要挪尾)。
-    //   occ 用 availOld (avail 更新在紧随其后的 OpFifoAvailUpdate); nm/avail
-    //   均为 Step1/Step3 后的稳定值, Step3 尾 SyncGrid 已保证可见。
-    __aicore__ inline void LruRebuildAllRows() {
+    // [v2.1] AllocAppend 的行循环包装 (v2.0 LruRebuildAllRows 的位置, 退化为
+    //   尾段追加)。每行必执行; rbBase (numHitsGm)/rawSlots/nm 均为 Step2/Step3
+    //   后的稳定值, Step3 尾 SyncGrid 已保证可见。avail 本 Op 不再需要 (occ 概念
+    //   随重建删除, 更新在紧随其后的 OpFifoAvailUpdate)。
+    //   [v2.1] ECHO_V2_SKIP_REBUILD 的 #ifdef 跳段块已删 (旋钮随旧 Rebuild 移除,
+    //   其结论本就不跨二进制, §9.18)。
+    __aicore__ inline void AllocAppendAllRows() {
         uint32_t rowsPerCore = tiling_.rowsPerCore;
         uint32_t tailRows = tiling_.tailRows;
         uint32_t startRow = blockIdx.x * rowsPerCore;
@@ -1322,23 +1260,13 @@ private:
         for (uint32_t r = 0; r < rowCount; ++r) {
             uint32_t row = startRow + r;
             if (row >= R) break;
-#ifdef ECHO_V2_SKIP_REBUILD
-            // [v2 debug] 跳过重建体 (零写零栅栏): 定位 MissCumsum trap 是否由
-            //   rebuild 的 UB/GM 写触发。golden 必挂 (lru 不更新) —— 只看 trap 有无。
-            continue;
-#endif
-            int32_t avail = availGm_[row];
-            uint32_t occ = (avail >= (int32_t)B) ? 0u : ((uint32_t)B - (uint32_t)avail);
             int32_t nm = numMissesGm_[row];
             uint32_t nmU = (nm < 0) ? 0u : (uint32_t)nm;
-            OpLruRebuildRow(B, topkDim, occ, nmU,
-                            lruGm_, row * (B + 1u),
-                            flagsGm_, row * (B + 1u),
-                            rawSlotsGm_, row * topkDim,
-                            flagsUb_, aAtUb_, lruUb_,
-                            hExclUb_, aExclUb_, rbScanUb_,
-                            tiling_.specEnabled,
-                            ((r + 1u >= rowCount) || (row + 1u >= R)) ? 1u : 0u);
+            OpAllocAppendRow(B, nmU,
+                             lruGm_, row * (B + 1u),
+                             rawSlotsGm_, row * topkDim,
+                             numHitsGm_, row,
+                             tiling_.specEnabled);
         }
     }
 
@@ -1368,12 +1296,9 @@ private:
     uint8_t* missMaskGm_;
     int32_t* flagsGm_;    // [v2] workspace 分类位: bit0=hit, bit1=淘汰/spec 移除
     int32_t* scanScratchUb_;   // [UB v2] [0,128) Step1 warp 归约/C1 与 Step5 MissCumsum 专用 (v1 已验证序列)
-    int32_t* rbScanUb_;        // [scan 分离] Step2 EvictScan / Step4 Rebuild 的扫描缓冲 (独立段, 不与 [0,128) 复用)
-    int32_t* flagsUb_;
-    int32_t* aAtUb_;
-    int32_t* lruUb_;
-    int32_t* hExclUb_;
-    int32_t* aExclUb_;
+    int32_t* rbScanUb_;        // [scan 分离] Step2 ClassifyEvict 的扫描缓冲 (独立段, 不与 [0,128) 复用)
+    int32_t* flagsUb_;         // [UB v2.1] ClassifyEvict 的 flags staging
+    int32_t* lruUb_;           // [UB v2.1] ClassifyEvict 的旧序 staging (防 lruGm 同数组读写竞争)
     void* wsBase_;
     int32_t* stepCyclesGm_;
     uint32_t perfStepIdx_;
@@ -1409,10 +1334,11 @@ extern "C" __global__ __launch_bounds__(ECHO_LRU_THREAD_NUM) void echo_lru_kerne
     tiling.specEnabled    = tilingBuf->specEnabled;
     tiling.argtopkDebugRow = tilingBuf->argtopkDebugRow;          // [v2] 已无 kernel 内读者, 保结构兼容
     tiling.argtopkGroupThreads = tilingBuf->argtopkGroupThreads; // [v2] 同上
-    // [UB 布局 v2] 单大 __ubuf__ 数组分段作 scanScratch/flags/aAt/lru/hExcl/aExcl/
-    //   freeIdx (见 Init 注释)。probe_ub_size 实测: 单 __ubuf__ 数组可到 192KB
-    //   (256KB 才 trap); 多个独立 __ubuf__ 数组会别名互相覆盖 (读 A 得 D)。
-    //   基准形态峰值 128+5*4097+2048 = 22661 ≤ ARGTOPK_UB_ELEMS=32768。
+    // [UB 布局 v2.1] 单大 __ubuf__ 数组分段作 scanScratch/flags/lru/freeIdx/rbScan
+    //   (见 Init 注释; v2.0 的 aAt/hExcl/aExcl 三段已随槽号域秩扫描删除)。
+    //   probe_ub_size 实测: 单 __ubuf__ 数组可到 192KB (256KB 才 trap); 多个独立
+    //   __ubuf__ 数组会别名互相覆盖 (读 A 得 D)。基准形态峰值 13120 ≤
+    //   ARGTOPK_UB_ELEMS=32768 (逐段推导见 Init 注释)。
     __ubuf__ int32_t argtopkUb[ARGTOPK_UB_ELEMS];
     EchoLruKernel op;
     op.Init(htd, dth, lru, free, avail, fifo, pos, spl, resetMask, curSlots,

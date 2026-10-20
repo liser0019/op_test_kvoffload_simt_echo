@@ -5,13 +5,13 @@
 > **本文档随代码迭代同步更新**：每次代码合入后由维护者增量修订对应章节，并在文末"文档更新日志"表追加一行。
 >
 > 覆盖范围：v2 维护序重构 + 栈溢出修复 + v2-opt1/2 + opt3 负结果 + t1024 消融
-> （§9.17–§9.21，2026-10-19/20）。
+> + v2.1 单趟分类（§9.17–§9.22，2026-10-19/20；v2.1 已实现待上板验证）。
 >
 > ⚠ **v2 转型说明（2026-10-19）**：淘汰路径已从 pri 时间戳 + Argtopk 基数选择重构为
 > lru 顺序数组 + 每步重建（§9.17）。本文 §5（20 步表）、§6（Argtopk 深读）及 §9.6–§9.12
 > 中涉及 Argtopk/protect/pri 的内容**保留为 v1 历史**，与现行代码的对应关系以 §9.17 为准；
 > 状态字段 `pri`→`lru`、非 spec 步骤 20→18、ECHO_PERF_NUM_STEPS 28→26、checks 重写为
-> 50 项（§8.5 的 172 项为 v1 历史）。§2/§3/§4 的结构分析（Path A/UB/栅栏模型/PackedBlockScan）
+> 50→54 项（v2.1，§9.22；§8.5 的 172 项为 v1 历史）。§2/§3/§4 的结构分析（Path A/UB/栅栏模型/PackedBlockScan）
 > 在 v2 下继续有效。
 > v1 终版快照：tag `v1-argtopk-final`。v1 末次验证数字见 §9.14/§9.15。
 >
@@ -1794,9 +1794,103 @@ ceil(topk/4)→ceil(topk/2)，topk=2048 → 1024 线程）。
 MissCumsum 的 −2.5~3.9K 是唯一正项但远不抵损失，无 salvage 价值。
 HitMiss 在 t512 的优化空间确认为收尾级（~4-7K，§10.2）。
 
+### 9.22 v2.1：单趟分类 + 平局松弛 + 尾段追加（2026-10-20，NPU 待验证）
+
+**动机**（§9.21 结论的直接推论）：v2.0 的 EvictScan（Step2）与 Rebuild 的位置域
+相位（Step4）是**对同一条 lru 位置序链的两遍同型扫描**——EvictScan 为取受害者
+（计数扫 + 发射扫），Rebuild 为重建分类，各自 staging flags、各带各的栅栏。拆成
+两遍是 Step 的顺序限制（中间隔着 Step3 AllocPop），不是元数据限制。§9.21 实测
+栅栏占总时间 ~1/3（warm ~41K/116K），跨 Op 融合（消栅栏 + 共享 staging）是最大
+杠杆；cold 的 Rebuild 31.8K 几乎全是空位置域上的槽号域扫描 + staging + 栅栏
+白付。叠加 §10.3 原决策点②获批（owner 2026-10-20）：hit/alloc 组内部排列属同
+年龄组，LRU 语义无差别——Rebuild 的槽号域秩扫描（aAt/hExcl/aExcl 相位）整体
+失去存在理由。
+
+**设计**：
+- **OpClassifyEvictRow**（替代 OpEvictScanRow，Step2，**每步每行必跑**——fs=0
+  也要维护序，v2.0 的"fs=0 跳行"删除）：单趟位置序扫描，每位置按 flags 分类
+  （bit0=hit / bit1=spec 移除 / 其余=候选），PackedBlockScan 打包
+  (kCnt|hCnt<<16) 前缀，一次发射三产出：
+  ① freeIdx：候选全局序 < fsClamp 者为受害者（位置序，与 v2.0 逐位一致）+
+    padding [B+1,..) + 尾零（三条写路径全部 fsClamp>0 门控，fs=0 行零写）；
+  ② K 段（幸存者，散射目标 = 候选全局序 − fsClamp，旧序保持）+ H 段（hit，
+    基址 totalK + hit 全局序 = **旧位置序**，平局松弛）直接进 lruGm；
+  ③ rbBase = totalK + totalH，t0 写 numHitsGm[row]（v2.0 起的死状态复活为
+    Step2→Step4 传递槽，workspace 布局零漂移）。
+  每行 3 道栅栏（staging→scan、scan 内部、尾——末行也不可省，freeIdx 有跨 Op
+  读者）；staging 吸收旧 Rebuild 的 lru GM→UB（散射写 lruGm 前全体读入，防同
+  数组跨线程读写竞争）；**occ==0 快路径**（cold）：零栅栏零 staging 零散射，
+  仅防御性保留 fsClamp>0 的 padding/尾零（复刻旧 EvictScan；管线内 occ=0 ⟹
+  fs=0 不可达）。
+- **OpAllocAppendRow**（替代 OpLruRebuildRow，Step4）：退化为一层循环——分配槽
+  按 rawSlots j 序（**分配序**，平局松弛）追加到 lru[rbBase, rbBase+nm)。零栅栏、
+  零 staging、零扫描：A 段与 K/H 段区间不重叠（[base,base+nm) vs [0,base)）；
+  rawSlots/rbBase 可见性由 Step3 尾 SyncGrid（dcci）保证（Op 内不另设栅栏）；
+  非 spec 尾零数学冗余论证沿用 v2.0（occNew ≥ occOld ⟹ 尾区 ⊆ 旧零尾），
+  spec 尾零保留。
+- Process：Step2 = ClassifyEvict（无条件）+ [needFree] SyncGrid(GM 回退)/
+  FreeRelease/FreePush；Step4 = AllocAppend + FifoAvailUpdate。needFree 语义
+  收窄为"free 流水线跳过"（fs=0 行不发 freeIdx，AllocPop 恒走老栈）——v2.0
+  时代它门控整个 EvictScan。新重建序（golden 契约）：
+  **新 lru = [幸存者(保持旧序)] ++ [hit(旧位置序)] ++ [新分配(分配序)]**；
+  ECHO_PERF_NUM_STEPS=26 不变（非 spec 18 步，步名换）。
+
+**布局变更**：UB 删 aAt/hExcl/aExcl 三段（槽号域秩扫描的载体）。新序
+scanScratch[0,128) → flags@256 → lru@256 → freeIdx（不额外对齐）→ rbScan@256，
+基准形态（B=4096 ⟹ B+1=4097；rowsPerCore=1, topkDim=2048 ⟹ freeIdx 2048；
+rbScan 2112）逐段实算：flags [256,4353) → lru [4608,8705) → freeIdx [8705,10753)
+→ rbScan [11008,13120)，**峰值 13120 ≤ 32768**（v2.0 同径实算 26176，省 13056）。
+
+**语义论证**：
+- 淘汰集合与 v1/v2.0 恒等：幸存者 pri = 旧位置序（互异无平局）且严格小于 hit
+  的 f / alloc 的 f+1（严格分层）⟹ v1 (pri,slot) 字典序前 fs 个非 hit ≡ 旧序
+  前 fs 个候选（候选 = 非 hit 非 bit1）；fs ≤ 候选数由 nm+hits=topk ≤ capacity
+  保证。check_common_semantics 的淘汰集合从初始历史独立推导，一字未改。
+- 全部输出（current_slots/miss_host_pos/miss_alloc_flat/miss_mask 与 htd/dth/
+  free/avail/fifo 终态）不依赖 lru 组内排列：hit/miss 由 htd 判定、分配由 free
+  栈决定，lru 只在"下一周期的年龄序"意义上被消费——组内排列自由度正是平局
+  松弛的安全边界。token-0 保留语义不变（reference_echo 的 htd 法判 miss 原样，
+  仅步末 lru 拼接规则换）。
+- bit1 语义收窄：受害者不再标 bit1（融合后无读者——旧读者是 Rebuild 的分类）；
+  spec 移除标记（Step0.5 写）照读照跳。非 spec 下 [0,occ) 无 bit1 条目，新旧行为
+  恒等；spec 下 bit1 槽已释放，不当候选反而正确（spec 无基准覆盖，按此维护）。
+
+**旋钮清理**：ECHO_V2_SKIP_REBUILD + 9 个 ECHO_V2_RB_* 随旧 Rebuild 删除
+（build.sh 不再传参；CMakeLists 的 option 默认关，不影响构建）；旋钮结论本就不
+跨二进制（§9.18）。ECHO_V2_DEBUG_CUTOFF 保留（阶段 6=Step4 后仍成立）。
+checks 重写为 **54 项**（ClassifyEvict 21 / AllocAppend 8 / 跨验证 14 / HitMiss
+3 / MissCumsum 7 / AllocPop+FifoAvail 1）；compare.py 的 reference_echo 改旧序
+直接法（删 pri 仿真，miss 判定仍 htd 法）。
+
+**预期收益**（口径：op 单价 ~300 cyc 由 v2.0 分步反推、栅栏 3.7K/道 t512 实测；
+ClassifyEvict ≈ 旧 EvictScan + 旧 Rebuild 的位置域相位 − 1 道栅栏 − 槽号域相位，
+AllocAppend ≈ 1-2K）：
+
+| 场景 | v2.0 P50 | v2.1 预期 | 依据 |
+|---|---:|---:|---|
+| warm_all_hit | 74.02 | ~67-69 | Rebuild 30.5K → ClassifyEvict ~20-23K + Append ~1K |
+| warm_75pct | 77.59 | ~68-71 | Rebuild 33.2K → 同上（warm 的 EvictScan 本被 needFree 跳过） |
+| full_cache_75pct | 100.68 | ~79-83 | EvictScan 21.7K + Rebuild 44.2K = 65.9K → ClassifyEvict ~25-30K + Append ~2K |
+| cold_reset | 108.19 | ~87-90 | Rebuild 31.8K → occ==0 快路径 ≈0 |
+
+**风险与预案**：① Step2 的 lru 散射紧邻 OpFreeRelease 读（UB freeIdx 路径无
+SyncGrid）——同型散射（v2.0 Rebuild phase D 后接 MissCumsum 读）已上板验证
+安全，但"重 UB 写后紧随访存"曾是 §9.18 的 trap 模式；若上板 507035（先 grep
+errcode 确认 354），预案 = Step2.SyncGrid 槽改无条件（一行）。② ClassifyEvict
+的单价估算若偏乐观（lru staging 的 GM 读为主），warm 收益缩水——分步对照
+（ECHO_V2_DEBUG_CUTOFF 或 perf_step）可定位。③ ~~occ==0 快路径的 freeIdx 防御性
+写无尾栅栏~~（审查修正，2026-10-20）：快路径收窄为 `occ==0 && fsClamp==0`（管线
+内唯一可达组合）；fsClamp>0 的 occ==0 组合落入正常路径（空扫描循环 + padding +
+尾零 + 全套栅栏，逐位复刻旧 EvictScan 边界行为）——原实现把该组合放在无栅栏的
+快路径内联，freeIdx (UB) 写 → 后续 Op 读缺 B3 排序，属 out-of-invariant 隐患，
+主会话审查时修正。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
+
+> [v2.1 2026-10-20] 单趟分类已实现、待上板验证（§9.22，预期见其收益表）；
+> 下列为 v2.0 基线数字（对照口径）。
 
 v2 + opt1/2（§9.17/§9.19，2026-10-19 上板全过，tag `v2.0`）：**full_cache
 100.68 μs（1.08×，v1 −17%）——维护序兑现设计目标但离 50-60 μs 仍有差距；
@@ -1815,39 +1909,27 @@ v1 终版快照：tag `v1-argtopk-final`（§9.14/9.15 数字）。
 | OpFifoAvailUpdate 冷触 | 全部 | fifo/avail 各 1 次冷行触（store 同价，H2，§9.20）≈ 6K；早算 stash 已实测无效（§9.20）；唯一削减路径 = 两数组合并（远期） | §9.20 |
 | 必要 scatter | 全部 | htd/dth/curSlots/flat/mask 的逐 miss 写 + pri 的逐 hit 写 | OpHitMiss（hit 分支）/OpSetUpdate |
 
-### 10.3 已识别方向（按当前优先级排序；t1024 已测负排除，§9.21）
+### 10.3 已识别方向（按当前优先级排序；融合+平局松弛已落地，§9.22）
 
-1. **Rebuild 常数削减 + EvictScan×Rebuild 融合**（warm/full 双场景主头，
-   栅栏占总时间 ~1/3 是最大杠杆，§9.21）：warm Rebuild 33K ≈ 4 道栅栏
-   ×~3.7K + O(B) staging/扫描。候选按收益排序：
-   - **EvictScan×Rebuild 单趟化**（full 专项，结构性大项）：两者都是"lru
-     位置序扫 + flags 判别"（EvictScan 取前 fs 非 hit 槽；Rebuild B 相位做
-     位置域分类）——SIMT 的阶段4分类是**一遍两用**（既出 evictable 前缀供
-     取、又供重建），我们拆成了两遍。融合 = Step2 的顺扫顺带 stage lru/flags
-     到 UB（Step4 免重复 staging，含原 flags 复用项）+ 产出幸存者/hit 位置域
-     分类供 Rebuild 直接散射。full 的 21.4+43.1=64.5K 目标砍 15-25K。
-     中高风险：算法重设计，checks 跨验证组可支撑等价性证明。
-   - **栅栏削减**：B1（staging）与 scan1 内部栅栏合并、B2/B3 融合评估
-     （§9.17 五相位）；每消一道 ≈ −3.7K。
-   - O(B) 冷读 staging 是 v2 维护税地板（§9.17 设计代价）。
-2. **决策点：golden 平局规则松弛**（需 owner/上游拍板）：现行 golden 要求
-   新 lru = [幸存者旧序] ++ [hit 按**槽号升序**] ++ [alloc 按槽号升序]——这是
-   v1 Argtopk (pri,slot) 字典序的实现产物被固化进契约，**语义上同年龄槽的
-   淘汰先后无差别**。若松弛为"hit 按旧位置序、alloc 按分配序"（对齐 SIMT 的
-   维护方式），Rebuild 的整个槽域相位（C：hExcl/aExcl 秩扫描）可删，预计
-   −8~12K + 少 1-2 道栅栏。代价：reference_echo/compare.py/checks 的逐位
-   契约改写，输出与 SIMT 的差异模式改变（自洽但不同）。与 1 正交，可叠加。
-3. **HitMiss 收尾**（~4-7K）：t1024 已排除大杠杆（§9.21），剩批量发射实验
+1. **v2.1 上板验证**（§9.22，已实现待验证）：单趟分类 + 平局松弛 + 尾段追加。
+   验证顺序：checks 54 项 → compare.py 四场景 golden（--verify-each-sample）→
+   profile_kernel.sh kernel 级 P50 → echo_perf_step.py 分步（对照 §9.22 预期
+   表）。trap 预案与回退路径见 §9.22 风险段（Step2.SyncGrid 无条件化）。
+2. **HitMiss 收尾**（~4-7K）：t1024 已排除大杠杆（§9.21），剩批量发射实验
    （检验多在途 load 能否重叠）+ 杂项。
-4. **冷启动专项**：cold 108.19 中 OpResetRows 33.1K（带宽地板，t1024 持平
-   佐证）+ Rebuild 31.8K + SetUpdate 22.5K；向量化存储评估。
-5. **投机解码（spec）场景测试**：Step0.5 路径 v2 语义已按 flags bit1 维护
-   （§9.17），但 compare.py 的 spl 恒为 max_token，spec golden 仍未覆盖。
-6. ~~行间流水~~（rows>32 形态）、~~维护序 v2~~（已落地）、~~FifoAvailUpdate
-   并行化~~（opt3 证伪，§9.20，已移入 §10.2）、~~t1024~~（§9.21 证伪）移除。
-7. **远期**：fifo/avail 合并为单状态数组（[rows][2] 交错布局）——FifoAvail 的
+3. **冷启动专项**：cold 108.19 中 OpResetRows 33.1K（带宽地板，t1024 持平
+   佐证）+ SetUpdate 22.5K（v2.1 后 Rebuild 项预期归零，见 §9.22）；向量化
+   存储评估。
+4. **投机解码（spec）场景测试**：Step0.5 路径语义已按 flags bit1 维护（§9.17；
+   [v2.1] bit1 专指 spec 移除，受害者不再标记——ClassifyEvict 的候选定义随之
+   收窄，spec 无基准覆盖按此维护），compare.py 的 spl 恒为 max_token，spec
+   golden 仍未覆盖，需先扩 reference。
+5. **远期**：fifo/avail 合并为单状态数组（[rows][2] 交错布局）——FifoAvail 的
    2 次冷触并 1 次（~−3K），需 host 侧状态布局 + golden 适配，仅在需要凑最后
    几 μs 时评估。
+6. 已完成/证伪：~~EvictScan×Rebuild 融合 + golden 平局松弛~~（v2.1 落地，§9.22）、
+   ~~行间流水~~（rows>32 形态）、~~维护序 v2~~（§9.17）、~~FifoAvailUpdate
+   并行化~~（opt3 证伪，§9.20，已移入 §10.2）、~~t1024~~（§9.21 证伪）移除。
 
 ---
 
@@ -1864,6 +1946,7 @@ v1 终版快照：tag `v1-argtopk-final`（§9.14/9.15 数字）。
 | 2026-10-16 | 第 7 版 | 待提交（round-4：[P-E]+白付清理） | 同步工作区未提交的 round-4：[P-E] 反向 P-D（OpArgtopkRow 行首全员 pack + B0，hist 一律读 key，Argtopk 栅栏 7→8，§6.2/§6.7/§9.15）与白付清理 A/B（非 spec 跳过 prologue FillZero+SyncGrid、anyReset=0 跳过 Step0 四 Op+SyncGrid，打点槽保留，§5.1/§9.15）；§9.11 [P-D] 条目标注已被回退；全文 kernel.h 行号按当前工作区核对修正；附录⑥标记已解决；NPU 验证待做（预期数字与挂起二分顺序见 §9.15） |
 | 2026-10-16 | 第 8 版 | `3906f91`+`9b63e24`（上板验证） | round-4（[P-E]+白付清理）上板验证（空闲设备）结果写入：§9.15 新增上板验证小节（warm 58.28/55.34 μs＝0.72×/0.67× 超出白付清理预期、cold 94.16 μs、full 120.12 μs；P-E 收益重校准——Argtopk −9.1K 远低于静态预期 −30K，Argtopk 转弥散结构无单一主导相位；距 50-60 μs 定量账 → v2 必要性坐实；int16 hist 扩 G=128 候选撤下）；§9.14 open question 1 关闭（SIMT ~2× 确认为设备占用干扰，比值恢复可信）；§7.11 新增"静态延迟链模型高估依赖读成本"方法论教训；§9 总表 round-4 行、§10.1 现状、§2.2 比值引用、头部覆盖范围同步刷新 |
 | 2026-10-20 | 第 13 版 | `ab4fb5b`→`f2acb7c`（t1024 消融实测回退） | §9.21 t1024 消融负结果：P50 四场景 +25~37 μs（Rebuild +11~16K=栅栏翻倍、HitMiss +6~8K 未降反升、MissCumsum −2.5~3.9K 不抵、ResetRows 持平）；三条结论（栅栏随线程数翻倍且占总时间 ~1/3、gather 核吞吐受限非每 warp 串行（H1 修正）、ResetRows 带宽地板佐证）；§10.2 HitMiss 行改"收尾 ~4-7K"；§10.3 重排（EvictScan×Rebuild 融合+栅栏削减列 1、新增 golden 平局规则松弛决策点、t1024 证伪移除）；CLAUDE.md 同步 |
+| 2026-10-20 | 第 14 版 | v2.1（单趟分类，NPU 待验证） | §9.22 v2.1 全记录：单趟分类 OpClassifyEvictRow（三产出 freeIdx/K 段/H 段+rbBase，融合 EvictScan+Rebuild 位置域扫描，每步必跑，occ==0 快路径）+ 平局松弛（hit 旧位置序/alloc 分配序，owner 2026-10-20 批准）+ 尾段追加 OpAllocAppendRow（零栅栏零扫描）；UB 删 aAt/hExcl/aExcl 三段（峰值 26176→13120 实算链）、numHitsGm 复活为 rbBase（布局零漂移）；reference_echo 改旧序直接法（htd 法判 miss 原样）；checks 重写 54 项（跨验证组改新规则+成员集合不变量）；旋钮清理（SKIP_REBUILD+9 个 RB_*，CUTOFF 保留）；预期收益表（warm_all ~67-69/warm75 ~68-71/full ~79-83/cold ~87-90）与风险预案（trap 预案=Step2.SyncGrid 无条件化）；§10.1 加 v2.1 待验证注记、§10.3 重排（v2.1 验证列 1，融合/松弛移入已完成）；banner 覆盖范围 →§9.17–§9.22；CLAUDE.md 同步 |
 | 2026-10-19 | 第 12 版 | 48610c0→266ed64（opt3 实测回退）+ `ab4fb5b`（t1024 消融待测） | §9.20 负结果记录：opt3 预置摊销实测净回退 ~+3K（HitMiss 四场景 +2.7~4.2K / FifoAvail 持平 / P50 +1~3.6 μs），机理 = 同 warp 冷访存串行（H1）+ 冷行 store 同价非火后即忘（H2）+ 块内栅栏同步推论，已 revert 回 v2.0 基线；§10.2 补 OpFifoAvailUpdate 冷触地板行、OpHitMiss 行按 H1 重估（t512 地板 22-25K）；§10.3 按 H1/H2 重排（t1024 消融验证列 1、Rebuild 栅栏/融合细化、FifoAvail 并行化证伪移除、fifo/avail 合并记远期）；CLAUDE.md 设备坑速查 + 优先级同步 |
 | 2026-10-19 | 第 11 版 | v2.0（6f4ad92+验证） | §9.19 opt1/2 上板验证（Rebuild warm_all 37.2→30.5K，P50 四场景 −2~−4%）；§10.1 刷新至 v2.0 数字；快照 tag v2.0。交接文档 CLAUDE.md 新增（新 AI 接手用） |
 | 2026-10-19 | 第 10 版 | v2 轮（fe10f91..本轮） | 恢复记录（按 owner 指示跳过中间误判过程）：新增 §9.17 v2 维护序重构全记录（设计/接口变更/上板 P50/分步/warm 回退账目）、§9.18 栈溢出事故（根因+修复，详见 §7.12 与独立文档）、§9.19 v2-opt1/2（待验证）；§7.12 新增 VEC SIMT 栈溢出条目（含 §7.9 grid.sync 关联修订）；头部 v2 转型 banner（§5/§6 Argtopk 内容保留为 v1 历史，checks 50 项）；§10.1/§10.3 按 v2 现状重写 |

@@ -121,47 +121,9 @@ set(ECHO_V2_DEBUG_CUTOFF "0" CACHE STRING "echo_lru v2 debug: early-return after
 if(NOT ECHO_V2_DEBUG_CUTOFF STREQUAL "0")
     list(APPEND ECHO_FLAGS -DECHO_V2_DEBUG_CUTOFF=${ECHO_V2_DEBUG_CUTOFF})
 endif()
-# [v2 debug] ECHO_V2_SKIP_REBUILD=ON: LruRebuildAllRows 体置空 (零写零栅栏),
-#   用于隔离 MissCumsum trap 的触发源 (rebuild 的写 vs 其他)。
-option(ECHO_V2_SKIP_REBUILD "echo_lru v2 debug: skip LruRebuild body" OFF)
-if(ECHO_V2_SKIP_REBUILD)
-    list(APPEND ECHO_FLAGS -DECHO_V2_SKIP_REBUILD)
-endif()
-# [v2 debug] RB_SERIAL: rebuild 两次 PackedBlockScan 换 t0 串行 (语义一致, 判别 codegen);
-#   RB_NOD: 跳过 rebuild phase D 的 GM 写 (判别 GM 写触发)。
-option(ECHO_V2_RB_SERIAL "echo_lru v2 debug: serial scans in rebuild" OFF)
-if(ECHO_V2_RB_SERIAL)
-    list(APPEND ECHO_FLAGS -DECHO_V2_RB_SERIAL)
-endif()
-option(ECHO_V2_RB_NOD "echo_lru v2 debug: skip rebuild phase D" OFF)
-if(ECHO_V2_RB_NOD)
-    list(APPEND ECHO_FLAGS -DECHO_V2_RB_NOD)
-endif()
-option(ECHO_V2_RB_NOTAIL "echo_lru v2 debug: skip rebuild phase D tail-zero" OFF)
-if(ECHO_V2_RB_NOTAIL)
-    list(APPEND ECHO_FLAGS -DECHO_V2_RB_NOTAIL)
-endif()
-option(ECHO_V2_RB_ZEROONLY "echo_lru v2 debug: phase D -> full-row zero (reset-shaped)" OFF)
-if(ECHO_V2_RB_ZEROONLY)
-    list(APPEND ECHO_FLAGS -DECHO_V2_RB_ZEROONLY)
-endif()
-# [v2 debug/候选修复] Step4→Step5 之间补回栅栏: RB_DCCI=完整 SyncGrid, RB_SYNC=裸 syncthreads。
-option(ECHO_V2_RB_ONEONLY "echo_lru v2 debug: phase D -> full-row constant 1" OFF)
-if(ECHO_V2_RB_ONEONLY)
-    list(APPEND ECHO_FLAGS -DECHO_V2_RB_ONEONLY)
-endif()
-option(ECHO_V2_RB_ZLOAD "echo_lru v2 debug: tail-zero loads zero from UB (break memset idiom)" OFF)
-if(ECHO_V2_RB_ZLOAD)
-    list(APPEND ECHO_FLAGS -DECHO_V2_RB_ZLOAD)
-endif()
-option(ECHO_V2_RB_DCCI "echo_lru v2 debug: SyncGrid between Step4 and Step5" OFF)
-if(ECHO_V2_RB_DCCI)
-    list(APPEND ECHO_FLAGS -DECHO_V2_RB_DCCI)
-endif()
-option(ECHO_V2_RB_SYNC "echo_lru v2 debug: bare syncthreads between Step4 and Step5" OFF)
-if(ECHO_V2_RB_SYNC)
-    list(APPEND ECHO_FLAGS -DECHO_V2_RB_SYNC)
-endif()
+# [v2.1 2026-10-20] ECHO_V2_SKIP_REBUILD 与 9 个 ECHO_V2_RB_* 旋钮已删: 它们服务
+#   旧 LruRebuild 的栈溢出排查 (§9.18), 重建路径已随单趟分类重构消失。旋钮结论
+#   本就不跨二进制 (每个旋钮=不同栈帧形态), 旧实验记录见 git 历史与 deep-dive。
 
 # [v2 debug] Echo kernel 的 bisheng 优化级别 (默认 -O3)。v2 trap 排查: 同源码不同
 #   优化级别 = 零语义改动的 codegen 判别实验 (§7.9 先例: 本栈存在编译单元整体

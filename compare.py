@@ -157,11 +157,19 @@ def reference_simt(case):
 
 
 def reference_echo(case, initial):
-    """Echo v2：内部按 v1 的 pri 时间戳语义仿真（久经验证），步末推导 lru 状态。
+    """Echo v2.1：旧序直接法推导（单趟分类 golden）。
 
-    pri 不再是状态字段，仅作内部仿真变量：占用槽按 (pri, slot) 稳定排序得到 lru
-    （秩→槽位，尾部恒 0）——这正是 v2 维护序与 v1 语义逐位等价的 golden 证明。
-    全部输出与 v1 逐位一致；设备实现改为增量维护 lru（不再做基数选择）。
+    [v2.1 2026-10-20] 重建序平局松弛（owner 批准）：新 lru = [幸存者(保持旧序)]
+    ++ [本步 hit 槽(按旧位置序)] ++ [新分配槽(按分配序)]。与 v1 (pri,slot) 规则的
+    差异仅在 hit 组/alloc 组的内部排列——同年龄组内槽的先后在 LRU 语义上无差别
+    （淘汰集合、hit/miss 判定、后续年龄分层全部不变），因此不再仿真 pri，直接从
+    旧序推导；设备实现为 Step2 单趟分类（OpClassifyEvictRow）+ Step4 尾段追加
+    （OpAllocAppendRow），与本参考逐位一致。
+    淘汰集合与 v1 恒等的证明要点：幸存者的 pri = 旧位置序（互异无平局）且严格
+    小于 hit 的 f 与 alloc 的 f+1（严格分层），v1 取 (pri,slot) 字典序前 fs 个
+    非 hit 占用槽 ⟺ 新规则取旧序前 fs 个候选（候选 = 非 hit 占用槽），逐槽一致；
+    fs ≤ 候选数由 nm+hits = topk ≤ capacity 保证。
+    miss 判定沿用 htd 法（token 0 → htd[0]=0 → 视为 hit 的保留语义不变）。
     """
     rows, topk, capacity = (case[k] for k in ("rows", "topk", "capacity"))
     out = {key: initial[key].copy() for key in ECHO_STATE}
@@ -170,55 +178,48 @@ def reference_echo(case, initial):
     for row in range(rows):
         htd, dth, lru, free = (out[key][row] for key in ("htd", "dth", "lru", "free_slots"))
         avail, fifo = int(out["avail"][row]), int(out["fifo"][row])
-        # [v2] 内部 pri 仿真：从 initial lru 重建 rank+1（与 v1 make_echo_initial 同构）
-        pri = np.full(capacity + 1, -1, np.int32)
-        pri[0] = I32_MAX
-        for p in range(int((lru > 0).sum())):
-            pri[int(lru[p])] = p + 1
         if case["reset_mask"][row]:
             htd.fill(I32_MAX)
             htd[0] = 0
             dth.fill(I32_MAX)
             lru.fill(0)
-            pri.fill(-1)
-            pri[0] = I32_MAX
             free.fill(0)
             free[:capacity] = np.arange(capacity, 0, -1, dtype=np.int32)
             avail, fifo = capacity, 1
 
+        occ = capacity - avail                     # [v2.1] 旧序有效长度 (occ = B − avail)
+        order = [int(s) for s in lru[:occ]]        # 旧序 (最旧→最新)
         tokens = case["topk_indices"][row]
         before = htd[tokens].copy()
         misses = before == I32_MAX
         num_misses = int(misses.sum())
-        pri[before[~misses]] = fifo
-        fifo += 1
-
-        free_size = max(num_misses - avail, 0)
-        if free_size:
-            candidates = [slot for slot in range(1, capacity + 1) if pri[slot] >= 0]
-            released = sorted(candidates, key=lambda slot: (int(pri[slot]), slot))[:free_size]
-            for slot in released:
-                htd[dth[slot]] = I32_MAX
-                dth[slot], pri[slot] = I32_MAX, -1
-            free[avail:avail + free_size] = released
-            avail += free_size
+        qset = {int(t) for t in tokens}
+        # [v2.1] 旧序拆分 (dth 法): hit 组保持旧位置序; 候选 = 非 hit 占用槽。
+        hit_slots = [s for s in order if dth[s] != I32_MAX and int(dth[s]) in qset]
+        cand = [s for s in order if dth[s] == I32_MAX or int(dth[s]) not in qset]
+        fs = max(num_misses - avail, 0)
+        victims = cand[:fs]                        # 位置序前 fs 个候选 = v1 淘汰集合
+        survivors = cand[fs:]
+        for slot in victims:
+            htd[dth[slot]] = I32_MAX
+            dth[slot] = I32_MAX
+        free[avail:avail + fs] = victims
+        avail += fs
 
         # free 是栈；这里取出的顺序决定每个 miss 最终拿到哪个 1 基槽。
         allocated = free[avail - num_misses:avail].copy()
         avail -= num_misses
-        pri[allocated] = fifo
-        fifo += 1
         for token, slot in zip(tokens[misses], allocated):
             htd[token], dth[slot] = slot, token
         out["current_slots"][row] = htd[tokens]
         out["miss_host_pos"][row] = np.where(misses, tokens, 0)
         out["miss_alloc_flat"][row] = np.where(misses, row * capacity + htd[tokens], 0)
         out["miss_mask"][row] = misses
-        # [v2] 步末推导 lru 状态：占用槽 (pri≥0, 不含 slot 0) 按 (pri, slot) 稳定排序
-        order = sorted((slot for slot in range(1, capacity + 1) if pri[slot] >= 0),
-                       key=lambda slot: (int(pri[slot]), slot))
-        lru[:len(order)] = order
-        lru[len(order):] = 0
+        # [v2.1] 新 lru = 幸存者(旧序) ++ hit(旧位置序) ++ 分配(分配序)；尾部恒 0。
+        new_order = survivors + hit_slots + [int(s) for s in allocated]
+        lru[:len(new_order)] = new_order
+        lru[len(new_order):] = 0
+        fifo += 2                                  # protect(f) 与 alloc(f+1) 两次自增的终值
         out["avail"][row], out["fifo"][row] = avail, fifo
     return out
 

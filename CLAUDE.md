@@ -33,11 +33,16 @@ SIMT 基线（`csrc/simt/`，同仓对照）竞争。
 1. 本文件
 2. `docs/ascend_vec_simt_stack_overflow.md` — 最阴险的设备坑，先读
 3. `docs/echo_lru_deep_dive.md` — 技术深读（注意头部 **v2 转型 banner**；
-   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.20 最新（§9.20 是 opt3 负结果与
-   微架构实测结论，必读）；§10.3 是方向清单）
+   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.22 最新（§9.20/§9.21 是负结果
+   与微架构实测结论；**§9.22 是 v2.1 单趟分类——已实现待上板验证，必读**）；
+   §10.3 是方向清单）
 4. `README.md` — 工程全貌
 
-## 当前状态（2026-10-19，tag `v2.0`）
+## 当前状态（2026-10-20，v2.1 已实现待验证）
+
+> [v2.1 2026-10-20] 单趟分类 + 平局松弛 + 尾段追加已实现（§9.22，owner 已
+> 批准规格），**NPU 待验证**——下列 v2.0 数字为对照基线，预期 warm_all
+> ~67-69 / warm75 ~68-71 / full ~79-83 / cold ~87-90。
 
 v2 维护序重构（lru 顺序数组取代 pri 时间戳 + Argtopk 基数选择，§9.17）+
 栈溢出修复（§9.18）+ opt1/2（§9.19）全部上板验证通过：
@@ -54,24 +59,22 @@ v2 维护序重构（lru 顺序数组取代 pri 时间戳 + Argtopk 基数选择
 - 分步热点（warm 口径）：Rebuild 33K（固定开销主导）、HitMiss 25K、
   Cumsum 16.5K、SetUpdate 14.8K、FifoAvail 6.2K（**地板项**：2 次冷触，
   opt3 已证伪 ~1K 假设并回退，§9.20）
-- 当前 HEAD = v2.0 基线（opt3 预置摊销与 t1024 两个方向已测负并回退，
-  微架构结论见 §9.20/§9.21；t512 为正确线程数，v1/v2 双证实）
+- 当前 HEAD = **v2.1 单趟分类（§9.22，已实现待上板验证）**；v2.0 快照 tag
+  `v2.0`（opt3 预置摊销与 t1024 两个方向已测负并回退，微架构结论见 §9.20/
+  §9.21；t512 为正确线程数，v1/v2 双证实）
 
 ## 下一步优先级（deep-dive §10.3，按序）
 
-1. **Rebuild 常数削减 + EvictScan×Rebuild 融合**（主攻方向，栅栏占总时间
-   ~1/3）：单趟化（Step2 顺扫顺带 stage lru/flags + 产位置域分类，Step4 免
-   重复 staging 与 B 相位，full 目标 −15-25K）；栅栏削减（B1+scan1 合并、
-   B2/B3 融合，每道 −3.7K）。中高风险，checks 跨验证组支撑等价性。
-2. **决策点（需 owner 拍板）：golden 平局规则松弛**——(pri,slot) 字典序是
-   v1 实现产物，语义上同年龄槽淘汰先后无差别；若松弛为位置序/分配序，
-   Rebuild 槽域相位（C）整体可删（−8~12K + 少 1-2 道栅栏），代价是
-   reference/compare/checks 契约改写。与 1 正交可叠加。
-3. **HitMiss 收尾**（~4-7K）：t1024 已排除大杠杆（gather 核吞吐受限），
+1. **v2.1 上板验证**（§9.22，已实现）：单趟分类 + 平局松弛 + 尾段追加。
+   验证顺序：checks 54 项 → compare.py 四场景 golden → profile P50 →
+   分步对照预期表；trap 预案 = Step2.SyncGrid 无条件化（§9.22 风险段）。
+2. **HitMiss 收尾**（~4-7K）：t1024 已排除大杠杆（gather 核吞吐受限），
    剩批量发射实验 + 杂项。
-4. cold 专项：OpResetRows 33K = htd 1 MiB/行纯写（带宽地板，t1024 持平佐证）。
-5. spec 场景测试（golden 未覆盖，需先扩 reference）。
-6. 远期：fifo/avail 合并单数组（省 1 次冷触 ~3K，host 布局 + golden 改动）。
+3. cold 专项：OpResetRows 33K = htd 1 MiB/行纯写（带宽地板，t1024 持平佐证）；
+   v2.1 后 Rebuild 项预期归零，SetUpdate 成为第二大头。
+4. spec 场景测试（golden 未覆盖，需先扩 reference；v2.1 起 bit1 专指 spec
+   移除，受害者不再标记）。
+5. 远期：fifo/avail 合并单数组（省 1 次冷触 ~3K，host 布局 + golden 改动）。
 
 ## 设备坑速查（详见 stack-overflow 文档与 deep-dive §7）
 
@@ -93,7 +96,7 @@ v2 维护序重构（lru 顺序数组取代 pri 时间戳 + Argtopk 基数选择
 
 ```bash
 git pull
-python3 checks/check_echo_kernel_host.py        # CPU 回归 50 项（纯 stdlib+g++）
+python3 checks/check_echo_kernel_host.py        # CPU 回归 54 项（纯 stdlib+g++）
 bash build.sh && ECHO_PERF_STEP=ON bash build.sh
 python compare.py --device 0 --warmup 2 --repeat 4 --verify-each-sample  # 四场景 golden
 bash profile_kernel.sh --device 0               # kernel 级 P50
@@ -101,8 +104,9 @@ python echo_perf_step.py --device 0 --warmup 5 --repeat 20              # 分步
 ```
 
 调试旋钮（build.sh 环境变量，产物一律进 `build_v2dbg/`，不覆盖正式构建）：
-`ECHO_V2_DEBUG_CUTOFF=1..9`（阶段截断）、`ECHO_V2_SKIP_REBUILD=1`、
-`ECHO_V2_RB_*` 系列、`ECHO_V2_KOPT=-O0..-O3`。
+`ECHO_V2_DEBUG_CUTOFF=1..9`（阶段截断）、`ECHO_V2_KOPT=-O0..-O3`。
+[v2.1] `ECHO_V2_SKIP_REBUILD` 与 `ECHO_V2_RB_*` 系列已随旧 Rebuild 删除
+（旋钮结论本就不跨二进制；旧实验见 git 历史与 deep-dive §9.18/§9.22）。
 **警告**：每个旋钮=不同二进制（含栈帧大小变化），旋钮实验结论只在本二进制内
 有效、跨 commit 不可组合（2026-10-19 的血泪教训，详见 stack-overflow 文档 §5）。
 
@@ -113,7 +117,7 @@ csrc/echo/          Echo kernel (echo_lru_kernel.h 主体) + plugin + launch
 csrc/simt/          SIMT 基线（同事的，一般不动）
 compare.py          基准主控（输入构造/golden/校验/计时）
 echo_perf_step.py   分步周期；profile_kernel.sh|py  kernel 级 P50
-checks/             50 项 CPU 回归（从 kernel.h 文本提取函数 + g++ mock）
+checks/             54 项 CPU 回归（从 kernel.h 文本提取函数 + g++ mock）
 debug_v2_state.py   逐字段 mismatch dump；debug_v2_stepcycles.py  打点取证
 docs/               deep-dive（主文档）+ 栈溢出全记录
 build_t*/ build_perf*/ build_v2dbg/   各构建产物目录（.gitignore）

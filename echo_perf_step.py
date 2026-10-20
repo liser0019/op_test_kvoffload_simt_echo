@@ -44,16 +44,17 @@ assert _MATCH, "echo_lru_tiling.h 中找不到 ECHO_PERF_NUM_STEPS"
 ECHO_PERF_NUM_STEPS = int(_MATCH.group(1))
 
 # 非 spec 路径 Process() 内 PerfBegin/PerfEnd 的 18 个打点（顺序即 perfStepIdx_ 顺序）。
-# [v2 维护序] 相对 v1 的 20 步：Step2 基数选择换成 OpEvictScan；OpFifoInc 并入
-# Step4 的 fifo+=2；OpAllocPriority 换成 OpLruRebuild（Bug2 SyncBlock 随竞争源删除）。
+# [v2.1 2026-10-20] 相对 v2 的变化：Step2 OpEvictScan 与 Step4 OpLruRebuild 融合为
+#   OpClassifyEvict（单趟分类，每步每行必跑），Step4 退化为 OpAllocAppend（尾段
+#   追加，零栅栏）；步名换、步数不变（仍是 18+8=26）。
 # specEnabled=1 时 Step0.5 在 "Step0.SyncGrid" 之后额外插入 8 步，本基准不覆盖。
 ECHO_PERF_STEP_NAMES = [
     "Step0.OpResetRows", "Step0.OpResetDthLru", "Step0.OpResetFree", "Step0.OpResetAvailFifo",
     "Step0.SyncGrid",
     "Step1.OpHitMiss", "Step1.SyncGrid",
-    "Step2.OpEvictScan", "Step2.SyncGrid", "Step2.OpFreeRelease", "Step2.OpFreePush",
+    "Step2.OpClassifyEvict", "Step2.SyncGrid", "Step2.OpFreeRelease", "Step2.OpFreePush",
     "Step3.OpAllocPop", "Step3.SyncGrid",
-    "Step4.OpLruRebuild", "Step4.OpFifoAvailUpdate",
+    "Step4.OpAllocAppend", "Step4.OpFifoAvailUpdate",
     "Step5.OpMissCumsum", "Step5.SyncGrid", "Step5.OpSetUpdate",
 ]
 ECHO_PERF_NONSPEC_STEPS = len(ECHO_PERF_STEP_NAMES)

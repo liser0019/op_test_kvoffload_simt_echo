@@ -14,15 +14,9 @@ SOC_VERSION="ascend950"
 PERF_STEP="${ECHO_PERF_STEP:-OFF}"
 ECHO_THREADS="${ECHO_LRU_THREADS:-1024}"
 V2_CUTOFF="${ECHO_V2_DEBUG_CUTOFF:-0}"
-V2_SKIPRB="${ECHO_V2_SKIP_REBUILD:-OFF}"
-V2_RBSER="${ECHO_V2_RB_SERIAL:-OFF}"
-V2_RBNOD="${ECHO_V2_RB_NOD:-OFF}"
-V2_RBNOTAIL="${ECHO_V2_RB_NOTAIL:-OFF}"
-V2_RBZERO="${ECHO_V2_RB_ZEROONLY:-OFF}"
-V2_RBDCCI="${ECHO_V2_RB_DCCI:-OFF}"
-V2_RBONE="${ECHO_V2_RB_ONEONLY:-OFF}"
-V2_RBZL="${ECHO_V2_RB_ZLOAD:-OFF}"
-V2_RBSYNC="${ECHO_V2_RB_SYNC:-OFF}"
+# [v2.1 2026-10-20] ECHO_V2_SKIP_REBUILD 与 9 个 ECHO_V2_RB_* 旋钮已删: 它们服务
+#   旧 LruRebuild 的栈溢出排查 (§9.18), 重建路径已随单趟分类重构消失。旋钮结论
+#   本就不跨二进制 (每个旋钮=不同栈帧形态), 旧实验记录见 git 历史与 deep-dive。
 V2_KOPT="${ECHO_V2_KOPT:--O3}"
 for arg in "$@"; do
     case "$arg" in
@@ -57,7 +51,7 @@ if ! [[ "$V2_KOPT" =~ ^-O[0123]$ ]]; then
     exit 2
 fi
 if ! [[ "$V2_CUTOFF" =~ ^[0-9]$ ]]; then
-    echo "ECHO_V2_DEBUG_CUTOFF 必须是 0..9 (0=正式构建产物build/; 1..9=调试构建产物build_v2dbg/, 阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7=MisssCumsum后 8=Step5.SyncGrid后 9=全程): $V2_CUTOFF" >&2
+    echo "ECHO_V2_DEBUG_CUTOFF 必须是 0..9 (0=正式构建产物build/; 1..9=调试构建产物build_v2dbg/, 阶段: 1=prologue 2=Step0 3=Step1 4=Step2后 5=Step3后 6=Step4后 7=MissCumsum后 8=Step5.SyncGrid后 9=全程): $V2_CUTOFF" >&2
     exit 2
 fi
 # 使用激活环境中的确切解释器，也让 CMake 使用同一个解释器。
@@ -66,8 +60,8 @@ BUILD_DIR="$SCRIPT_DIR/build"
 if [[ "$PERF_STEP" == "ON" ]]; then
     BUILD_DIR="$SCRIPT_DIR/build_perf"
 fi
-if [[ "$V2_CUTOFF" != "0" || "$V2_SKIPRB" != "OFF" || "$V2_RBSER" != "OFF" || "$V2_RBNOD" != "OFF" || "$V2_RBNOTAIL" != "OFF" || "$V2_RBZERO" != "OFF" || "$V2_RBDCCI" != "OFF" || "$V2_RBSYNC" != "OFF" || "$V2_RBONE" != "OFF" || "$V2_RBZL" != "OFF" || "$V2_KOPT" != "-O3" ]]; then
-    # v2 调试构建 (截断/跳重建) 使用独立目录, 不覆盖正式产物。
+if [[ "$V2_CUTOFF" != "0" || "$V2_KOPT" != "-O3" ]]; then
+    # v2 调试构建 (阶段截断/优化档) 使用独立目录, 不覆盖正式产物。
     BUILD_DIR="$SCRIPT_DIR/build_v2dbg"
 fi
 if [[ "$ECHO_THREADS" != "1024" ]]; then
@@ -81,7 +75,7 @@ fi
 CMAKE_ARGS=(
     -S "$SCRIPT_DIR" -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release -DNPU_ARCH="$SOC_VERSION"
-    -DECHO_PERF_STEP="$PERF_STEP" -DECHO_LRU_THREADS="$ECHO_THREADS" -DECHO_V2_DEBUG_CUTOFF="$V2_CUTOFF" -DECHO_V2_SKIP_REBUILD="$V2_SKIPRB" -DECHO_V2_RB_SERIAL="$V2_RBSER" -DECHO_V2_RB_NOD="$V2_RBNOD" -DECHO_V2_RB_NOTAIL="$V2_RBNOTAIL" -DECHO_V2_RB_ZEROONLY="$V2_RBZERO" -DECHO_V2_RB_DCCI="$V2_RBDCCI" -DECHO_V2_RB_ONEONLY="$V2_RBONE" -DECHO_V2_RB_ZLOAD="$V2_RBZL" -DECHO_V2_RB_SYNC="$V2_RBSYNC"
+    -DECHO_PERF_STEP="$PERF_STEP" -DECHO_LRU_THREADS="$ECHO_THREADS" -DECHO_V2_DEBUG_CUTOFF="$V2_CUTOFF"
     -DECHO_KERNEL_OPT_LEVEL="$V2_KOPT"
     -DPython3_EXECUTABLE="$BUILD_PYTHON")
 for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
