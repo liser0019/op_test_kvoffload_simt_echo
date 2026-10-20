@@ -33,12 +33,13 @@ SIMT 基线（`csrc/simt/`，同仓对照）竞争。
 1. 本文件
 2. `docs/ascend_vec_simt_stack_overflow.md` — 最阴险的设备坑，先读
 3. `docs/echo_lru_deep_dive.md` — 技术深读（注意头部 **v2 转型 banner**；
-   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.23 最新（§9.20/§9.21 是负结果
-   与微架构实测结论；§9.22 是 v2.1 单趟分类，已上板验证；**§9.23 是 v2.1-prof
-   打点升级——已落地待上板验证，必读**）；§10.3 是方向清单）
+   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.24 最新（§9.20/§9.21 是负结果
+   与微架构实测结论；§9.22 是 v2.1 单趟分类，已上板验证；§9.23 是 v2.1-prof
+   打点升级，已上板验证——验证记录/频率漂移结论/栅栏读法注记；**§9.24 是
+   v2.2 flags 世代号化——已落地待上板验证，必读**）；§10.3 是方向清单）
 4. `README.md` — 工程全貌
 
-## 当前状态（2026-10-20，tag `v2.1`，上板全过）
+## 当前状态（2026-10-20，v2.2 落地待验证；最近已验证 = tag `v2.1`）
 
 v2.1 单趟分类 + 平局松弛 + 尾段追加（§9.22）验证通过——**首次 warm×2 + full
 三场景全部 ≤ SIMT，full 首破 100**：
@@ -50,29 +51,42 @@ v2.1 单趟分类 + 平局松弛 + 尾段追加（§9.22）验证通过——**�
 | warm_all_hit | 81.54 | **69.33** | **0.85×** | −6.3% |
 | full_cache_75pct | 93.23 | **82.12** | **0.88×** | −18.5% |
 
-- 快照链：tag `v2.1`（现行）→ `v2.0`（§9.17-§9.21，含 opt3/t1024 负结果与
-  微架构实测结论）→ `v1-argtopk-final`（Argtopk 版，full 120.92）
-- 分步热点（full 口径）：ClassifyEvict 29K（含 3 栅栏 ~11K）、HitMiss 24K
-  （gather 吞吐地板）、MissCumsum 16.4K（45% 栅栏）、SetUpdate 14.2K、
-  FreeRelease 7.1K、FifoAvail ~6.4K（地板）、SyncGrid 槽 ~15K
-- 距 50-60 目标还差 ~25-30%；剩余大头逐项变贵——先精确打点（§10.3①）再动刀
+**v2.2 flags 世代号化（§9.24，commit `284ff71`，NPU 待验证）**：删 OpZeroFlags
++ prologue SyncGrid（§9.23 验证轮实测两槽 13.7-13.9K cyc、占跨度 8.5-11.9%）
+——flags 改世代号等值链（hit=gen / spec=gen+1；gen 从 1 起每次调用 +4，窗
+{4k+1,4k+2}；0/I32_MAX/陈旧值窗外免疫）。**生产契约变化：workspace 分配时
+清零一次**（compare.py 已 empty→zeros）。预期临界路径 −7~10K/场景：full
+~76-78 / warm75 ~65-67 / warm_all ~63-65 / cold ~90-92 μs；上板实测 <6K 则
+复盘账目。
+
+- 快照链：v2.2 = `284ff71`（未打 tag，验证后打）→ tag `v2.1`（最近已验证）
+  → `v2.0`（§9.17-§9.21，含 opt3/t1024 负结果与微架构实测结论）→
+  `v1-argtopk-final`（Argtopk 版，full 120.92）
+- 分步热点（full，v2.1-prof 新口径 = 绝对戳差分含间隙，§9.23 验证轮）：Step5
+  簇 38.7K（MissCumsum 17.8 + SyncGrid 5.4 + SetUpdate 15.5，最大簇）、
+  ClassifyEvict 31.1K（含 3 栅栏）、HitMiss 27.8K（gather 吞吐地板，skew 6.8K
+  数据相关长尾）、FreeRelease+FreePush 13.3K、prologue 两槽 13.8K（v2.2 删）、
+  FifoAvail 4.9K（地板）
+- 距 50-60 目标还差 ~25-30%（v2.2 兑现后再算）；精确打点已收口（§9.23），
+  剩余大头见 §10.3 新排序
 
 ## 下一步优先级（deep-dive §10.3，按序）
 
-1. **精确打点（专家意见 2026-10-20；②③已落地 §9.23，NPU 待验证）**：①msprof
-   应用级采集（torch_npu profiler 只有 kernel 级时长；task-based --aic-metrics
-   另给 PipeUtilization/Memory/L2 等 per-launch 行——**勿用 msprof op**，对
-   torch 负载不适配；首轮已出三结论：主频 1.585 GHz / 分步对账 94% 缺口
-   ~10K = prologue/进出 / vec 管线主导；待补采 L2Cache、ResourceConflictRatio、
-   Memory 三组与逐核 task_cyc）；②kernel 内时间戳升级 + ③echo_perf_step 标定
-   修正**已落地**（绝对戳 29 槽、1.585 GHz 常数、--p50-us 锚点、skew、
-   --matrix CSV + prof_report.py HTML 报告，§9.23）——待上板验证：四场景
-   echo_perf_step + 一轮 --matrix/prof_report + 可选 ECHO_PERF_DRAIN 对照。
-2. **ClassifyEvict 再削**（full 29K → 目标 −3-6K）：B3 尾栅栏依赖重审
+**立即待办 = v2.2 上板验证**（§9.24 验证计划）：checks 56 → 双构建 → 四场景
+golden（语义等价 ⟹ 逐字段不变）→ profile A/B（基线 full 82.24 / warm75 71.30 /
+warm_all 68.96 / cold 96.19）→ 分步对照（prologue 两槽应消失；跨度基线 full
+136.0K / warm75 116.2K / warm_all 113.4K / cold 160.2K）。msprof 仍挂起：
+L2Cache / ResourceConflictRatio / Memory 三组 task-based 计数器 + 逐核
+task_cyc（**勿用 msprof op**，对 torch 负载不适配）。
+
+1. **ClassifyEvict 再削**（full 31.1K 新口径 → 目标 −3-6K）：B3 尾栅栏依赖重审
    （freeIdx 首读者是 FreeRelease）、staging 合并、切片杂项。
-3. **SetUpdate/FreeRelease/HitMiss 收尾**（各 −2-4K）：htd 冷 store 簇与
-   dth 读合并、HitMiss 批量发射实验。
-4. cold 专项：ResetRows 32.6K ≈ 带宽地板（1.6 TB/s 已高利用率）。
+2. **Step5 簇**（full 最大簇 38.7K = MissCumsum 17.8 + SyncGrid 5.4 +
+   SetUpdate 15.5）：htd 冷 store 簇与 FreeRelease dth 读合并、MissCumsum
+   杂项 ~2K、簇间栅栏依赖重审。
+3. **HitMiss gather 地板**（27.8K、skew 6.8K 数据相关长尾）：批量发射实验。
+4. cold 专项：reset 簇 53.4K（ResetRows 34.0K ≈ 带宽地板，1.6 TB/s 已高
+   利用率）。
 5. spec 场景测试（golden 未覆盖，需先扩 reference）。
 6. 混合范式预研（专家意见，parked——纯 SIMT 收尾后评估）；远期：fifo/avail
    合并单数组。
@@ -86,7 +100,9 @@ v2.1 单趟分类 + 平局松弛 + 尾段追加（§9.22）验证通过——**�
   是它的指纹，出现即停止语义排查。
 - 507034 = 超时：先 `npu-smi info` 查占用/换卡，再归因代码。
 - GM 跨线程写后读要 dcci 三明治；同地址 atomic ~9K cyc；UB 必须单大数组
-  （多数组别名）；无 64 位运算；Event 计时不可信（用 profiler/分步周期）。
+  （多数组别名）；无 64 位运算；Event 计时不可信（用 profiler/分步周期）；
+  **两 run 频率可漂移 ~4-5%**（§9.23 验证轮实锤）——决策用 cycles、锚点逐
+  场景给、profile_kernel 与 echo_perf_step 背靠背连跑。
 - **冷访存微架构（2026-10-19/20 实测，§9.20/§9.21）**：单发冷 GM 触（少量
   在途）串行 ~3-4K/次，冷行 store 同价（非 fire-and-forget）；批量 gather 是
   核级吞吐受限（加线程无用）；栅栏随线程数翻倍（t512 ~3.7K / t1024 ~6-8K）
@@ -97,13 +113,17 @@ v2.1 单趟分类 + 平局松弛 + 尾段追加（§9.22）验证通过——**�
 
 ```bash
 git pull
-python3 checks/check_echo_kernel_host.py        # CPU 回归 54 项（纯 stdlib+g++）
+python3 checks/check_echo_kernel_host.py        # CPU 回归 56 项（纯 stdlib+g++）
 bash build.sh && ECHO_PERF_STEP=ON bash build.sh
 python compare.py --device 0 --warmup 2 --repeat 4 --verify-each-sample  # 四场景 golden
-bash profile_kernel.sh --device 0               # kernel 级 P50
+bash profile_kernel.sh --device 0               # kernel 级 P50（与下步背靠背连跑）
 python echo_perf_step.py --device 0 --warmup 5 --repeat 20 --matrix results/perf \
-    --p50-us <本轮kernel级P50>                   # 分步（v2.1-prof 绝对戳 + 1.585GHz 标定，§9.23）
-python prof_report.py --matrix results/perf_<场景> --p50-us <本轮kernel级P50> \
+    --p50-us cold_reset=96.19,warm_75pct=71.30,warm_all_hit=68.96,full_cache_75pct=82.24
+                                                # 分步（v2.1-prof 绝对戳，§9.23）；锚点 = 上一步
+                                                # 各场景 P50，逗号分隔"场景=值"逐场景语法（示例值
+                                                # 为 v2.1-prof 轮；纯浮点 = 全场景统一旧行为）；
+                                                # 自带漂移探测——WARNING 时 μs 仅参考，决策用 cycles
+python prof_report.py --matrix results/perf_<场景> --p50-us <该场景P50> \
     --out results/perf_<场景>.html              # 单文件 HTML 报告（可加 --op-summary，浏览器打开）
 ```
 
@@ -125,9 +145,10 @@ csrc/simt/          SIMT 基线（同事的，一般不动）
 compare.py          基准主控（输入构造/golden/校验/计时）
 echo_perf_step.py   分步（v2.1-prof 绝对戳 + --matrix CSV）；profile_kernel.sh|py  kernel 级 P50
 prof_report.py      分步数据 → 单文件 HTML 报告（对账条/热力图/逐步聚合/op 表，§9.23）
-checks/             54 项 CPU 回归（从 kernel.h 文本提取函数 + g++ mock）
+checks/             56 项 CPU 回归（从 kernel.h 文本提取函数 + g++ mock；v2.2 增
+                    陈旧/audit 免疫与 HitMiss 覆写用例）
 debug_v2_state.py   逐字段 mismatch dump；debug_v2_stepcycles.py  打点取证
-                    （[v2.1-prof 注记] stepcycles 的 ">=0 已写" 判定需改哨兵等值，§9.23 遗留）
+                    （[v2.1-prof] 哨兵等值判定，§9.23 遗留项已修）
 docs/               deep-dive（主文档）+ 栈溢出全记录
 build_t*/ build_perf*/ build_v2dbg/   各构建产物目录（.gitignore）
 ```
