@@ -38,43 +38,41 @@ SIMT 基线（`csrc/simt/`，同仓对照）竞争。
    §10.3 是方向清单）
 4. `README.md` — 工程全貌
 
-## 当前状态（2026-10-20，v2.1 已实现待验证）
+## 当前状态（2026-10-20，tag `v2.1`，上板全过）
 
-> [v2.1 2026-10-20] 单趟分类 + 平局松弛 + 尾段追加已实现（§9.22，owner 已
-> 批准规格），**NPU 待验证**——下列 v2.0 数字为对照基线，预期 warm_all
-> ~67-69 / warm75 ~68-71 / full ~79-83 / cold ~87-90。
+v2.1 单趟分类 + 平局松弛 + 尾段追加（§9.22）验证通过——**首次 warm×2 + full
+三场景全部 ≤ SIMT，full 首破 100**：
 
-v2 维护序重构（lru 顺序数组取代 pri 时间戳 + Argtopk 基数选择，§9.17）+
-栈溢出修复（§9.18）+ opt1/2（§9.19）全部上板验证通过：
+| 场景 | SIMT | Echo v2.1 | Echo/SIMT | vs v2.0 |
+|---|---:|---:|---:|---:|
+| cold_reset | 74.54 | 99.59 | 1.34× | −8.0% |
+| warm_75pct | 80.72 | **71.36** | **0.88×** | −8.0% |
+| warm_all_hit | 81.54 | **69.33** | **0.85×** | −6.3% |
+| full_cache_75pct | 93.23 | **82.12** | **0.88×** | −18.5% |
 
-| 场景 | SIMT | Echo v2 | Echo/SIMT |
-|---|---:|---:|---:|
-| cold_reset | 74.33 | 108.19 | 1.46× |
-| warm_75pct | 80.73 | 77.59 | 0.96× |
-| warm_all_hit | 80.92 | 74.02 | 0.91× |
-| full_cache_75pct | 93.11 | **100.68** | **1.08×** |
-
-- v1 终版回退点：tag `v1-argtopk-final`（Argtopk 版，full 120.92）
-- warm 与 SIMT 持平；full 距 50-60 目标还差 ~40-50%
-- 分步热点（warm 口径）：Rebuild 33K（固定开销主导）、HitMiss 25K、
-  Cumsum 16.5K、SetUpdate 14.8K、FifoAvail 6.2K（**地板项**：2 次冷触，
-  opt3 已证伪 ~1K 假设并回退，§9.20）
-- 当前 HEAD = **v2.1 单趟分类（§9.22，已实现待上板验证）**；v2.0 快照 tag
-  `v2.0`（opt3 预置摊销与 t1024 两个方向已测负并回退，微架构结论见 §9.20/
-  §9.21；t512 为正确线程数，v1/v2 双证实）
+- 快照链：tag `v2.1`（现行）→ `v2.0`（§9.17-§9.21，含 opt3/t1024 负结果与
+  微架构实测结论）→ `v1-argtopk-final`（Argtopk 版，full 120.92）
+- 分步热点（full 口径）：ClassifyEvict 29K（含 3 栅栏 ~11K）、HitMiss 24K
+  （gather 吞吐地板）、MissCumsum 16.4K（45% 栅栏）、SetUpdate 14.2K、
+  FreeRelease 7.1K、FifoAvail ~6.4K（地板）、SyncGrid 槽 ~15K
+- 距 50-60 目标还差 ~25-30%；剩余大头逐项变贵——先精确打点（§10.3①）再动刀
 
 ## 下一步优先级（deep-dive §10.3，按序）
 
-1. **v2.1 上板验证**（§9.22，已实现）：单趟分类 + 平局松弛 + 尾段追加。
-   验证顺序：checks 54 项 → compare.py 四场景 golden → profile P50 →
-   分步对照预期表；trap 预案 = Step2.SyncGrid 无条件化（§9.22 风险段）。
-2. **HitMiss 收尾**（~4-7K）：t1024 已排除大杠杆（gather 核吞吐受限），
-   剩批量发射实验 + 杂项。
-3. cold 专项：OpResetRows 33K = htd 1 MiB/行纯写（带宽地板，t1024 持平佐证）；
-   v2.1 后 Rebuild 项预期归零，SetUpdate 成为第二大头。
-4. spec 场景测试（golden 未覆盖，需先扩 reference；v2.1 起 bit1 专指 spec
-   移除，受害者不再标记）。
-5. 远期：fifo/avail 合并单数组（省 1 次冷触 ~3K，host 布局 + golden 改动）。
+1. **精确打点（专家意见 2026-10-20）**：①msprof op 一轮（torch_npu profiler
+   只有 kernel 级时长；msprof op 另给 Current/Rated Freq、逐核 aiv_time、
+   PipeUtilization、Memory/UB 带宽、L2、Bank Conflict——skill:
+   ops-profiling/msprof-op-guide，注意它**不含** kernel 内函数级拆解）；
+   ②kernel 内时间戳升级（每核绝对时间戳→核间 skew；可选排空模式开关）；
+   ③echo_perf_step.py 标定修正（--p50-us 外部锚点替代 Event 假频率）。
+2. **ClassifyEvict 再削**（full 29K → 目标 −3-6K）：B3 尾栅栏依赖重审
+   （freeIdx 首读者是 FreeRelease）、staging 合并、切片杂项。
+3. **SetUpdate/FreeRelease/HitMiss 收尾**（各 −2-4K）：htd 冷 store 簇与
+   dth 读合并、HitMiss 批量发射实验。
+4. cold 专项：ResetRows 32.6K ≈ 带宽地板（1.6 TB/s 已高利用率）。
+5. spec 场景测试（golden 未覆盖，需先扩 reference）。
+6. 混合范式预研（专家意见，parked——纯 SIMT 收尾后评估）；远期：fifo/avail
+   合并单数组。
 
 ## 设备坑速查（详见 stack-overflow 文档与 deep-dive §7）
 
