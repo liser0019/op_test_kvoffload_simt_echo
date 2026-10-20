@@ -24,6 +24,18 @@
     列=27 槽原始绝对戳）与 <prefix>_<scenario>_steps.csv（行=块，列=26 步耗时 +
     末列 entry→末戳总跨度），供 prof_report.py 生成 HTML 报告。非 spec 构建下
     8 个 spec 步列恒为空。
+  - [2026-10-20 二轮] --p50-us 每场景锚点 + 跨 run 漂移探测。锚点是
+    profile_kernel.sh 的 kernel 级 P50，从**独立 run** 进口——两 run 频率可漂移
+    （本轮实锤：四场景按各自 P50 反推隐含频率 1.63-1.67 GHz，均高于 msprof 首轮
+    1.585；且曾把 full 的 P50=82.24 误传给全部四场景，其余三场景 μs 换算全错，
+    cycles 不受影响）。故：①语法升级——纯浮点=全场景统一锚点（旧行为，向后
+    兼容）；逗号分隔 "场景=值" 列表=逐场景锚点，未列出的场景回落默认 1.585 GHz
+    档（行为与打印同无锚点）。②对每个有锚点场景探测——跨度按默认频率换算
+    超过 P50 时打醒目 WARNING（跨度是 kernel 内部区间 entry→末戳，恒应小于
+    kernel 总时长，该不等式逻辑上不可能，唯一解释是两 run 频率不同；此时 μs 列
+    仅参考）；隐含频率偏离 1.585 GHz >2% 但未触发前者时打 NOTE（跨 run 漂移
+    常见量级，μs 等比例缩放，占比/排序不受影响）。③收尾打印各锚点场景隐含频率
+    对照，离散 >3% 再提示（run 内频率波动或锚点口径问题的信号）。
 
 前置条件（与 compare.py 的正式测量分开构建，互不覆盖）：
 
@@ -48,6 +60,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -201,6 +214,57 @@ def write_matrix_csvs(args, scenario, blocks, rep_matrix, freq_hz, freq_source):
     return abs_path, steps_path
 
 
+def parse_p50_us(raw, parser):
+    """解析 --p50-us → None / float（全场景统一）/ {场景: float}（逐场景）。
+
+    [为什么手写解析而非 argparse type=float] 锚点有三种形态（缺省 / 标量 /
+    逐场景映射），逐场景还要校验名表、正有限值、两种语法不得混用——超出单个
+    type= 回调的表达力；集中在此报错才能给出两种合法用法的完整示例。
+    场景名对照 compare.SCENARIOS（与本脚本 --scenario 同表），且与本次选了哪些
+    场景无关：列表允许包含本轮不跑的合法场景（同一条锚点命令常配合不同
+    --scenario 子集复用），只有拼错的场景名才算错。
+    """
+    if raw is None:
+        return None
+    raw = raw.strip()
+    usage = ("用法一（全场景统一）：--p50-us 82.24；用法二（逐场景）："
+             "--p50-us cold_reset=96.19,warm_75pct=71.30,warm_all_hit=68.96,"
+             "full_cache_75pct=82.24（未列出场景回落默认 1.585 GHz 档）；两种语法不能混用")
+    if not raw:
+        parser.error(f"--p50-us 不能为空。{usage}")
+    if "=" not in raw and "," not in raw:
+        # 纯浮点形态：全场景统一锚点（旧行为，向后兼容）。
+        try:
+            value = float(raw)
+        except ValueError:
+            parser.error(f"--p50-us 无法解析为浮点：{raw!r}。{usage}")
+        if not (math.isfinite(value) and value > 0):
+            parser.error(f"--p50-us 必须为正有限数（μs）：{raw!r}")
+        return value
+    # 列表形态：每项必须是 场景=值；混进任何无 '=' 的条目即两种语法混用。
+    anchors = {}
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            parser.error(f"--p50-us 列表含空条目（检查多余逗号）：{raw!r}。{usage}")
+        if "=" not in item:
+            parser.error(f"--p50-us 两种语法混用（条目 {item!r} 不含 '='）。{usage}")
+        name, _, value_str = item.partition("=")
+        name, value_str = name.strip(), value_str.strip()
+        if name not in SCENARIOS:
+            parser.error(f"--p50-us 未知场景名 {name!r}；合法场景：{', '.join(SCENARIOS)}。{usage}")
+        if name in anchors:
+            parser.error(f"--p50-us 场景 {name} 重复给出（{anchors[name]:g} 与 {value_str}）")
+        try:
+            value = float(value_str)
+        except ValueError:
+            parser.error(f"--p50-us 场景 {name} 的值无法解析为浮点：{value_str!r}")
+        if not (math.isfinite(value) and value > 0):
+            parser.error(f"--p50-us 场景 {name} 的值必须为正有限数（μs）：{value_str!r}")
+        anchors[name] = value
+    return anchors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -216,9 +280,13 @@ def main():
     parser.add_argument("--library", type=Path,
                         default=ROOT / "build_perf/libsimt_vs_echo_ops.so",
                         help="ECHO_PERF_STEP=ON 构建的共享库；默认 build_perf/libsimt_vs_echo_ops.so")
-    parser.add_argument("--p50-us", type=float, default=None,
-                        help="外部锚点：kernel 级 P50（μs，来自 profile_kernel.sh）。给了则用 "
-                             "ΣΔ(最慢核跨度中位)/P50 标定频率并打印两档对照；默认用 1.585 GHz 常数")
+    parser.add_argument("--p50-us", default=None,
+                        help="外部锚点：kernel 级 P50（μs，来自 profile_kernel.sh）。纯浮点=全场景"
+                             "统一锚点（如 --p50-us 82.24，旧行为）；或逗号分隔的 场景=值 列表逐场景"
+                             "给锚点（如 --p50-us cold_reset=96.19,full_cache_75pct=82.24），未列出的"
+                             "场景回落默认 1.585 GHz 档。有锚点的场景用 ΣΔ(最慢核跨度中位)/P50 标定"
+                             "并打印两档对照 + 跨 run 漂移探测（锚点来自独立 run，跨度@默认频率超过"
+                             "P50 即两 run 频率漂移实锤，届时 μs 列仅参考）")
     parser.add_argument("--matrix", type=Path, default=None,
                         help="导出前缀：每场景写 <prefix>_<scenario>_abs.csv 与 "
                              "<prefix>_<scenario>_steps.csv（代表轮，行=块），供 prof_report.py")
@@ -228,8 +296,8 @@ def main():
         parser.error("需要 rows>0、0<topk<=capacity<=4096、max_token>topk")
     if args.warmup < 0 or args.repeat <= 0:
         parser.error("warmup>=0、repeat>0")
-    if args.p50_us is not None and not (args.p50_us > 0):
-        parser.error("--p50-us 必须为正数（μs）")
+    # 锚点解析（含全部校验）：None / 全场景浮点 / 逐场景映射，见 parse_p50_us。
+    p50_anchors = parse_p50_us(args.p50_us, parser)
     scenarios = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
 
     try:
@@ -275,10 +343,14 @@ def main():
         "step_names": ECHO_PERF_STEP_NAMES,
         "duration_names": ECHO_PERF_DURATION_NAMES,
         "freq_hz_default": ECHO_FREQ_HZ,
-        "p50_us_anchor": args.p50_us,
+        # 解析后的锚点结构：None | float（全场景统一，与旧 JSON 同型）| {场景: μs}
+        # （逐场景；未列出场景 = 无锚点，用 freq_hz_default）。
+        "p50_us_anchor": p50_anchors,
     }
     print("实际加载共享库:", library_path, flush=True)
     results = {"metadata": metadata, "scenarios": {}}
+    # (场景, 隐含频率 span/P50)——仅收有锚点的场景，收尾漂移汇总用（见循环后）。
+    implied_freqs = []
 
     for scenario in scenarios:
         case = make_case(args.rows, args.topk, args.capacity, args.max_token, scenario, args.seed)
@@ -351,22 +423,49 @@ def main():
 
         # 频率口径：默认 1.585 GHz 常数（msprof 实测）；--p50-us 锚点给了则
         #   freq = ΣΔ(最慢核跨度中位)/P50（跨度不含 Init/kernel 进出，锚点口径
-        #   会略高——两档对照即暴露该差）。
+        #   会略高——两档对照即暴露该差）。[2026-10-20 二轮] 锚点逐场景取值：
+        #   纯浮点形态作用于全部场景（旧行为）；列表形态未列出的场景回落默认档，
+        #   行为与打印同无锚点。
+        anchor_us = p50_anchors.get(scenario) if isinstance(p50_anchors, dict) else p50_anchors
         freq_hz = ECHO_FREQ_HZ
         freq_source = "const 1.585GHz (msprof §10.3①)"
-        if args.p50_us is not None:
-            freq_hz = span_median / (args.p50_us * 1e-6)
-            freq_source = f"anchor ΣΔ/P50 ({span_median:.0f}cyc/{args.p50_us}μs)"
+        if anchor_us is not None:
+            freq_hz = span_median / (anchor_us * 1e-6)
+            freq_source = f"anchor ΣΔ/P50 ({span_median:.0f}cyc/{anchor_us}μs)"
         est_us = median_cycles / freq_hz * 1e6
         pct = median_cycles / sum_step_median * 100.0
 
         print(f"  频率口径: {freq_source} → {freq_hz / 1e9:.4f} GHz"
-              + (f"（默认档 {ECHO_FREQ_HZ / 1e9:.3f} GHz 对照）" if args.p50_us is not None else
+              + (f"（默认档 {ECHO_FREQ_HZ / 1e9:.3f} GHz 对照）" if anchor_us is not None else
                  "（--p50-us 可给外部锚点对照）"), flush=True)
-        if args.p50_us is not None:
+        if anchor_us is not None:
             print(f"    两档对照: 最慢核跨度中位 {span_median:.0f} cyc ≈ "
                   f"{span_median / ECHO_FREQ_HZ * 1e6:.2f} μs @1.585GHz / "
                   f"{span_median / freq_hz * 1e6:.2f} μs @锚点", flush=True)
+            # 跨 run 漂移探测（[2026-10-20 二轮]，动机见模块 docstring）：锚点来自
+            #   profile_kernel.sh 的独立 run，两 run 频率可漂移。两个信号按严重度
+            #   递进——①跨度按默认频率换算 > P50：跨度是 kernel 内部区间
+            #   （entry→末戳），恒应小于 kernel 总时长，该不等式逻辑上不可能成立
+            #   （代数上等价于隐含频率 > 1.585 GHz），唯一解释是锚点 run 比打点
+            #   run 频率慢，此时 μs 列不可信；②隐含频率偏离 1.585 GHz 超过 2% 但
+            #   未触发 ①：跨 run 漂移常见量级，μs 等比例缩放即可，只给 NOTE 不
+            #   惊动用户。两种情况下 cycles 列都不受影响（换算前的原始统计）。
+            #   收尾还有第三信号：各场景隐含频率离散（见循环后汇总）。
+            implied_freqs.append((scenario, freq_hz))
+            span_us_default = span_median / ECHO_FREQ_HZ * 1e6
+            if span_us_default > anchor_us:
+                print(f"    *** WARNING[漂移] *** 最慢核跨度中位 {span_median:.0f} cyc 按默认 "
+                      f"{ECHO_FREQ_HZ / 1e9:.3f} GHz 换算 = {span_us_default:.2f} μs > 锚点 P50 "
+                      f"{anchor_us} μs（隐含频率 {freq_hz / 1e9:.4f} GHz）—— 跨度是 kernel 内部区间"
+                      "（entry→末戳），恒应小于 kernel 总时长，此不等式逻辑上不可能；"
+                      "跨 run 频率漂移实锤（锚点 run 与打点 run 频率不同），本场景 μs 列仅参考，"
+                      "cycles 不受影响；建议 profile_kernel 与 echo_perf_step 背靠背连跑或用 msprof "
+                      "同 run 锚定", flush=True)
+            elif abs(freq_hz - ECHO_FREQ_HZ) / ECHO_FREQ_HZ > 0.02:
+                dev_pct = (freq_hz - ECHO_FREQ_HZ) / ECHO_FREQ_HZ * 100.0
+                print(f"    NOTE[漂移]: 隐含频率 {freq_hz / 1e9:.4f} GHz vs 默认 "
+                      f"{ECHO_FREQ_HZ / 1e9:.3f} GHz 偏差 {dev_pct:+.1f}%（未触发不可能不等式）—— "
+                      "±几 % 属跨 run 漂移常见量级，μs 等比例缩放，占比/排序不受影响", flush=True)
         print(f"  对账: 最慢核跨度(entry→末戳)中位 {span_median:.0f} cyc ≈ "
               f"{span_median / freq_hz * 1e6:.2f} μs; Σ步max中位 {sum_step_median:.0f} cyc "
               f"(跨核逐峰求和, 仅参考; msprof 单核均值 ~131.5K cyc @full_cache, §10.3①); "
@@ -418,6 +517,21 @@ def main():
             "correctness": "passed",
             "case_sha256": array_hash({k: v for k, v in case.items() if isinstance(v, np.ndarray)}),
         }
+
+    # 收尾漂移汇总（第三信号）：各锚点场景的隐含频率对照。若同一轮里四场景反推
+    #   出的频率彼此离散（(max−min)/min > 3%），说明 run 内频率波动或某个锚点
+    #   口径不对（拿错 run 的 P50、场景配错）——值得回查锚点来源，而不是直接
+    #   采信 μs 列。无锚点场景不参与（没有隐含频率可言）。
+    if implied_freqs:
+        freq_values = [f for _, f in implied_freqs]
+        f_min, f_max = min(freq_values), max(freq_values)
+        print("隐含频率对照(仅有锚点场景): " + ", ".join(
+            f"{s}={f / 1e9:.4f}GHz" for s, f in implied_freqs), flush=True)
+        spread = (f_max - f_min) / f_min
+        if spread > 0.03:
+            print(f"  提示: 隐含频率离散 (max−min)/min = {spread * 100:.1f}% > 3% —— "
+                  "run 内频率波动或锚点口径问题的信号（核对各锚点是否来自同一轮、"
+                  "同一口径的 profile_kernel run）", flush=True)
 
     args.json.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
