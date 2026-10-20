@@ -32,7 +32,7 @@ root=Path(__file__).resolve().parents[1]
 # 修改 tiling 后误用旧模型。
 tiling=(root/'csrc/echo/echo_lru_tiling.h').read_text()
 for name,value in [('ARGTOPK_GROUP_THREADS',64),('ARGTOPK_UB_NPAD_MAX',8192),
-                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',26)]:
+                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',29)]:
     match=re.search(r'constexpr uint32_t '+name+r'\s*=\s*(\d+)\s*;',tiling)
     assert match and int(match.group(1))==value, f'{name} 已改变，请同步调整 CPU 模型'
 src=(root/'csrc/echo/echo_lru_kernel.h').read_text()

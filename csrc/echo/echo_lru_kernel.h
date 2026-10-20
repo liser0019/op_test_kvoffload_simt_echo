@@ -50,7 +50,8 @@
 #include "simt_api/device_atomic_functions.h"   // asc_atomic_add
 #include "simt_api/device_functions.h"          // asc_dcci_entire
 #include "simt_api/device_warp_functions.h"     // asc_shfl_up / asc_reduce_add ([P0/P1/P3] warp 协作)
-// clock() (PerfBegin/PerfEnd 分步打点) 由 common_functions.h → utils/debug/asc_time.h 提供
+// clock() ([v2.1-prof] PerfEntry/PerfEnd 绝对时间戳打点; v2 时代为 PerfBegin/PerfEnd
+// 差值) 由 common_functions.h → utils/debug/asc_time.h 提供
 // (3510 纯 SIMT 下返回 uint64_t 周期计数).
 // Path A does not use cooperative_groups; avoid an unnecessary CANN 9.2 dependency.
 
@@ -977,14 +978,18 @@ public:
         wsMissRankGm_ = ws + o; o += R * topkDim;
         flagsGm_      = ws + o; o += R * (B + 1);       // [v2] 分类位: bit0=hit; bit1=spec 移除 ([v2.1] 受害者不再标记)
 
-        // GM workspace 尾部: [ECHO_PERF_STEP] 每核分步周期 [bn*ECHO_PERF_NUM_STEPS]。
-        //   与 host 侧 EchoWorkspaceElements 公式逐项一致 (v1 的 argtopk 诊断 dump 区已随基数选择删除)。
+        // GM workspace 尾部: [ECHO_PERF_STEP] 每核分步打点区 [bn*ECHO_PERF_NUM_STEPS]。
+        //   [v2.1-prof 2026-10-20] 语义从 "第 k 步差值" 改为 "第 k 个标记点的 t0
+        //   绝对 clock 低 32 位" (slot 0=entry, 1/2=prologue, 3..20=非 spec 18 步,
+        //   槽位表见 Process 注释与 tiling.h ECHO_PERF_NUM_STEPS 注释); host 侧
+        //   uint32 回绕差分还原步耗时。与 host 侧 EchoWorkspaceElements 公式逐项
+        //   一致 (v1 的 argtopk 诊断 dump 区已随基数选择删除)。
         uint32_t bn = tiling_.blockNum;
         uint32_t elemOff = (o + 1u) & ~1u;  // 8 字节对齐 (2×int32)
 
-        stepCyclesGm_ = nullptr;
+        stepAbsGm_ = nullptr;
 #ifdef ECHO_PERF_STEP
-        stepCyclesGm_ = ws + elemOff;
+        stepAbsGm_ = ws + elemOff;
         elemOff += bn * ECHO_PERF_NUM_STEPS;
 #endif
         perfStepIdx_ = 0u;
@@ -1047,10 +1052,25 @@ public:
     }
 
     // Process: 各步顺序执行, 步间 SyncGrid() (块内 syncthreads + dcci) 解决行内跨线程 RAW.
-    //   ECHO_PERF_STEP 构建下 PerfBegin/PerfEnd 把每步 t0 的 clock() 周期写入 workspace
-    //   尾部 (见 tiling.h ECHO_PERF_NUM_STEPS); 普通构建为空操作, 不改变行为.
+    //   ECHO_PERF_STEP 构建下 PerfEnd 在每个步末把 t0 的 clock() 绝对时间戳 (低 32 位)
+    //   写入 workspace 尾部 (见 tiling.h ECHO_PERF_NUM_STEPS); 普通构建为空操作,
+    //   不改变行为.
+    // [v2.1-prof 2026-10-20] 打点从 PerfBegin/PerfEnd 差值改为 "entry + 步末绝对戳"
+    //   (PerfBegin/perfLast_ 已删): 步 i 耗时 = t[i+1]-t[i] (host 侧 uint32 回绕差分),
+    //   步间间隙自然归属到下一步 —— v2.1 分步 Σ 只覆盖单核 ~131.5K cyc 的 94%, 缺口
+    //   = 未打点 prologue ~10K + 槽间隙 (msprof 对账, §10.3①); 本轮 prologue 纳入
+    //   打点 + 间隙可见, 覆盖预期 ~100% (Init/kernel 进出仍在 slot 0 之外, §9.23).
+    // [v2.1-prof 槽位表 (名表顺序, 与 echo_perf_step.py ECHO_PERF_STEP_NAMES 逐项一致)]:
+    //   slot 0  = entry (Process 进入, PerfEntry 写)
+    //   slot 1  = prologue.OpZeroFlags 末 (spec 的 OpFillZero 不打点 → 并入 slot 2 差分)
+    //   slot 2  = prologue.SyncGrid 末
+    //   slot 3..20 = 非 spec 18 步 (下表)
+    //   spec 8 步按现行约定 (v2 起) 插在 Step0.SyncGrid 之后: 顺序计数器语义下
+    //     实际落位 slot 8..15, 后续非 spec 步顺延 16..28; 名表尾部 21..28 仅陈列,
+    //     非 spec 构建 (本基准 spec_enabled=False) 该 8 槽恒为哨兵 (不写).
     // [v2 步表 (非 spec 18 步, v1 为 20; [v2.1] Step2/Step4 换 Op)]:
-    //   prologue(无打点): OpZeroFlags(+spec OpFillZero) + SyncGrid
+    //   prologue: OpZeroFlags(+spec OpFillZero) + SyncGrid —— 2 槽
+    //     ([v2.1-prof] 起纳入打点, 原 "prologue(无打点)")
     //   Step0 (anyReset 门控): OpResetRows / OpResetDthLru / OpResetFree /
     //     OpResetAvailFifo + SyncGrid —— 5 槽
     //   Step1: OpHitMiss (hit→flags bit0) + SyncGrid —— 2 槽
@@ -1062,6 +1082,8 @@ public:
     //     (fifo+=2, avail+=fs-nm) —— 2 槽
     //   Step5: OpMissCumsum + SyncGrid + OpSetUpdate —— 3 槽
     __aicore__ inline void Process() {
+        PerfEntry();  // [v2.1-prof] slot 0: Process 进入时刻 (Init/kernel 进出开销
+                      //   仍在打点之外, 对账口径见 §9.23)
         uint32_t R = tiling_.numTokens;
         uint32_t B = tiling_.topkBufferB;
         uint32_t topkDim = tiling_.topkDim;
@@ -1071,15 +1093,21 @@ public:
         uint32_t rowsPerCore = tiling_.rowsPerCore;
         uint32_t tailRows = tiling_.tailRows;
 
-        // ---- prologue (无打点): flags 清零 (+ spec pushCount) + SyncGrid ----
+        // ---- prologue: flags 清零 (+ spec pushCount) + SyncGrid ----
         // [v2] flags 每次 invocation 从全零起 (audit 污染防御); SyncGrid 的 dcci
         //   排空写缓冲, 保证同核 WAW (清零 → Step1 scatter 同地址) 顺序 (fifo 事件
         //   同型教训: 写滞留 store buffer 可能反超覆盖他人已落地写)。
+        // [v2.1-prof] prologue 纳入打点 (msprof 对账: 未打点 prologue ~10K cyc 是
+        //   v2.1 分步 Σ 94% 缺口的主成分, §10.3①): OpZeroFlags 末 = slot 1,
+        //   SyncGrid 末 = slot 2; spec 的 OpFillZero 保持不打点 (同现状, 其耗时
+        //   并入 slot 2 差分)。
         OpZeroFlags(R, B, rowsPerCore, tailRows, flagsGm_);
+        PerfEnd();  // [v2.1-prof] slot 1: prologue.OpZeroFlags 末
         if (tiling_.specEnabled) {
             OpFillZero(R, rowsPerCore, tailRows, pushCountGm_);
         }
         SyncGrid();
+        PerfEnd();  // [v2.1-prof] slot 2: prologue.SyncGrid 末
         if (ECHO_V2_DEBUG_CUTOFF_V == 1u) return;   // [v2 debug] 阶段 1 截断
 
         // ---- Step 0: reset (anyReset 门控, 沿用 round-4 白付清理) ----
@@ -1091,31 +1119,36 @@ public:
                 anyReset = anyReset || (resetMaskGm_[startRow + r] != 0);
             }
         }
-        PerfBegin(); if (anyReset) OpResetRows(R, maxModelLenP1, rowsPerCore, tailRows, resetMaskGm_, htdGm_); PerfEnd();
-        PerfBegin(); if (anyReset) OpResetDthLru(R, B, rowsPerCore, tailRows, resetMaskGm_, dthGm_, lruGm_); PerfEnd();
-        PerfBegin(); if (anyReset) OpResetFree(R, B, freeStackSize, rowsPerCore, tailRows, resetMaskGm_, freeGm_); PerfEnd();
-        PerfBegin(); if (anyReset) OpResetAvailFifo(R, B, rowsPerCore, tailRows, resetMaskGm_, availGm_, fifoGm_); PerfEnd();
-        PerfBegin(); if (anyReset) SyncGrid(); PerfEnd();
+        // [v2.1-prof] PerfBegin 已删 (差值语义废止): 步耗时 = 本步末戳 - 上一戳,
+        //   prologue SyncGrid 末(slot 2)到 Step0 末(slot 3)的差分含 anyReset 扫描
+        //   (全线程冗余读 resetMask) 与 cutoff 判定 —— 间隙归属下一步的既定语义。
+        if (anyReset) OpResetRows(R, maxModelLenP1, rowsPerCore, tailRows, resetMaskGm_, htdGm_); PerfEnd();
+        if (anyReset) OpResetDthLru(R, B, rowsPerCore, tailRows, resetMaskGm_, dthGm_, lruGm_); PerfEnd();
+        if (anyReset) OpResetFree(R, B, freeStackSize, rowsPerCore, tailRows, resetMaskGm_, freeGm_); PerfEnd();
+        if (anyReset) OpResetAvailFifo(R, B, rowsPerCore, tailRows, resetMaskGm_, availGm_, fifoGm_); PerfEnd();
+        if (anyReset) SyncGrid(); PerfEnd();
         if (ECHO_V2_DEBUG_CUTOFF_V == 2u) return;   // [v2 debug] 阶段 2 截断
 
         // ---- Step 0.5: invalidate speculative suffix (spec 路径; 非 spec 跳过) ----
+        // [v2.1-prof] spec 8 戳按现行约定插在此处: 顺序计数器下占 slot 8..15,
+        //   非 spec 构建整块跳过 (spec 槽恒为哨兵); 名表 21..28 仅陈列位。
         if (tiling_.specEnabled) {
-            PerfBegin(); OpInvalidateSpecSuffix(R, B, maxModelLenP1, rowsPerCore, tailRows, splGm_, dthGm_, flagsGm_, htdGm_, wsCumsumGm_); PerfEnd();
-            PerfBegin(); SyncGrid(); PerfEnd();
-            PerfBegin(); OpSpecCumsum(R, B, rowsPerCore, tailRows, wsCumsumGm_, pushCountGm_); PerfEnd();
-            PerfBegin(); SyncGrid(); PerfEnd();
-            PerfBegin(); OpSpecPushFree(R, B, freeStackSize, rowsPerCore, tailRows, wsCumsumGm_, availGm_, freeGm_); PerfEnd();
-            PerfBegin(); SyncGrid(); PerfEnd();
-            PerfBegin(); OpSpecAvailAdd(R, rowsPerCore, tailRows, availGm_, pushCountGm_); PerfEnd();
-            PerfBegin(); SyncGrid(); PerfEnd();
+            OpInvalidateSpecSuffix(R, B, maxModelLenP1, rowsPerCore, tailRows, splGm_, dthGm_, flagsGm_, htdGm_, wsCumsumGm_); PerfEnd();
+            SyncGrid(); PerfEnd();
+            OpSpecCumsum(R, B, rowsPerCore, tailRows, wsCumsumGm_, pushCountGm_); PerfEnd();
+            SyncGrid(); PerfEnd();
+            OpSpecPushFree(R, B, freeStackSize, rowsPerCore, tailRows, wsCumsumGm_, availGm_, freeGm_); PerfEnd();
+            SyncGrid(); PerfEnd();
+            OpSpecAvailAdd(R, rowsPerCore, tailRows, availGm_, pushCountGm_); PerfEnd();
+            SyncGrid(); PerfEnd();
         }
 
         // ---- Step 1: hit/miss + hit 标记 + miss 计数 + freeSize ----
-        PerfBegin(); OpHitMiss(R, topkDim, effTopk, maxModelLenP1, B, rowsPerCore, tailRows,
-                     htdGm_, posGm_, curSlotsGm_, numMissesGm_, availGm_, freeSizeGm_,
-                     flagsGm_, scanScratchUb_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();  // flags/curSlots (全员写) 经 dcci 对后续全员读可见;
-                                            // numMisses/freeSize (t0 写) 同点可见。
+        OpHitMiss(R, topkDim, effTopk, maxModelLenP1, B, rowsPerCore, tailRows,
+                  htdGm_, posGm_, curSlotsGm_, numMissesGm_, availGm_, freeSizeGm_,
+                  flagsGm_, scanScratchUb_); PerfEnd();
+        SyncGrid(); PerfEnd();  // flags/curSlots (全员写) 经 dcci 对后续全员读可见;
+                                // numMisses/freeSize (t0 写) 同点可见。
         if (ECHO_V2_DEBUG_CUTOFF_V == 3u) return;   // [v2 debug] 阶段 3 截断
 
         // ---- Step 2 [v2.1]: classify+evict (单趟分类) + [needFree] free 流水线 ----
@@ -1126,27 +1159,27 @@ public:
         //   OpAllocPop 恒走老栈路径, FreeRelease/FreePush 的 j<fs 循环体不执行)。
         //   打点槽保留 (≈0 周期), 条件块统一, 栅栏无发散。
         bool needFree = (scanScratchUb_[64] != 0);
-        PerfBegin(); ClassifyAllRows(); PerfEnd();
+        ClassifyAllRows(); PerfEnd();
         // [P-C+尾栅栏去重] freeIdx 写 (末行 ClassifyEvict 尾栅栏) → OpFreeRelease 读:
         //   UB 路径已排序, 本槽跳过; GM 回退路径保守保留完整 SyncGrid (大 batch
         //   形态不在基准覆盖, 不冒险)。
-        PerfBegin(); if (needFree && !freeIdxInUb_) SyncGrid(); PerfEnd();
-        PerfBegin(); if (needFree) OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, dthGm_, htdGm_); PerfEnd();
-        PerfBegin(); if (needFree) OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
+        if (needFree && !freeIdxInUb_) SyncGrid(); PerfEnd();
+        if (needFree) OpFreeRelease(R, topkDim, B, maxModelLenP1, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, dthGm_, htdGm_); PerfEnd();
+        if (needFree) OpFreePush(R, topkDim, freeStackSize, rowsPerCore, tailRows, freeIdxPtr_, freeIdxInUb_, freeSizeGm_, availGm_, freeGm_); PerfEnd();
         if (ECHO_V2_DEBUG_CUTOFF_V == 4u) return;   // [v2 debug] 阶段 4 截断
 
         // ---- Step 3: alloc pop (OpFifoInc 已并入 Step4 的 fifo+=2) ----
-        PerfBegin(); OpAllocPop(R, topkDim, freeStackSize, rowsPerCore, tailRows,
-                     numMissesGm_, freeSizeGm_, availGm_, freeIdxPtr_, freeIdxInUb_, freeGm_, rawSlotsGm_); PerfEnd();
-        PerfBegin(); SyncGrid(); PerfEnd();  // rawSlots 跨线程 RAW → AllocAppend/SetUpdate 读;
-                                             // rbBase (numHitsGm, ClassifyEvict t0 写) →
-                                             // AllocAppend 全员读 (dcci; v2.1 的 Step2→Step4
-                                             // 传递全靠本栅栏, Op 内不另设)
+        OpAllocPop(R, topkDim, freeStackSize, rowsPerCore, tailRows,
+                   numMissesGm_, freeSizeGm_, availGm_, freeIdxPtr_, freeIdxInUb_, freeGm_, rawSlotsGm_); PerfEnd();
+        SyncGrid(); PerfEnd();  // rawSlots 跨线程 RAW → AllocAppend/SetUpdate 读;
+                                // rbBase (numHitsGm, ClassifyEvict t0 写) →
+                                // AllocAppend 全员读 (dcci; v2.1 的 Step2→Step4
+                                // 传递全靠本栅栏, Op 内不另设)
         if (ECHO_V2_DEBUG_CUTOFF_V == 5u) return;   // [v2 debug] 阶段 5 截断
 
         // ---- Step 4 [v2.1]: lru 尾段追加 + fifo/avail 折叠更新 ----
-        PerfBegin(); AllocAppendAllRows(); PerfEnd();
-        PerfBegin(); OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_); PerfEnd();
+        AllocAppendAllRows(); PerfEnd();
+        OpFifoAvailUpdate(R, rowsPerCore, tailRows, fifoGm_, availGm_, freeSizeGm_, numMissesGm_); PerfEnd();
         // [v2.1] ECHO_V2_RB_DCCI/RB_SYNC 的 Step4→Step5 补栅栏块已删: 旋钮服务
         //   旧 Rebuild 的 trap 排查 (§9.18, "重 UB 写后可合并递增 GM 写毒化紧随
         //   访存"), 重建路径已不存在; 若上板复现同类 trap, 预案 = 本位置恢复一道
@@ -1157,12 +1190,12 @@ public:
         //   竞争源消失, avail 读者已被 Step3 SyncGrid 排空)。
 
         // ---- Step 5: set_update (含最终槽位回写, 原 OpFinalSlots 已并入) ----
-        PerfBegin(); OpMissCumsum(R, topkDim, effTopk, rowsPerCore, tailRows,
+        OpMissCumsum(R, topkDim, effTopk, rowsPerCore, tailRows,
                      curSlotsGm_, posGm_, wsMissRankGm_, missHostPosGm_, scanScratchUb_); PerfEnd();
         if (ECHO_V2_DEBUG_CUTOFF_V == 7u) return;   // [v2 debug] 阶段 7 截断 (MissCumsum 后)
-        PerfBegin(); SyncGrid(); PerfEnd();  // wsMissRank/missPos 跨线程 RAW → OpSetUpdate
+        SyncGrid(); PerfEnd();  // wsMissRank/missPos 跨线程 RAW → OpSetUpdate
         if (ECHO_V2_DEBUG_CUTOFF_V == 8u) return;   // [v2 debug] 阶段 8 截断 (Step5 SyncGrid 后)
-        PerfBegin(); OpSetUpdate(R, topkDim, effTopk, B, maxModelLenP1, rowsPerCore, tailRows,
+        OpSetUpdate(R, topkDim, effTopk, B, maxModelLenP1, rowsPerCore, tailRows,
                     curSlotsGm_, wsMissRankGm_, missHostPosGm_, missAllocFlatGm_, missMaskGm_,
                     rawSlotsGm_, htdGm_, dthGm_); PerfEnd();
         // [P2] 之后无本 kernel 内读者, 不再需要尾步/尾栅栏 (kernel 结束即对 host 可见)。
@@ -1186,9 +1219,29 @@ private:
         asc_syncthreads();
     }
 
-    __aicore__ inline void PerfBegin() {
+    // [v2.1-prof 2026-10-20] 打点语义改造 (差值 → 绝对时间戳, §9.23):
+    //   PerfBegin/perfLast_ 已删 (差值语义废止), PerfEnd 只在步末由 t0 读一次
+    //   clock(), 低 32 位截断存 int32 —— host 侧 (echo_perf_step.py) 用 uint32
+    //   视图回绕差分还原步耗时 (单次 invocation 跨度 ~160K cyc @1.585GHz ≪ 2^31,
+    //   回绕安全)。步 i 耗时 = t[i+1]-t[i], 步间间隙自然归属到下一步。
+    //   槽位序 = 名表序 (entry → prologue×2 → 非 spec 18 步; spec 8 步插在
+    //   Step0.SyncGrid 后, 见 Process 步表): perfStepIdx_ 从 0 起, slot 0 由
+    //   PerfEntry 先写 (不推进计数器), 每个 PerfEnd 先自增再写 —— 首个 PerfEnd
+    //   恰落 slot 1。"kernel 在第 N 步 trap" 时槽 0..N 仍为已写前缀 (哨兵检测
+    //   语义不变, debug_v2_stepcycles 的 trap 二分依赖此前缀性质)。
+    //   ⚠ 绝对戳 int32 高位可负: 读回侧 ">=0 即已写" 的旧判定失效, 哨兵只认
+    //   等值 -12345 (debug_v2_stepcycles 尚未同步, 见 §9.23 注记)。
+    //   [ECHO_PERF_DRAIN] 扰动旋钮 (build.sh ECHO_PERF_DRAIN=ON, 默认 OFF, 产物
+    //   进 build_v2dbg/): 定义后 PerfEnd 在读 clock 前先 SyncGrid() (syncthreads
+    //   + dcci 排空写缓冲 —— 专家 AddTimePoint 方案 PipeBarrier<PIPE_ALL> 在纯
+    //   SIMT 头树中的等价物), 量 "真实边界 vs 记账边界" 的偏差。每标记 +一道
+    //   栅栏价, 强扰动: 结论仅在本二进制内有效 (旋钮=不同二进制, 栈溢出文档
+    //   §5 的血泪教训), 正式构建零影响。
+    __aicore__ inline void PerfEntry() {
 #ifdef ECHO_PERF_STEP
-        if (threadIdx.x == 0) perfLast_ = clock();
+        if (threadIdx.x == 0 && stepAbsGm_ != nullptr) {
+            stepAbsGm_[blockIdx.x * ECHO_PERF_NUM_STEPS] = (int32_t)(uint32_t)clock();
+        }
 #else
         (void)0;
 #endif
@@ -1196,14 +1249,15 @@ private:
 
     __aicore__ inline void PerfEnd() {
 #ifdef ECHO_PERF_STEP
+#ifdef ECHO_PERF_DRAIN
+        SyncGrid();  // [v2.1-prof] DRAIN: 先排空写缓冲再取时 (调用点无发散, 全员到达)
+#endif
         if (threadIdx.x == 0) {
-            uint64_t now = clock();
-            uint64_t delta = now - perfLast_;
-            uint32_t d = (delta > 0x7FFFFFFFull) ? 0x7FFFFFFFu : (uint32_t)delta;
-            if (stepCyclesGm_ != nullptr && perfStepIdx_ < ECHO_PERF_NUM_STEPS) {
-                stepCyclesGm_[blockIdx.x * ECHO_PERF_NUM_STEPS + perfStepIdx_] = (int32_t)d;
-            }
             ++perfStepIdx_;
+            if (stepAbsGm_ != nullptr && perfStepIdx_ < ECHO_PERF_NUM_STEPS) {
+                stepAbsGm_[blockIdx.x * ECHO_PERF_NUM_STEPS + perfStepIdx_] =
+                    (int32_t)(uint32_t)clock();
+            }
         }
 #else
         (void)0;
@@ -1300,9 +1354,8 @@ private:
     int32_t* flagsUb_;         // [UB v2.1] ClassifyEvict 的 flags staging
     int32_t* lruUb_;           // [UB v2.1] ClassifyEvict 的旧序 staging (防 lruGm 同数组读写竞争)
     void* wsBase_;
-    int32_t* stepCyclesGm_;
-    uint32_t perfStepIdx_;
-    uint64_t perfLast_;
+    int32_t* stepAbsGm_;   // [v2.1-prof] 每核绝对时间戳区 (原 stepCyclesGm_, 语义见 PerfEnd 注释)
+    uint32_t perfStepIdx_;  // [v2.1-prof] 打点槽计数器: PerfEntry 写 slot 0 不推进; PerfEnd 先自增再写 (首个 → slot 1)
     int32_t* freeIdxUb_;    // [P-C] freeIdx 的 UB 落点 (放得下时启用)
     int32_t* freeIdxPtr_;   // freeIdx 实际指针: UB 或 GM
     bool freeIdxInUb_;

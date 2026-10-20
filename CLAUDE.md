@@ -33,9 +33,9 @@ SIMT 基线（`csrc/simt/`，同仓对照）竞争。
 1. 本文件
 2. `docs/ascend_vec_simt_stack_overflow.md` — 最阴险的设备坑，先读
 3. `docs/echo_lru_deep_dive.md` — 技术深读（注意头部 **v2 转型 banner**；
-   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.22 最新（§9.20/§9.21 是负结果
-   与微架构实测结论；**§9.22 是 v2.1 单趟分类——已实现待上板验证，必读**）；
-   §10.3 是方向清单）
+   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.23 最新（§9.20/§9.21 是负结果
+   与微架构实测结论；§9.22 是 v2.1 单趟分类，已上板验证；**§9.23 是 v2.1-prof
+   打点升级——已落地待上板验证，必读**）；§10.3 是方向清单）
 4. `README.md` — 工程全貌
 
 ## 当前状态（2026-10-20，tag `v2.1`，上板全过）
@@ -59,12 +59,15 @@ v2.1 单趟分类 + 平局松弛 + 尾段追加（§9.22）验证通过——**�
 
 ## 下一步优先级（deep-dive §10.3，按序）
 
-1. **精确打点（专家意见 2026-10-20）**：①msprof op 一轮（torch_npu profiler
-   只有 kernel 级时长；msprof op 另给 Current/Rated Freq、逐核 aiv_time、
-   PipeUtilization、Memory/UB 带宽、L2、Bank Conflict——skill:
-   ops-profiling/msprof-op-guide，注意它**不含** kernel 内函数级拆解）；
-   ②kernel 内时间戳升级（每核绝对时间戳→核间 skew；可选排空模式开关）；
-   ③echo_perf_step.py 标定修正（--p50-us 外部锚点替代 Event 假频率）。
+1. **精确打点（专家意见 2026-10-20；②③已落地 §9.23，NPU 待验证）**：①msprof
+   应用级采集（torch_npu profiler 只有 kernel 级时长；task-based --aic-metrics
+   另给 PipeUtilization/Memory/L2 等 per-launch 行——**勿用 msprof op**，对
+   torch 负载不适配；首轮已出三结论：主频 1.585 GHz / 分步对账 94% 缺口
+   ~10K = prologue/进出 / vec 管线主导；待补采 L2Cache、ResourceConflictRatio、
+   Memory 三组与逐核 task_cyc）；②kernel 内时间戳升级 + ③echo_perf_step 标定
+   修正**已落地**（绝对戳 29 槽、1.585 GHz 常数、--p50-us 锚点、skew、
+   --matrix CSV + prof_report.py HTML 报告，§9.23）——待上板验证：四场景
+   echo_perf_step + 一轮 --matrix/prof_report + 可选 ECHO_PERF_DRAIN 对照。
 2. **ClassifyEvict 再削**（full 29K → 目标 −3-6K）：B3 尾栅栏依赖重审
    （freeIdx 首读者是 FreeRelease）、staging 合并、切片杂项。
 3. **SetUpdate/FreeRelease/HitMiss 收尾**（各 −2-4K）：htd 冷 store 簇与
@@ -98,11 +101,17 @@ python3 checks/check_echo_kernel_host.py        # CPU 回归 54 项（纯 stdlib
 bash build.sh && ECHO_PERF_STEP=ON bash build.sh
 python compare.py --device 0 --warmup 2 --repeat 4 --verify-each-sample  # 四场景 golden
 bash profile_kernel.sh --device 0               # kernel 级 P50
-python echo_perf_step.py --device 0 --warmup 5 --repeat 20              # 分步（只看周期，μs 换算失真）
+python echo_perf_step.py --device 0 --warmup 5 --repeat 20 --matrix results/perf \
+    --p50-us <本轮kernel级P50>                   # 分步（v2.1-prof 绝对戳 + 1.585GHz 标定，§9.23）
+python prof_report.py --matrix results/perf_<场景> --p50-us <本轮kernel级P50> \
+    --out results/perf_<场景>.html              # 单文件 HTML 报告（可加 --op-summary，浏览器打开）
 ```
 
 调试旋钮（build.sh 环境变量，产物一律进 `build_v2dbg/`，不覆盖正式构建）：
-`ECHO_V2_DEBUG_CUTOFF=1..9`（阶段截断）、`ECHO_V2_KOPT=-O0..-O3`。
+`ECHO_V2_DEBUG_CUTOFF=1..9`（阶段截断）、`ECHO_V2_KOPT=-O0..-O3`、
+`ECHO_PERF_DRAIN=ON`（[v2.1-prof] 打点排空扰动测量：PerfEnd 读 clock 前先
+SyncGrid，量"真实边界 vs 记账边界"；**需配 ECHO_PERF_STEP=ON**，每标记 +一道
+栅栏价，强扰动结论仅本二进制内有效，§9.23）。
 [v2.1] `ECHO_V2_SKIP_REBUILD` 与 `ECHO_V2_RB_*` 系列已随旧 Rebuild 删除
 （旋钮结论本就不跨二进制；旧实验见 git 历史与 deep-dive §9.18/§9.22）。
 **警告**：每个旋钮=不同二进制（含栈帧大小变化），旋钮实验结论只在本二进制内
@@ -114,9 +123,11 @@ python echo_perf_step.py --device 0 --warmup 5 --repeat 20              # 分步
 csrc/echo/          Echo kernel (echo_lru_kernel.h 主体) + plugin + launch
 csrc/simt/          SIMT 基线（同事的，一般不动）
 compare.py          基准主控（输入构造/golden/校验/计时）
-echo_perf_step.py   分步周期；profile_kernel.sh|py  kernel 级 P50
+echo_perf_step.py   分步（v2.1-prof 绝对戳 + --matrix CSV）；profile_kernel.sh|py  kernel 级 P50
+prof_report.py      分步数据 → 单文件 HTML 报告（对账条/热力图/逐步聚合/op 表，§9.23）
 checks/             54 项 CPU 回归（从 kernel.h 文本提取函数 + g++ mock）
 debug_v2_state.py   逐字段 mismatch dump；debug_v2_stepcycles.py  打点取证
+                    （[v2.1-prof 注记] stepcycles 的 ">=0 已写" 判定需改哨兵等值，§9.23 遗留）
 docs/               deep-dive（主文档）+ 栈溢出全记录
 build_t*/ build_perf*/ build_v2dbg/   各构建产物目录（.gitignore）
 ```

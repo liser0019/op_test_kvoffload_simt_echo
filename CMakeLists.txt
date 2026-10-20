@@ -114,6 +114,21 @@ list(APPEND ECHO_FLAGS -DECHO_LRU_THREAD_NUM_OVERRIDE=${ECHO_LRU_THREADS})
 if(ECHO_PERF_STEP)
     list(APPEND ECHO_FLAGS -DECHO_PERF_STEP)
 endif()
+# [v2.1-prof 2026-10-20] ECHO_PERF_DRAIN=ON (需配 ECHO_PERF_STEP=ON): PerfEnd 读
+#   clock 前先 SyncGrid 排空写缓冲, 量"真实边界 vs 记账边界"(deep_dive §9.23)。
+#   强扰动旋钮 (每标记 +一道栅栏价), 结论仅本二进制内有效; build.sh 将其产物
+#   导向 build_v2dbg/。仅 kernel 侧需要该宏 (plugin 的 EchoWorkspaceElements
+#   不引用), 正式构建 (OFF) 编译选项零变化。
+set(ECHO_PERF_DRAIN "OFF" CACHE STRING "echo_lru perf: SyncGrid-drain before each PerfEnd stamp (ON/OFF)")
+if(NOT ECHO_PERF_DRAIN MATCHES "^(ON|OFF)$")
+    message(FATAL_ERROR "ECHO_PERF_DRAIN 只能为 ON/OFF")
+endif()
+if(ECHO_PERF_DRAIN STREQUAL "ON" AND NOT ECHO_PERF_STEP)
+    message(FATAL_ERROR "ECHO_PERF_DRAIN=ON 需要 ECHO_PERF_STEP=ON")
+endif()
+if(ECHO_PERF_DRAIN STREQUAL "ON")
+    list(APPEND ECHO_FLAGS -DECHO_PERF_DRAIN)
+endif()
 # [v2 debug] ECHO_V2_DEBUG_CUTOFF=N: Process 在第 N 阶段后提前 return (仅 kernel 侧,
 #   用于二分定位设备侧 trap; 产物目录 build_v2dbg/, 不覆盖正式构建)。
 #   阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4 7/0=全程。

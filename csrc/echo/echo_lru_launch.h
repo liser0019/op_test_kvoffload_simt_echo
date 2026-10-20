@@ -17,7 +17,8 @@ void launch_echo_lru(int32_t* htd, int32_t* dth, int32_t* lru, int32_t* freeSlot
 //   [0, base)           每行: wsCumsum(B+1) + pushCount/numHits/numMisses/freeSize(4)
 //                       + freeIdx(topk) + rawSlots(topk) + wsMissRank(topk)
 //                       + flags(B+1)   [v2] 分类位 (bit0=hit, bit1=淘汰/spec 移除)
-//   [align2(base), +bn*ECHO_PERF_NUM_STEPS)      [ECHO_PERF_STEP] 每核分步周期 (仅 perf 构建分配)
+//   [align2(base), +bn*ECHO_PERF_NUM_STEPS)      [ECHO_PERF_STEP] 每核分步打点区
+//                       ([v2.1-prof] t0 绝对时间戳低 32 位, 仅 perf 构建分配)
 //   (v1 的 argtopk 诊断 dump 区 [bn*256 + bn*ARGTOPK_GM_NPAD_MAX] 已随基数选择删除)
 inline uint64_t EchoWorkspaceElements(uint32_t rows, uint32_t topk,
                                        uint32_t capacity, uint32_t blocks) {

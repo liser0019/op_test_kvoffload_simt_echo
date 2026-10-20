@@ -296,7 +296,8 @@ def prepare_npu(torch, case, echo_initial, device, blocks_override=None):
         blocks = (rows + rows_per_core - 1) // rows_per_core  # 向上取整可能小于请求值，正常
     npad = 1 << capacity.bit_length()  # next_pow2(capacity+1)，4096→8192。
     # [v2] 新版 workspace 上界：每行 wsCumsum(B+1) + 4 标量 + 3*topk 向量
-    #   + flags(B+1)（分类位）；每核仅打点构建的 stepCycles（26）。有意按上界
+    #   + flags(B+1)（分类位）；每核仅打点构建的 stepAbs 绝对时间戳区（29，
+    #   [v2.1-prof]）。有意按上界
     #   多分配（每核 4*npad+2*64*256+256+8192 是 v1 argtopk 时代的超大余量，
     #   保留兼容任何布局微调；严格大于新版 plugin 所需）。
     base = rows * (2 * (capacity + 1) + 4 + 3 * topk)

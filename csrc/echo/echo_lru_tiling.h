@@ -44,14 +44,24 @@ constexpr uint32_t ARGTOPK_UB_NPAD_MAX = 8192;    // = next_pow2(ARGTOPK_B_MAX+1
 constexpr uint32_t ARGTOPK_UB_ELEMS = 4u * ARGTOPK_UB_NPAD_MAX;  // 单大 __ubuf__ 数组总元素 (v2: 通用 UB 池)
 constexpr uint32_t ARGTOPK_GROUP_THREADS = 64;    // [v2 遗留] 基数选择直方图线程数, 无引用
 
-// ---- [Perf 分步打点] ECHO_PERF_STEP 编译宏打开时, 每核把 Process 各步的 clock() 周期数
-//   写入 workspace 尾部 stepCycles[blockIdx.x * ECHO_PERF_NUM_STEPS + stepIdx].
-//   [v2] 非 spec 路径共 18 步 (索引 0..17: Step0×5, Step1×2, Step2×4, Step3×2,
-//   Step4×2, Step5×3 —— 相对 v1 的 20 步: 删 OpFifoInc/OpAllocPriority/Bug2
-//   SyncBlock, 增 EvictScan/LruRebuild, 详见 deep_dive §9.17);
-//   specEnabled=1 时 Step0.5 在索引 4 之后额外插入 8 步, 共 26 步.
+// ---- [Perf 分步打点] ECHO_PERF_STEP 编译宏打开时, 每核把 Process 各标记点的 t0
+//   clock() 绝对时间戳 (低 32 位, int32) 写入 workspace 尾部
+//   stepAbs[blockIdx.x * ECHO_PERF_NUM_STEPS + slotIdx].
+//   [v2] 曾为 18 个非 spec 步的 t0 差值 (spec 构建 26 步);
+//   [v2.1-prof 2026-10-20] 改为绝对时间戳 + entry/prologue 纳入, 槽位 29 =
+//   1 entry + 28 步末标记 (含 2 个 prologue 槽): slot 0 = Process 进入
+//   (PerfEntry 写, Init/kernel 进出开销在其外), slot 1/2 = prologue.OpZeroFlags /
+//   prologue.SyncGrid (spec 的 OpFillZero 不打点, 耗时并入 slot 2 差分),
+//   slot 3..20 = 非 spec 18 步 (Step0×5, Step1×2, Step2×4, Step3×2, Step4×2,
+//   Step5×3, 详见 deep_dive §9.23), 名表尾部 21..28 = 8 个 spec 步名 (陈列位).
+//   ⚠ spec 构建下 8 个 spec 戳按现行约定 (v2 起) 仍插在 Step0.SyncGrid 之后、
+//   Step1 之前 —— 顺序计数器语义下实际落在 slot 8..15, 后续非 spec 步顺延至
+//   16..28; 名表 21..28 只是非 spec 名表的尾部陈列, 非 spec 构建 (本基准
+//   spec_enabled=False) 该 8 槽恒为哨兵.
+//   步耗时 = t[slot+1] - t[slot] (host 侧 uint32 回绕差分; 单次 invocation 跨度
+//   ~160K cyc @1.585GHz ≪ 2^31, 回绕安全), 步间间隙自然归属到下一步.
 //   步名对照见 echo_perf_step.py 的 ECHO_PERF_STEP_NAMES.
-constexpr uint32_t ECHO_PERF_NUM_STEPS = 26;
+constexpr uint32_t ECHO_PERF_NUM_STEPS = 29;
 
 // [v2 debug] ECHO_V2_DEBUG_CUTOFF=N: Process 在第 N 阶段后提前 return (0=关闭)。
 //   仅用于二分定位设备侧 trap: 截断后状态不完整, golden 必挂 (Assertion) ——

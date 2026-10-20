@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""v2 trap 取证：读打点构建的 stepCycles 区域，定位 trap 发生在哪一步。
+"""v2 trap 取证：读打点构建的 stepAbs 区域，定位 trap 发生在哪一步。
 
-原理：ECHO_PERF_STEP 构建下，PerfEnd 在每步完成时把 t0 的 clock() 周期写入
-workspace 尾部 stepCycles 区。kernel 在第 N 步 trap → 步 0..N-1 已写、N 及之后
-为哨兵。即使 npuSynchronizeDevice 抛错，进程内的 workspace 张量仍尝试读回。
+原理：ECHO_PERF_STEP 构建下，PerfEntry/PerfEnd 在 Process 进入与每个步末把 t0
+的 clock() **绝对时间戳**（低 32 位，[v2.1-prof]）写入 workspace 尾部 stepAbs 区。
+kernel 在第 N 步 trap → 槽 0..N 已写（trap 前缀性质保留）、N+1 及之后为哨兵。
+即使 npuSynchronizeDevice 抛错，进程内的 workspace 张量仍尝试读回。
+⚠ 绝对戳 int32 高位可负（uint32 低 32 位回绕存储）——"已写"判定只认哨兵等值
+（!= -12345），不能用 ">=0"（旧差值语义的判定，已废止）。
 
 用法（需先构建打点版）:
     ECHO_PERF_STEP=ON bash build.sh
@@ -43,7 +46,7 @@ def main():
     bench.restore_state(torch, "echo", initial_dev, state)
     for key in bench.ECHO_OUTPUT:
         state[key].fill_(255 if key == "miss_mask" else -777)
-    state["workspace"].fill_(-12345)   # 哨兵: 步周期恒 >=0, 负值=未写
+    state["workspace"].fill_(-12345)   # 哨兵: [v2.1-prof] 绝对戳 int32 高位可负, 只认等值
 
     try:
         bench.invoke(torch, "echo", case, inputs, state)
@@ -60,10 +63,10 @@ def main():
     try:
         region = state["workspace"][off:off + blocks * nsteps].cpu().numpy()
         ws = region.reshape(blocks, nsteps)
-        print(f"stepCycles 读回成功 (blocks={blocks}, steps={nsteps})，每块最后完成的步：", flush=True)
+        print(f"stepAbs 读回成功 (blocks={blocks}, slots={nsteps})，每块最后写戳：", flush=True)
         last_written = []
         for b in range(blocks):
-            written = [i for i in range(nsteps) if ws[b, i] >= 0]
+            written = [i for i in range(nsteps) if ws[b, i] != -12345]
             last_written.append(written[-1] if written else -1)
             if b < 6:
                 tail = [(i, int(ws[b, i])) for i in written[-3:]] if written else "无"

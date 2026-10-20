@@ -5,7 +5,8 @@
 > **本文档随代码迭代同步更新**：每次代码合入后由维护者增量修订对应章节，并在文末"文档更新日志"表追加一行。
 >
 > 覆盖范围：v2 维护序重构 + 栈溢出修复 + v2-opt1/2 + opt3 负结果 + t1024 消融
-> + v2.1 单趟分类（§9.17–§9.22，2026-10-19/20；v2.1 已上板验证，tag `v2.1`）。
+> + v2.1 单趟分类（§9.17–§9.22，2026-10-19/20；v2.1 已上板验证，tag `v2.1`）
+> + v2.1-prof 打点升级（§9.23，2026-10-20，NPU 待验证）。
 >
 > ⚠ **v2 转型说明（2026-10-19）**：淘汰路径已从 pri 时间戳 + Argtopk 基数选择重构为
 > lru 顺序数组 + 每步重建（§9.17）。本文 §5（20 步表）、§6（Argtopk 深读）及 §9.6–§9.12
@@ -1171,6 +1172,13 @@ owner 在服务器侧完成（pull → `build.sh` → compare.py audit → profi
 
 ### 8.3 echo_perf_step.py：分步周期、哨兵检测、频率标定
 
+> [v2.1-prof 2026-10-20] 本节按 v2 差值口径撰写，**打点语义已升级**（§9.23）：每核
+> 槽位存 t0 绝对 clock 低 32 位（29 槽 = entry + prologue×2 + 非 spec 18 + spec 陈列
+> 8），host 侧 uint32 回绕差分；频率默认 1.585 GHz 常数（msprof 实测）+ `--p50-us`
+> 外部锚点两档对照，**Event 标定行已废弃**（§7.8）；哨兵只认等值 -12345（绝对戳
+> 高位可负，"负值即异常"防御废止）；统计新增 skew（每步 32 核 max−min 中位）与
+> `--matrix` CSV 导出（供 prof_report.py）。下文未逐条重写，以 §9.23 为准。
+
 - 直接 import compare.py 的输入构造/参考/恢复/调用（同尺寸/seed/场景），分步之和可与
   Event 总耗时互相印证（`echo_perf_step.py:11-16`）。
 - **哨兵机制**：每次调用前用 `-12345` 填充 workspace；读回 stepCycles 区若仍有哨兵或
@@ -1916,6 +1924,100 @@ golden 逐字段全过、无 trap（风险①未触发）。
 （§7.8），Σ 步 max 中位与 kernel P50 交叉验证 ≈ 1.4-1.5 GHz 量级自洽；分步
 绝对值与 P50 的对账问题见 §10.3①（msprof + 时间戳升级计划）。
 
+### 9.23 v2.1-prof：打点升级（entry + 绝对时间戳 + 标定修正 + HTML 报告）（2026-10-20，NPU 待验证）
+
+一轮把 §10.3① 精确打点的三个悬案收口：频率假数、对账缺口、核间偏差不可见。
+算法代码零改动（全部打点相关改动在 `#ifdef ECHO_PERF_STEP` 内，正式构建零行为
+变化），核心是**语义改造**而非加打点。
+
+**动机**：
+
+1. **频率标定关闭**：msprof 首轮实测主频 **1.585 GHz**（aiv_total_cycles 是全核和：
+   4.22M cyc / 32 核 / 83.5 μs；DVFS 无降频，§10.3①）。echo_perf_step 旧"频率标定"
+   行用每轮 Σ步周期 / Event 微秒反推 → 输出 141-245 MHz 假数（Event 含 ~600 μs 级
+   固定开销，§7.8）。本轮废弃该行：默认常数 1.585 GHz；`--p50-us` 给外部锚点
+   （profile_kernel.sh 的 kernel 级 P50）时改用 ΣΔ/P50 标定并打印两档对照；Event P50
+   仍测量打印但注明 §7.8 不可信、不参与任何换算。
+2. **对账缺口闭合**：v2.1 分步 Σ 121.7K 只占单核 ~131.5K cyc 的 94%（msprof，
+   full_cache），缺口 ~10K = 未打点 prologue（OpZeroFlags 全量清零 4097×32 int32 +
+   prologue SyncGrid）+ 进出/槽间隙 ~6 μs。本轮 prologue 纳入打点（2 槽）+ 间隙
+   归属下一步，分步覆盖预期 94% → ~100%（Init/kernel 进出仍在 slot 0 之外，残余
+   缺口即该项，直接可见）。
+3. **核间偏差首见**：旧差值口径每核只写自己的步差，host 无法看核间不均衡；绝对戳
+   + host 差分后，每步 32 核 max−min（skew）成为一等统计量（"每条横线一个核"的
+   专家参考形态 → prof_report 热力图）。
+
+**设计（槽位语义）**：`stepCyclesGm_`（步差值）→ `stepAbsGm_`（t0 绝对 clock 低
+32 位，int32），`ECHO_PERF_NUM_STEPS` 26→29：
+
+| 槽 | 内容 |
+|---|---|
+| 0 | entry：Process 进入（PerfEntry 写；Init/kernel 进出开销在其外） |
+| 1 | prologue.OpZeroFlags 末（spec 的 OpFillZero 不打点 → 耗时并入槽 2 差分） |
+| 2 | prologue.SyncGrid 末 |
+| 3..20 | 非 spec 18 步（Step0×5 / Step1×2 / Step2×4 / Step3×2 / Step4×2 / Step5×3，顺序照旧） |
+| 21..28 | spec 8 步名（**陈列位**，见下） |
+
+- **PerfBegin/perfLast_ 删除**，PerfEnd 只在步末由 t0 读一次 clock：`++perfStepIdx_;
+  stepAbsGm_[bn*N + idx] = (int32)(uint32_t)clock()`；slot 0 由 PerfEntry 先写（不
+  推进计数器，首个 PerfEnd 恰落 slot 1）。步耗时 = t[i+1]−t[i]（host 侧 numpy
+  uint32 视图回绕差分），**步间间隙自然归属到下一步**——anyReset 扫描（全线程冗余
+  读 resetMask）等此前落在打点外的开销，现在计入下一步差分。
+- **回绕安全**：单次 invocation 跨度 ~160K cyc @1.585 GHz ≪ 2^31。哨兵 -12345 只认
+  等值——绝对戳 int32 高位可负，v2 差值语义的"<0 即异常"防御在新语义下会把一半
+  合法戳误判为异常，已废止。
+- **spec 槽位约定（规格核对结果）**：spec 8 步在 kernel 内的执行位置沿用 v2 起的
+  现行约定——插在 Step0.SyncGrid 之后、Step1 之前；顺序计数器语义下实际落位
+  slot 8..15，后续非 spec 步顺延 16..28。名表 21..28 只是 8 个 spec 步名的陈列位
+  （非 spec 构建恒为哨兵）。echo_perf_step 读回时校验"槽 0..20 全写且 21..28 全
+  哨兵"，检测到 spec 构建直接报错（spec 分步报告属 §10.3⑥ 未来工作）。
+- **ECHO_PERF_DRAIN 旋钮**（build.sh + CMakeLists，默认 OFF，需配 ECHO_PERF_STEP=ON，
+  产物进 build_v2dbg/）：定义后 PerfEnd 在读 clock 前先 SyncGrid()（syncthreads+dcci
+  排空写缓冲——专家 AddTimePoint 方案 PipeBarrier<PIPE_ALL> 在纯 SIMT 头树中的等价
+  物），量"真实边界 vs 记账边界"的偏差。强扰动（每标记 +一道栅栏价），结论仅在本
+  二进制内有效（旋钮=不同二进制的既有教训）。
+- **host 侧（echo_perf_step.py 重写）**：统计 = 最慢核中位（max over blocks →
+  median over repeats）+ **skew**（每步 32 核 max−min 的中位）；对账行 = 最慢核跨度
+  中位（entry→末戳；逐块望远镜恒等 = 该核各步之和，对账以跨度为准，跨核逐峰求和
+  仅参考）+ Event P50（仅打印）；`--matrix <prefix>` 每场景导出
+  `<prefix>_<scenario>_abs.csv`（行=块，列=29 槽原始绝对戳）与
+  `<prefix>_<scenario>_steps.csv`（行=块，列=28 步耗时 + entry→末戳总跨度；代表轮 =
+  最慢核跨度最接近中位的样本，两 CSV 同轮可互相对照）。
+
+**prof_report.py（新增）**：单文件自包含 HTML 报告器（owner 服务器生成、浏览器打开；
+纯 stdlib + 手写 SVG/JS，无外部依赖、无网络请求）。页面：§1 总览（统计瓦片 + 对账
+条：打点跨度 vs msprof echo Duration vs 外部 P50 锚点，缺口 = Init/kernel 进出等
+打点外开销）→ §2 逐核×逐步热力图（行=核、列=28 步，全局线性顺序色标，cyc/μs 可
+切换，悬停数值）→ §3 逐步聚合（P50 条形 + max 同色浅轨道 + min 刻度 + skew 列，
+μs 轴）→ §4 msprof op 级表（--op-summary 容错列嗅探，echo 行高亮，不猜单位不换算）
+→ §5 原始 CSV 折叠表（= 各图的无悬停/键盘可达等价物）。配色沿用 dataviz skill 的
+已验证参考调色板（light：顺序色阶蓝 100..700 单 hue；本机禁跑 node 校验脚本，故
+原样引用其验证结论而非自配色）。
+
+**实现落点**：`echo_lru_kernel.h`（PerfEntry/PerfEnd 重写 + Process 打点重排 +
+stepAbsGm_ 改名，算法一行未动）、`echo_lru_tiling.h`（N=29 + 槽位注释）、
+`checks`（常量断言 26→29）、`build.sh`+`CMakeLists.txt`（ECHO_PERF_DRAIN）、
+`echo_perf_step.py`（重写）、`prof_report.py`（新增）。
+
+**遗留登记（主会话审查时已顺手同步，随本 commit 一并合入）**：
+
+- ~~`debug_v2_stepcycles.py` 的 `>= 0` 已写判定在新语义下失效~~（已修，2026-10-20
+  审查轮）：哨兵改等值判定（`!= -12345`），docstring/打印文案同步为绝对戳语义；
+  其依赖的"前缀性质"（trap 于步 N → 槽 0..N 已写、其后哨兵）在新语义下仍成立。
+- ~~`compare.py:299` 注释 "stepCycles（26）" 与 `echo_lru_launch.h` 注释 "每核分步
+  周期" 未随本轮更新~~（已修，同上：分别改为 "stepAbs 绝对时间戳区（29）" 与
+  "分步打点区（t0 绝对时间戳低 32 位）"；行为无影响——compare.py 的 workspace
+  上界每核 73984 元素 ≫ bn×29，launch.h 按符号引用自动扩容）。
+- CMakeLists.txt 本轮必须同步（ECHO_PERF_DRAIN 的编译宏管道——bisheng 编译命令在
+  CMake 内显式拼装，无通用宏透传；不改则旋钮静默失效）。该文件在主会话下发的改动
+  白名单之外，已在实现报告中置顶标注，由主会话审查定夺。
+
+**预期与验证计划**：分步覆盖 94% → ~100%（跨度口径）；prologue ~10K 首次可见且
+OpZeroFlags 与 prologue SyncGrid 分离；skew 首次可见；频率悬案关闭（1.585 GHz 常数
+两档对照）。NPU 验证待做：四场景 echo_perf_step（--warmup 5 --repeat 20）+ 一轮
+--matrix + prof_report 生成 + （可选）ECHO_PERF_DRAIN=ON 对照一轮（结论仅该二进制
+内有效）。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
@@ -1942,7 +2044,8 @@ v2.0 快照 tag `v2.0`（§9.17-§9.21）；v1 终版 tag `v1-argtopk-final`。
 
 ### 10.3 已识别方向（按当前优先级排序；v2.1 已上板验证，§9.22）
 
-1. **精确打点（专家意见 2026-10-20，先测准再动刀）**：现分步（t0 clock 差值）
+1. **精确打点（专家意见 2026-10-20，先测准再动刀；时间戳升级 + 标定修正已落地
+   §9.23，NPU 待验证）**：现分步（t0 clock 差值）
    与 kernel P50 绝对值对不上——①频率标定被 Event P50 污染（§7.8，输出里
    141-245 MHz 是假数，Σ/P50 交叉 ≈1.4-1.5 GHz 才自洽）；②t0-only 口径看不见
    核间/线程间偏差；③步边界无排空，边界归属模糊。计划三件套：
@@ -1971,23 +2074,32 @@ v2.0 快照 tag `v2.0`（§9.17-§9.21）；v1 终版 tag `v1-argtopk-final`。
      纯写 20.6 μs（1.6 TB/s）——SIMT store 路径写带宽约为 MTE 引擎一半，
      更快写路径存在物理空间但 kernel 内不可用 MTE（混合范式的具体候选点，
      parked 记录）。
-   - **kernel 内时间戳升级**（参考专家提供的 AddTimePoint 方案，映射到纯
-     SIMT）：每核绝对时间戳（现在只存 t0 差值→核间 skew 可见，即参考文档
-     "每条横线一个核"图）；可选排空模式（PipeBarrier 等价物=SyncGrid，编译
-     开关默认关，测"真实边界" vs "记账边界"差）；**prologue 纳入打点**（对账
-     显示 ~6 μs 未覆盖，OpZeroFlags 是主要成分）；
-   - **echo_perf_step.py 标定修正**：接受 --p50-us 外部锚点（来自
-     profile_kernel.sh）替代 Event 标定；1.58 GHz 实测值已可作默认常数。
+   - **kernel 内时间戳升级（已落地 §9.23，NPU 待验证）**：PerfBegin/差值 →
+     PerfEntry + 步末绝对戳（29 槽 = entry + prologue×2 + 非 spec 18 + spec
+     陈列 8），host uint32 回绕差分，步间间隙归属下一步；核间 skew 首次可见
+     （参考文档 "每条横线一个核"图 → prof_report 热力图）；排空模式已挂
+     ECHO_PERF_DRAIN 编译旋钮（SyncGrid = PipeBarrier<PIPE_ALL> 等价物，默认
+     关，量"真实边界" vs "记账边界"差）；prologue 已纳入打点（OpZeroFlags/
+     SyncGrid 两槽）。
+   - **echo_perf_step.py 标定修正（已落地 §9.23）**：默认 1.585 GHz 常数；
+     --p50-us 外部锚点（profile_kernel.sh）两档对照；Event P50 仅打印
+     （§7.8 不可信，不参与换算）。
+   - **可视化结论（2026-10-20）**：绑定 msprof op 的 HTML 报告路线不适用 torch
+     负载（同 msprof op 的还原-重放问题）——已自建 prof_report.py（§9.23，
+     吃 --matrix 两 CSV + op_summary，单文件 HTML，服务器生成后浏览器打开）；
+     官方 GUI = MindStudio Insight 可直接打开 PROF_* 采集目录（kernel 时间轴/
+     算子视图），需要图形界面时用之。
    msprof **不含** kernel 内函数级拆解（op_summary 均为 op 级）——函数级仍靠
-   时间戳方案，两者互补。待补采：L2Cache / ResourceConflictRatio / Memory
-   三组 + Run A 的 aicore.db 逐核 task_cyc 抽取（核间均衡）。
+   时间戳方案（§9.23 已落地），两者互补。待补采：L2Cache / ResourceConflictRatio /
+   Memory 三组 + Run A 的 aicore.db 逐核 task_cyc 抽取（核间均衡；§9.23 的
+   skew/热力图已给 kernel 内视角，交叉验证用）。
    - **[新候选 2026-10-20] flags 世代号化**：对账暴露 prologue ~10K cyc/步
      （OpZeroFlags 全量清零 4097×32 int32 + SyncGrid）。flags[s] 改存每步
      +1 的世代号 gen（hit 判定 = `flags[s]==gen`）可**删 OpZeroFlags 与
      prologue SyncGrid**（世代号天然防 audit 污染/跨 invocation 残留；WAW
      消失；int32 回绕 2^31 步不现实）。预计全场景 −5~8K（full ~4-6%）。
      风险中：spec bit1 语义需一并世代化、ClassifyEvict 判定改等值比较。
-     与时间戳升级正交，可并行评估。
+     与时间戳升级正交（§9.23 落地后先用新打点复核 prologue 实测占比再定刀）。
 2. **ClassifyEvict 再削**（full 29K = 3 栅栏 ~11K + staging/两遍走查/散射
    ~18K）：候选 = 尾栅栏与后续 Op 的依赖重审（freeIdx 读者是 FreeRelease 而
    非 AllocPop，B3 能否并入 FreeRelease 前提）、staging 读的合并（flags 与
@@ -2025,6 +2137,7 @@ v2.0 快照 tag `v2.0`（§9.17-§9.21）；v1 终版 tag `v1-argtopk-final`。
 | 2026-10-16 | 第 7 版 | 待提交（round-4：[P-E]+白付清理） | 同步工作区未提交的 round-4：[P-E] 反向 P-D（OpArgtopkRow 行首全员 pack + B0，hist 一律读 key，Argtopk 栅栏 7→8，§6.2/§6.7/§9.15）与白付清理 A/B（非 spec 跳过 prologue FillZero+SyncGrid、anyReset=0 跳过 Step0 四 Op+SyncGrid，打点槽保留，§5.1/§9.15）；§9.11 [P-D] 条目标注已被回退；全文 kernel.h 行号按当前工作区核对修正；附录⑥标记已解决；NPU 验证待做（预期数字与挂起二分顺序见 §9.15） |
 | 2026-10-16 | 第 8 版 | `3906f91`+`9b63e24`（上板验证） | round-4（[P-E]+白付清理）上板验证（空闲设备）结果写入：§9.15 新增上板验证小节（warm 58.28/55.34 μs＝0.72×/0.67× 超出白付清理预期、cold 94.16 μs、full 120.12 μs；P-E 收益重校准——Argtopk −9.1K 远低于静态预期 −30K，Argtopk 转弥散结构无单一主导相位；距 50-60 μs 定量账 → v2 必要性坐实；int16 hist 扩 G=128 候选撤下）；§9.14 open question 1 关闭（SIMT ~2× 确认为设备占用干扰，比值恢复可信）；§7.11 新增"静态延迟链模型高估依赖读成本"方法论教训；§9 总表 round-4 行、§10.1 现状、§2.2 比值引用、头部覆盖范围同步刷新 |
 | 2026-10-20 | 第 13 版 | `ab4fb5b`→`f2acb7c`（t1024 消融实测回退） | §9.21 t1024 消融负结果：P50 四场景 +25~37 μs（Rebuild +11~16K=栅栏翻倍、HitMiss +6~8K 未降反升、MissCumsum −2.5~3.9K 不抵、ResetRows 持平）；三条结论（栅栏随线程数翻倍且占总时间 ~1/3、gather 核吞吐受限非每 warp 串行（H1 修正）、ResetRows 带宽地板佐证）；§10.2 HitMiss 行改"收尾 ~4-7K"；§10.3 重排（EvictScan×Rebuild 融合+栅栏削减列 1、新增 golden 平局规则松弛决策点、t1024 证伪移除）；CLAUDE.md 同步 |
+| 2026-10-20 | 第 16 版 | v2.1-prof（NPU 待验证） | §9.23 打点升级全记录：差值→绝对时间戳（29 槽 = entry + prologue×2 + 非 spec 18 + spec 陈列 8；PerfBegin/perfLast_ 删除；host uint32 回绕差分；步间间隙归属下一步）；标定修正（默认 1.585 GHz 常数 + --p50-us 锚点两档对照，Event 标定行废弃 §7.8）；prologue 纳入打点（对账 94%→~100% 预期）+ skew 首见；ECHO_PERF_DRAIN 排空旋钮（build.sh + CMakeLists，产物 build_v2dbg/，需配 ECHO_PERF_STEP=ON）；echo_perf_step.py 重写 + --matrix CSV 导出 + 新增 prof_report.py（单文件 HTML：对账条/逐核×逐步热力图/逐步聚合/op 表/原始折叠表，dataviz skill 已验证调色板原样引用）；§8.3 加 v2.1-prof 指针、§10.3① 刷新（时间戳+标定已落地待验证、可视化结论：自建 prof_report / MindStudio Insight 可开 PROF_* 目录）；checks 常量断言 26→29；遗留三项（debug_v2_stepcycles 写判定、compare.py:299/launch.h 注释）已由主会话审查轮顺手同步、CMakeLists 为白名单外必要管道（旋钮不进 ECHO_FLAGS 即静默失效）一并合入；CLAUDE.md 同步 |
 | 2026-10-20 | 第 15 版 | v2.1（`6188d3b`+验证） | §9.22 上板验证：四场景 golden 全过、P50 warm 71.36/69.33（0.88×/0.85×）/full 82.12（0.88×，−18.5%）/cold 99.59（1.34×）——首次三场景 ≤SIMT、full 破百；分步对照表（ClassifyEvict full 29.0K = 旧两 Op 之和 −56%；cold Rebuild 31.8K→10.7K）；§10.1 刷新；§10.3 重排（精确打点列 1：msprof op 硬件侧视角 + kernel 内绝对时间戳升级 + 标定修正；ClassifyEvict 再削/收尾清单/混合范式 parked）；快照 tag v2.1 |
 | 2026-10-20 | 第 14 版 | v2.1（单趟分类，NPU 待验证） | §9.22 v2.1 全记录：单趟分类 OpClassifyEvictRow（三产出 freeIdx/K 段/H 段+rbBase，融合 EvictScan+Rebuild 位置域扫描，每步必跑，occ==0 快路径）+ 平局松弛（hit 旧位置序/alloc 分配序，owner 2026-10-20 批准）+ 尾段追加 OpAllocAppendRow（零栅栏零扫描）；UB 删 aAt/hExcl/aExcl 三段（峰值 26176→13120 实算链）、numHitsGm 复活为 rbBase（布局零漂移）；reference_echo 改旧序直接法（htd 法判 miss 原样）；checks 重写 54 项（跨验证组改新规则+成员集合不变量）；旋钮清理（SKIP_REBUILD+9 个 RB_*，CUTOFF 保留）；预期收益表（warm_all ~67-69/warm75 ~68-71/full ~79-83/cold ~87-90）与风险预案（trap 预案=Step2.SyncGrid 无条件化）；§10.1 加 v2.1 待验证注记、§10.3 重排（v2.1 验证列 1，融合/松弛移入已完成）；banner 覆盖范围 →§9.17–§9.22；CLAUDE.md 同步 |
 | 2026-10-19 | 第 12 版 | 48610c0→266ed64（opt3 实测回退）+ `ab4fb5b`（t1024 消融待测） | §9.20 负结果记录：opt3 预置摊销实测净回退 ~+3K（HitMiss 四场景 +2.7~4.2K / FifoAvail 持平 / P50 +1~3.6 μs），机理 = 同 warp 冷访存串行（H1）+ 冷行 store 同价非火后即忘（H2）+ 块内栅栏同步推论，已 revert 回 v2.0 基线；§10.2 补 OpFifoAvailUpdate 冷触地板行、OpHitMiss 行按 H1 重估（t512 地板 22-25K）；§10.3 按 H1/H2 重排（t1024 消融验证列 1、Rebuild 栅栏/融合细化、FifoAvail 并行化证伪移除、fifo/avail 合并记远期）；CLAUDE.md 设备坑速查 + 优先级同步 |
