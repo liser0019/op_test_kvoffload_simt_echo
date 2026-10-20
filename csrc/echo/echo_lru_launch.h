@@ -16,7 +16,8 @@ void launch_echo_lru(int32_t* htd, int32_t* dth, int32_t* lru, int32_t* freeSlot
 // GM workspace 布局 (与 EchoLruKernel::Init 逐项一致, [v2]):
 //   [0, base)           每行: wsCumsum(B+1) + pushCount/numHits/numMisses/freeSize(4)
 //                       + freeIdx(topk) + rawSlots(topk) + wsMissRank(topk)
-//                       + flags(B+1)   [v2] 分类位 (bit0=hit, bit1=淘汰/spec 移除)
+//                       + flags(B+1)   [v2.2] 分类位 (hit=gen / spec 移除=genSpec,
+//                       世代号等值链; 值域自洽, 无 per-invocation 清零 —— 分配时清零一次即可)
 //   [align2(base), +bn*ECHO_PERF_NUM_STEPS)      [ECHO_PERF_STEP] 每核分步打点区
 //                       ([v2.1-prof] t0 绝对时间戳低 32 位, 仅 perf 构建分配)
 //   (v1 的 argtopk 诊断 dump 区 [bn*256 + bn*ARGTOPK_GM_NPAD_MAX] 已随基数选择删除)

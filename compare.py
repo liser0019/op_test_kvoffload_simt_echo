@@ -296,15 +296,22 @@ def prepare_npu(torch, case, echo_initial, device, blocks_override=None):
         blocks = (rows + rows_per_core - 1) // rows_per_core  # 向上取整可能小于请求值，正常
     npad = 1 << capacity.bit_length()  # next_pow2(capacity+1)，4096→8192。
     # [v2] 新版 workspace 上界：每行 wsCumsum(B+1) + 4 标量 + 3*topk 向量
-    #   + flags(B+1)（分类位）；每核仅打点构建的 stepAbs 绝对时间戳区（29，
-    #   [v2.1-prof]）。有意按上界
+    #   + flags(B+1)（分类位）；每核仅打点构建的 stepAbs 绝对时间戳区（27，
+    #   [v2.1-prof]；[v2.2] prologue 两槽已删）。有意按上界
     #   多分配（每核 4*npad+2*64*256+256+8192 是 v1 argtopk 时代的超大余量，
     #   保留兼容任何布局微调；严格大于新版 plugin 所需）。
     base = rows * (2 * (capacity + 1) + 4 + 3 * topk)
     elements = ((base + 1) & ~1) + blocks * (4 * npad + 64 * 256 + 64 * 256 + 256 + 8192)
     if elements > I32_MAX:
         raise ValueError("Echo workspace 超过 int32 索引范围")
-    states["echo"]["workspace"] = torch.empty(elements, dtype=torch.int32, device=device)
+    # [v2.2 flags 世代号化] 分配时一次性清零（原 torch.empty）：flags 值域
+    #   {4k+1, 4k+2}（hit=gen / spec=gen+1，gen 从 1 起每次调用 +4），0 永不
+    #   落窗 —— 此后靠值域自洽，per-invocation 的 OpZeroFlags 清零已删。
+    #   生产侧契约 = workspace 分配时清零一次。SIMT 侧 workspace 与本改动无关，
+    #   保持 empty。audit 在样本间整体填 I32_MAX（≡3 mod 4）同样窗外免疫
+    #   （旧 bit 语义下 I32_MAX 的 bit0=1 会被误判 hit、靠清零兜底；新值域
+    #   严格更安全）。
+    states["echo"]["workspace"] = torch.zeros(elements, dtype=torch.int32, device=device)
     states["echo"]["blocks"] = blocks
     torch.npu.synchronize()
     return inputs, initial, states
@@ -480,6 +487,9 @@ def main():
                 output_keys = SIMT_OUTPUT if name == "simt" else ECHO_OUTPUT
                 for key in output_keys:
                     state[key].fill_(255 if key == "miss_mask" else -777)
+                # [v2.2] echo 的 flags 世代号窗 {4k+1,4k+2} 对 I32_MAX（≡3 mod 4）
+                #   污染天然免疫（旧 bit 语义需 OpZeroFlags 兜底，已删），此处污染
+                #   口径不变；SIMT 侧 workspace 自理。
                 state["workspace"].fill_(I32_MAX)
                 invoke(torch, name, case, inputs, state)
                 torch.npu.synchronize()

@@ -48,25 +48,26 @@ constexpr uint32_t ARGTOPK_GROUP_THREADS = 64;    // [v2 遗留] 基数选择直
 //   clock() 绝对时间戳 (低 32 位, int32) 写入 workspace 尾部
 //   stepAbs[blockIdx.x * ECHO_PERF_NUM_STEPS + slotIdx].
 //   [v2] 曾为 18 个非 spec 步的 t0 差值 (spec 构建 26 步);
-//   [v2.1-prof 2026-10-20] 改为绝对时间戳 + entry/prologue 纳入, 槽位 29 =
-//   1 entry + 28 步末标记 (含 2 个 prologue 槽): slot 0 = Process 进入
-//   (PerfEntry 写, Init/kernel 进出开销在其外), slot 1/2 = prologue.OpZeroFlags /
-//   prologue.SyncGrid (spec 的 OpFillZero 不打点, 耗时并入 slot 2 差分),
-//   slot 3..20 = 非 spec 18 步 (Step0×5, Step1×2, Step2×4, Step3×2, Step4×2,
-//   Step5×3, 详见 deep_dive §9.23), 名表尾部 21..28 = 8 个 spec 步名 (陈列位).
+//   [v2.1-prof 2026-10-20] 改为绝对时间戳 + entry/prologue 纳入;
+//   [v2.2 2026-10-20 flags 世代号化] prologue 两槽 (OpZeroFlags/SyncGrid) 删除,
+//   槽位 27 = 1 entry + 26 步末标记: slot 0 = Process 进入 (PerfEntry 写,
+//   Init/kernel 进出开销在其外), slot 1..18 = 非 spec 18 步 (Step0×5, Step1×2,
+//   Step2×4, Step3×2, Step4×2, Step5×3, 详见 deep_dive §9.23), 名表尾部
+//   19..26 = 8 个 spec 步名 (陈列位).
 //   ⚠ spec 构建下 8 个 spec 戳按现行约定 (v2 起) 仍插在 Step0.SyncGrid 之后、
-//   Step1 之前 —— 顺序计数器语义下实际落在 slot 8..15, 后续非 spec 步顺延至
-//   16..28; 名表 21..28 只是非 spec 名表的尾部陈列, 非 spec 构建 (本基准
+//   Step1 之前 —— 顺序计数器语义下实际落在 slot 6..13, 后续非 spec 步顺延至
+//   14..26; 名表 19..26 只是非 spec 名表的尾部陈列, 非 spec 构建 (本基准
 //   spec_enabled=False) 该 8 槽恒为哨兵.
 //   步耗时 = t[slot+1] - t[slot] (host 侧 uint32 回绕差分; 单次 invocation 跨度
 //   ~160K cyc @1.585GHz ≪ 2^31, 回绕安全), 步间间隙自然归属到下一步.
 //   步名对照见 echo_perf_step.py 的 ECHO_PERF_STEP_NAMES.
-constexpr uint32_t ECHO_PERF_NUM_STEPS = 29;
+constexpr uint32_t ECHO_PERF_NUM_STEPS = 27;
 
 // [v2 debug] ECHO_V2_DEBUG_CUTOFF=N: Process 在第 N 阶段后提前 return (0=关闭)。
 //   仅用于二分定位设备侧 trap: 截断后状态不完整, golden 必挂 (Assertion) ——
 //   "trap(RuntimeError 507035)" vs "Assertion/比对失败" 就是二分信号。
-//   阶段: 1=prologue 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4
+//   阶段: 1=prologue 后 (v2.2 起 prologue 仅剩 spec OpFillZero, 非 spec 构建该
+//         段为空) 2=Step0 3=Step1 4=Step2 5=Step3 6=Step4
 //         7=Step5.MissCumsum 后 8=Step5.SyncGrid 后 9=全程。
 #ifdef ECHO_V2_DEBUG_CUTOFF
 constexpr uint32_t ECHO_V2_DEBUG_CUTOFF_V = ECHO_V2_DEBUG_CUTOFF;
@@ -96,6 +97,12 @@ struct EchoLruTiling {
                               // host/torch 侧按 min(spl)<maxModelLenP1 判定. 默认 0 (非 spec).
     uint32_t argtopkDebugRow; // [诊断3] 需 dump pass0 归并后直方图的行号; 0xFFFFFFFF=关闭.
     uint32_t argtopkGroupThreads;
+    // [v2.2 flags 世代号] 本次 invocation 的 flags 世代号: plugin 侧进程级静态
+    //   计数器发放 (从 1 起, 每次调用 +4 → 恒 ≡1 mod 4), 随 tiling H2D 传入。
+    //   全局单调即可, 无需 per-workspace 计数: 任何陈旧 flags 值 (上一
+    //   invocation 的 / 内存回收复用前的旧 workspace) 恒旧于当前窗 {gen, gen+1},
+    //   天然不撞; 进程重启则配 "workspace 分配时清零一次" 契约 (0 永不落窗)。
+    int32_t flagsGen;
 };
 
 }  // namespace ascend_kernel

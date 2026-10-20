@@ -25,7 +25,7 @@ op 级表、原始数据折叠表。单文件内联 CSS/JS，**无外部依赖�
 页面结构：
     §1 总览    —— 场景元信息 + 统计瓦片 + 对账条（打点跨度 vs msprof 时长 vs 外部 P50 锚点，
                   缺口即 Init/kernel 进出等打点外开销，§9.23 对账口径）
-    §2 热力图  —— 行=核（blockIdx），列=28 步（名表序），色=该步该核耗时（顺序色标，
+    §2 热力图  —— 行=核（blockIdx），列=26 步（名表序），色=该步该核耗时（顺序色标，
                   cyc/μs 可切换，悬停显示数值；8 个 Step0.5 列在非 spec 构建下未写=灰）
     §3 逐步聚合 —— 每步 32 核分布：P50 条形（max 作同色浅轨道、min 刻度）+ skew 列（μs 轴）
     §4 op 级表 —— （若给 --op-summary）kernel 名 / Duration / aiv_vec_ratio / scalar /
@@ -154,12 +154,12 @@ def load_matrix(prefix: str) -> dict:
             raise SystemExit(f"找不到 {p} —— 先运行 echo_perf_step.py --matrix <prefix> 生成两个 CSV")
     hdr, rows = read_csv_skip_comments(abs_path)
     if len(hdr) < 3 or hdr[0] != "block":
-        raise SystemExit(f"{abs_path} 表头异常（应为 block + 29 槽名）: {hdr[:3]}")
+        raise SystemExit(f"{abs_path} 表头异常（应为 block + 27 槽名）: {hdr[:3]}")
     slot_names = hdr[1:]
     abs_vals = [[int(c) for c in r[1:]] for r in rows]
     hdr2, rows2 = read_csv_skip_comments(steps_path)
     if len(hdr2) < 3 or hdr2[0] != "block" or hdr2[-1] != "span_entry_to_last":
-        raise SystemExit(f"{steps_path} 表头异常（应为 block + 28 步名 + span_entry_to_last）: {hdr2[:3]}")
+        raise SystemExit(f"{steps_path} 表头异常（应为 block + 26 步名 + span_entry_to_last）: {hdr2[:3]}")
     step_names = hdr2[1:-1]
     if len(step_names) + 1 != len(slot_names):
         raise SystemExit(f"两 CSV 列数不一致: abs {len(slot_names)} 槽 vs steps {len(step_names)} 步")
@@ -243,7 +243,7 @@ def parse_op_summary(path: Path):
 # ============================ SVG 图 ============================
 
 def svg_heatmap(data: dict, freq_hz: float) -> str:
-    """核心页：行=核，列=28 步（名表序），色=该步该核耗时（全局线性顺序色标）。
+    """核心页：行=核，列=26 步（名表序），色=该步该核耗时（全局线性顺序色标）。
 
     颜色域取全体已写格的 max（诚实呈现热点集中度；小值接近表面=接近零）；
     单位切换只影响 tooltip/图例文本，不影响颜色（μs 是 cyc 的线性变换）。
@@ -522,9 +522,9 @@ def section_raw(data):
         '<section class="card"><h2>5. 原始数据</h2>'
         '<p class="cap">两个 CSV 的原样表格（= 各图的无悬停/键盘可达等价物）；'
         '绝对戳为 int32 低 32 位（高位可负，属正常回绕存储），-12345 = 未写哨兵。</p>'
-        f'<details><summary>{esc(data["abs_path"].name)}（行=块，列=29 槽原始绝对戳）</summary>'
+        f'<details><summary>{esc(data["abs_path"].name)}（行=块，列=27 槽原始绝对戳）</summary>'
         + table(["block"] + data["slot_names"], abs_rows) + "</details>"
-        f'<details><summary>{esc(data["steps_path"].name)}（行=块，列=28 步耗时 + 总跨度）</summary>'
+        f'<details><summary>{esc(data["steps_path"].name)}（行=块，列=26 步耗时 + 总跨度）</summary>'
         + table(["block"] + data["step_names"] + ["span_entry_to_last"], steps_rows) + "</details>"
         "</section>")
 

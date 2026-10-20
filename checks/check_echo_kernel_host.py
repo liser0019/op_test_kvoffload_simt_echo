@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Echo v2.1（单趟分类）回归：提取实际 C++ 函数，g++/128 个 CPU 线程检查分类淘汰与尾段追加。
+"""Echo v2.1/v2.2（单趟分类 + flags 世代号）回归：提取实际 C++ 函数，g++/128 个 CPU 线程检查分类淘汰与尾段追加。
 
-覆盖 v2.1 的设备算法改动（详见 kernel 头注释与 deep_dive §9.22，共 54 项）：
+覆盖 v2.1/v2.2 的设备算法改动（详见 kernel 头注释与 deep_dive §9.22，共 56 项）：
   - OpClassifyEvictRow：单趟分类（融合 v2.0 EvictScan + Rebuild 位置域扫描）——
     三产出 freeIdx（前 victims 个候选，位置序 + padding [B+1,..) + 尾零，全部由
     fsClamp>0 门控）/ K 段（幸存者保持旧序）+ H 段（hit 按旧位置序，平局松弛）/
-    rbBase（t0 写 numHitsGm）；occ==0 快路径（零栅栏）；不写 flags bit1；
+    rbBase（t0 写 numHitsGm）；occ==0 快路径（零栅栏）；不写 flags；
+    [v2.2] 分类改世代号等值链（v==gen hit / v==genSpec spec 跳过 / 其余候选，
+    gen/genSpec 经参数传入；gen=1/genSpec=2 下旧 golden 向量数值不变），另加
+    陈旧/audit 免疫用例（预填 {gen, genSpec, gen−4, gen−3, 0, I32_MAX} 混合，
+    仅窗口内两值生效）；
   - OpAllocAppendRow：分配槽按 rawSlots j 序（分配序，平局松弛）尾段追加 +
     spec 尾零；padding 索引防御性钳位（>B 钳到 B、<0 钳到 0）；
-  - 跨验证组（14 试验）：随机场景（occ/hit 模式/fs/nm/bit1 混合/padding 边界/
+  - 跨验证组（14 试验）：随机场景（occ/hit 模式/fs/nm/spec 混合/padding 边界/
     nm=0/fs=0/occ=0/spec 垃圾尾）按 v2.1 新规则独立推导 golden，与链式调用
     （ClassifyEvict+AllocAppend，rbBase 经"GM"单元格传递，与设备 Step2→Step4
     同构）逐位比对，另加成员集合不变量断言（sorted(新 lru[0:occNew]) ==
     期望占用槽集合，防段错位/漏槽/重槽）；
-  - OpHitMiss：hit → flags bit0（v2 替代 pri 时间戳）、warp 归约计数、[P4]
-    freeSize 折叠、[C1] 淘汰标志、零 atomic；
+  - OpHitMiss：hit → flags=gen（[v2.2] 世代号；v2 曾为 bit0、v1 为 pri 时间戳）、
+    warp 归约计数、[P4] freeSize 折叠、[C1] 淘汰标志、零 atomic；另加覆写用例
+    （陈旧值 5 的 hit 槽 → gen=9；非 hit 槽保持陈旧/audit 值 —— 设备侧已无
+    prologue 清零可依赖，覆写语义即正确性）；
   - OpMissCumsum：两级 warp 扫描（[P3]，v2 未改动，原样回归）；
   - OpAllocPop + OpFifoAvailUpdate：直读 freeIdx + 老栈等价（[P4] 原样回归）；
     fifo 两次自增合并为 +2（[v2]）。
@@ -32,7 +38,7 @@ root=Path(__file__).resolve().parents[1]
 # 修改 tiling 后误用旧模型。
 tiling=(root/'csrc/echo/echo_lru_tiling.h').read_text()
 for name,value in [('ARGTOPK_GROUP_THREADS',64),('ARGTOPK_UB_NPAD_MAX',8192),
-                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',29)]:
+                   ('ARGTOPK_GM_NPAD_MAX',8192),('ECHO_PERF_NUM_STEPS',27)]:
     match=re.search(r'constexpr uint32_t '+name+r'\s*=\s*(\d+)\s*;',tiling)
     assert match and int(match.group(1))==value, f'{name} 已改变，请同步调整 CPU 模型'
 src=(root/'csrc/echo/echo_lru_kernel.h').read_text()
@@ -115,8 +121,10 @@ try{
     int checks=0;
     // ---- 1) OpClassifyEvictRow: 单趟分类 (freeIdx + K/H 段散射 + rbBase) ----
     // hitMode: 0=随机分布 hit; 1=hit 集中在最旧端 (必须跳过, 选中靠后的候选)。
-    // bit1Mode: 0=无 bit1; 1=随机标 ~occ/6 个 bit1 (spec 移除语义: 不计候选不计
-    //   hit; 只标非 hit 位 —— 管线内 Step0.5 早于 Step1, hit 与 bit1 不共位)。
+    // bit1Mode: 0=无 spec; 1=随机标 ~occ/6 个 spec 移除位 (不计候选不计 hit;
+    //   只标非 hit 位 —— 管线内 Step0.5 早于 Step1, hit 与 spec 不共位)。
+    //   [v2.2] 下方调用传 gen=1/genSpec=2 —— fixtures 编码值 {1,2} 恰为该窗口,
+    //   等值链与旧 bit 判定在此编码下重合, 旧 golden 向量数值不变。
     // fsClamp==0 用例: freeIdx 必须零写 (fs=0 行不发 freeIdx, AllocPop 恒走老栈),
     //   K/H 照散射。occ==0 用例: fsClamp==0 走快路径 (零栅栏, 全不动 + rbBase=0);
     //   fsClamp>0 (用例 12, 管线内不可达的防御组合) 落入正常路径 (空扫描循环 +
@@ -157,8 +165,9 @@ try{
                     }
                 }
             }
+            // [v2.2] 编码值 {1,2} 恰为 gen=1/genSpec=2 窗口 (调用传 1,2)。
             for(uint32_t s=1;s<=B;++s)flagsRow[s]=(hitFlags[s]?1:0)|(bit1Flags[s]?2:0);
-            // golden (v2.1 新规则直接推导): hit 组=旧位置序; 候选=非 hit 非 bit1;
+            // golden (v2.1 新规则直接推导): hit 组=旧位置序; 候选=非 hit 非 spec;
             //   受害者=前 victims=min(fsClamp,候选数) 个候选 (位置序)。
             std::vector<int32_t> hitSlots,cand;
             for(uint32_t p=0;p<occ;++p){
@@ -188,7 +197,7 @@ try{
             std::vector<int32_t> flagsUb(B+1+8,-777),lruUb(B+1+8,-777),scan(64+8,-777);
             launch([&]{OpClassifyEvictRow(B,topkDim,fsClamp,occ,lruGm.data(),0,
                                           flagsGm.data(),0,freeIdx.data(),rbBaseOut.data(),
-                                          flagsUb.data(),lruUb.data(),scan.data());});
+                                          flagsUb.data(),lruUb.data(),scan.data(),1,2);});
             for(uint32_t j=0;j<topkDim;++j)
                 require(freeIdx[j]==expFreeIdx[j],"classify freeIdx mismatch");
             for(uint32_t j=topkDim;j<freeIdx.size();++j)require(freeIdx[j]==-777,"freeIdx overrun");
@@ -200,6 +209,59 @@ try{
                 require(flagsUb[i]==-777&&lruUb[i]==-777,"UB staging overrun");
             ++checks;
         }
+    }
+    // ---- 1b) [v2.2] ClassifyEvict 世代号窗口: 陈旧/audit 值免疫 ----
+    // flags 预填混合值: 9=gen(hit 槽) / 10=genSpec(spec 槽) / 5=gen-4(上一届
+    //   陈旧 hit) / 6=gen-3(上一届陈旧 spec) / 0(分配清零基线) / I32_MAX(audit
+    //   样本间污染, ≡3 mod 4)。断言: 仅 ==9 按 hit、==10 按 spec 跳过、其余
+    //   (含全部窗外值) 一律候选 —— freeIdx/幸存者/hit 散射与 "只有槽 3 是 hit、
+    //   槽 7 是 spec" 的旧语义 golden 逐位一致 (stride=4 保证陈旧值永不撞窗)。
+    {
+        printf("[classify gen-window]\n");fflush(stdout);
+        const uint32_t B=16,occ=12,fsClamp=4,topkDim=B;
+        const int32_t gen=9,genSpec=10;
+        std::vector<int32_t> lruRow(B+1,0);
+        for(uint32_t p=0;p<occ;++p)lruRow[p]=static_cast<int32_t>(p+1);   // 旧序 = [1..12]
+        std::vector<int32_t> flagsRow(B+1,0);   // 0 = 基线 (窗外, 候选)
+        flagsRow[3]=gen;        // hit 槽 (窗口内)
+        flagsRow[7]=genSpec;    // spec 移除槽 (窗口内)
+        flagsRow[1]=gen-4;      // 陈旧 hit (上一届 gen) —— 必须按候选
+        flagsRow[5]=gen-3;      // 陈旧 spec (上一届 genSpec) —— 必须按候选
+        flagsRow[11]=I32_MAX;   // audit 污染 (≡3 mod 4) —— 必须按候选
+        std::vector<int32_t> hitSlots{3},cand;
+        for(uint32_t p=0;p<occ;++p){
+            int32_t s=lruRow[p];
+            if(s==3)continue;   // hit (v==gen)
+            if(s==7)continue;   // spec 移除 (v==genSpec)
+            cand.push_back(s);
+        }
+        uint32_t totalCand=(uint32_t)cand.size(),totalH=(uint32_t)hitSlots.size();
+        uint32_t victims=std::min<uint32_t>(fsClamp,totalCand);
+        uint32_t totalK=totalCand-victims;
+        uint32_t rbBase=totalK+totalH;
+        require(victims==fsClamp,"fixture: fsClamp 不得超候选数 (本用例无 padding)");
+        std::vector<int32_t> expFreeIdx(topkDim,-777);
+        for(uint32_t j=0;j<fsClamp;++j)expFreeIdx[j]=cand[j];
+        for(uint32_t j=fsClamp;j<topkDim;++j)expFreeIdx[j]=0;
+        std::vector<int32_t> expLru=lruRow;
+        for(uint32_t p=0;p<totalK;++p)expLru[p]=cand[victims+p];
+        for(uint32_t p=0;p<totalH;++p)expLru[totalK+p]=hitSlots[p];
+        std::vector<int32_t> lruGm=lruRow,flagsGm=flagsRow;
+        std::vector<int32_t> freeIdx(topkDim+8,-777),rbBaseOut(2,-777);
+        std::vector<int32_t> flagsUb(B+1+8,-777),lruUb(B+1+8,-777),scan(64+8,-777);
+        launch([&]{OpClassifyEvictRow(B,topkDim,fsClamp,occ,lruGm.data(),0,
+                                      flagsGm.data(),0,freeIdx.data(),rbBaseOut.data(),
+                                      flagsUb.data(),lruUb.data(),scan.data(),gen,genSpec);});
+        for(uint32_t j=0;j<topkDim;++j)
+            require(freeIdx[j]==expFreeIdx[j],"classify gen-window freeIdx mismatch");
+        for(uint32_t j=topkDim;j<freeIdx.size();++j)require(freeIdx[j]==-777,"freeIdx overrun (gen-window)");
+        for(uint32_t p=0;p<=B;++p)require(lruGm[p]==expLru[p],"classify gen-window lru K/H mismatch");
+        for(uint32_t s=0;s<=B;++s)require(flagsGm[s]==flagsRow[s],"classify must not write flags (gen-window)");
+        require(rbBaseOut[0]==(int32_t)rbBase,"classify gen-window rbBase mismatch");
+        require(rbBaseOut[1]==-777,"rbBaseOut overrun (gen-window)");
+        for(uint32_t i=B+1;i<flagsUb.size();++i)
+            require(flagsUb[i]==-777&&lruUb[i]==-777,"UB staging overrun (gen-window)");
+        ++checks;
     }
     // ---- 2) OpAllocAppendRow: 尾段追加 golden ----
     // 预置 K/H 已散射的 lru ([0,base) 随机占位, [base,B] 哨兵 -777) + rbBase;
@@ -251,7 +313,7 @@ try{
     }
     // ---- 3) 跨验证: v2.1 新规则独立 golden vs 链式调用 (ClassifyEvict+AllocAppend) ----
     // CPU golden 直接按新序推导: 新 lru = 幸存者(旧序) ++ hit(旧位置序) ++ 分配
-    //   (rawSlots j 序); 淘汰集合 = 旧序前 fsClamp 个候选 (候选=非 hit 非 bit1)。
+    //   (rawSlots j 序); 淘汰集合 = 旧序前 fsClamp 个候选 (候选=非 hit 非 spec)。
     // 链式调用与设备 Step2→Step4 同构 (rbBase 经"GM"单元格传递, 两次 launch 间
     //   无栅栏 —— mock 的 launch() join 即全序)。
     // 管线不变量对齐: 分配 = 受害者(重用, 分配序前段) + 空槽池补足, 空槽池含
@@ -332,7 +394,7 @@ try{
         std::vector<int32_t> flagsUb(B+1+8,-777),lruUb(B+1+8,-777),scan(64+8,-777);
         launch([&]{OpClassifyEvictRow(B,B,fsClamp,occ,lruGm.data(),0,flagsGm.data(),0,
                                       freeIdx.data(),rbBaseGm.data(),
-                                      flagsUb.data(),lruUb.data(),scan.data());});
+                                      flagsUb.data(),lruUb.data(),scan.data(),1,2);});
         launch([&]{OpAllocAppendRow(B,nm,lruGm.data(),0,raw.data(),0,rbBaseGm.data(),0u,specOn);});
         for(uint32_t p=0;p<=B;++p)require(lruGm[p]==expected[p],"cross: lru mismatch (golden vs chain)");
         require(rbBaseGm[0]==(int32_t)rbBase,"cross: rbBase mismatch");
@@ -347,18 +409,18 @@ try{
         ++checks;
     }
 
-    // ---- 4) OpHitMiss: warp 归约计数 + freeSize 折叠 + [v2] flags bit0, 无 atomic ----
+    // ---- 4) OpHitMiss: warp 归约计数 + freeSize 折叠 + [v2.2] flags=gen, 无 atomic ----
     for(uint32_t eff:{4u,1536u,2048u}){
         constexpr uint32_t R=3,L=4096,T=2048,B=4096;
         std::vector<int32_t> htd(R*L),pos(R*T),out(R*T,-777),misses(R,-777),fsOut(R,-777),scratch(65,-777);
-        std::vector<int32_t> avail(R),flags(R*(B+1),0);   // [v2] flags (prologue 已清零)
+        std::vector<int32_t> avail(R),flags(R*(B+1),0);   // [v2.2] flags 基线 0 (窗外值; 设备侧为 workspace 分配清零 + 世代号自洽, 无 per-invocation 清零)
         for(uint32_t r=0;r<R;++r)avail[r]=static_cast<int32_t>(r*700+13);
         for(uint32_t i=0;i<R*L;++i)htd[i]=(i%4==0)?I32_MAX:static_cast<int32_t>(i%4096);
         for(uint32_t i=0;i<R*T;++i)pos[i]=(i%7==0)?-1:static_cast<int32_t>((i*5)%(L+100));
         atomicCalls=0;
         int32_t anyFs=0;   // [C1] 淘汰标志 golden
         launch([&]{OpHitMiss(R,T,eff,L,B,R,R,htd.data(),pos.data(),out.data(),
-                             misses.data(),avail.data(),fsOut.data(),flags.data(),scratch.data());});
+                             misses.data(),avail.data(),fsOut.data(),flags.data(),scratch.data(),1);});
         for(uint32_t r=0;r<R;++r){
             int32_t expectedMisses=0;
             std::vector<int32_t> goldenFlags(B+1,0);
@@ -367,10 +429,10 @@ try{
                 require(out[r*T+j]==expectedSlot,"hit slot mismatch");
                 if(j<eff&&expectedSlot==I32_MAX)++expectedMisses;
                 if(j<eff&&expectedSlot!=I32_MAX&&expectedSlot>=0&&expectedSlot<=static_cast<int32_t>(B))
-                    goldenFlags[expectedSlot]=1;   // [v2] distinct token → distinct slot
+                    goldenFlags[expectedSlot]=1;   // [v2.2] gen=1: distinct token → distinct slot
             }
             for(uint32_t s2=0;s2<=B;++s2)
-                require(flags[r*(B+1)+s2]==goldenFlags[s2],"[v2] hit flags bit0 mismatch");
+                require(flags[r*(B+1)+s2]==goldenFlags[s2],"[v2.2] hit flags gen mismatch");
             require(misses[r]==expectedMisses,"miss count mismatch");
             int32_t expectedFs=expectedMisses-avail[r];
             if(expectedFs<0)expectedFs=0;
@@ -379,6 +441,36 @@ try{
         }
         require(scratch[64]==anyFs,"[C1] eviction flag mismatch");
         require(atomicCalls==0,"[P0] OpHitMiss must not use atomics");
+        ++checks;
+    }
+    // ---- 4b) [v2.2] OpHitMiss 覆写: 陈旧值 → gen, 非 hit 槽不动 ----
+    // 槽 4 预填陈旧 hit 值 5 (上一届 gen), 命中后必须覆写为 gen=9; 槽 6 预填 5、
+    //   槽 2 预填 I32_MAX (audit 污染), 非 hit 槽必须原样保留 —— 世代号方案下
+    //   OpHitMiss 无 prologue 清零可依赖, 覆写语义即正确性。
+    {
+        printf("[hitmiss gen-overwrite]\n");fflush(stdout);
+        constexpr uint32_t R=1,L=16,T=4,B=8,eff=4;
+        std::vector<int32_t> htd(R*L,I32_MAX),pos{2,7,9,11};
+        std::vector<int32_t> out(R*T,-777),misses(R,-777),fsOut(R,-777),scratch(65,-777);
+        std::vector<int32_t> avail{1};
+        htd[2]=4;   // token 2 → slot 4 (唯一 hit)
+        std::vector<int32_t> flags(R*(B+1),0);
+        flags[4]=5;         // 陈旧 hit 值 (上一届 gen): hit 槽, 须覆写为 9
+        flags[6]=5;         // 陈旧值, 非 hit 槽: 必须保持 5
+        flags[2]=I32_MAX;   // audit 污染, 非 hit 槽: 必须保持 I32_MAX
+        std::vector<int32_t> flagsCopy=flags;
+        const int32_t gen=9;
+        launch([&]{OpHitMiss(R,T,eff,L,B,R,R,htd.data(),pos.data(),out.data(),
+                             misses.data(),avail.data(),fsOut.data(),flags.data(),scratch.data(),gen);});
+        require(out[0]==4&&out[1]==I32_MAX&&out[2]==I32_MAX&&out[3]==I32_MAX,
+                "hitmiss gen: slot gather mismatch");
+        require(misses[0]==3,"hitmiss gen: miss count mismatch");
+        require(fsOut[0]==2,"hitmiss gen: folded free size mismatch");
+        require(scratch[64]==1,"hitmiss gen: eviction flag mismatch");
+        require(flags[4]==gen,"hitmiss gen: hit slot must be overwritten to gen");
+        for(uint32_t s=0;s<=B;++s)
+            if(s!=4u)require(flags[s]==flagsCopy[s],
+                             "hitmiss gen: non-hit slots must keep stale/audit values");
         ++checks;
     }
     // ---- 5) OpMissCumsum: 并行扫描与串行回退 (v2 未改动, 原样回归) ----

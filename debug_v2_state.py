@@ -50,6 +50,8 @@ def main():
     state = states["echo"]
 
     # 与 audit 相同的流程: 恢复 → 污染输出/workspace → 单次调用
+    # [v2.2] I32_MAX ≡ 3 (mod 4) 恒在 flags 世代号窗 {4k+1,4k+2} 之外 —— 与
+    #   compare.py audit 同型污染，新值域天然免疫，无需随 flags 语义改动调整。
     bench.restore_state(torch, "echo", initial_dev, state)
     for key in bench.ECHO_OUTPUT:
         state[key].fill_(255 if key == "miss_mask" else -777)

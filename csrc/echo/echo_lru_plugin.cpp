@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <torch/all.h>
@@ -9,6 +10,19 @@
 #include "echo_lru_launch.h"
 
 namespace {
+// [v2.2 flags 世代号] 进程级单调计数器: 每次调用 fetch_add(4) 发放一个新 gen,
+//   从 1 起 → 恒 ≡1 (mod 4), 窗口 {gen, gen+1} 只覆盖余类 1/2 —— 0 (workspace
+//   分配时清零一次的基线) 与 I32_MAX (audit 样本间整体污染, ≡3) 永不落窗。
+//   全局单调即可, 无需 per-workspace 计数: 任何陈旧值 (上一 invocation 的, 或
+//   内存回收复用前的旧 workspace 留下的) 恒旧于当前窗, 天然不撞; 进程重启则配
+//   "新 workspace 分配时清零一次" 契约 (0 窗外)。relaxed 足够 —— 取号与 kernel
+//   读 tiling 之间隔着 launch 边界 (H2D 拷贝 + 流序), launch 边界即同步点。
+//   stride=4 (而非 1) 是为了躲 "本届 spec 标记 (g+1) = 下届 gen" 的撞值陷阱
+//   (stride=2 虽躲开该陷阱, 但 gen 取遍全体奇数、I32_MAX 亦奇数会撞 gen;
+//   stride=4 才把 0/I32_MAX 的余类永久留在窗外)。Meta 注册路径 (EchoMeta) 同样
+//   经 Check 取号 —— 只消耗号段不发射 kernel, 无害 (real 调用仍严格递增)。
+std::atomic<uint32_t> g_echoFlagsGen{1u};
+
 int64_t EchoCoreCount() {
   int32_t device = 0;
   TORCH_CHECK(aclrtGetDevice(&device) == ACL_SUCCESS, "echo_lru: cannot query current device");
@@ -78,6 +92,9 @@ ascend_kernel::EchoLruTiling Check(const at::Tensor& pos, const at::Tensor& spl,
   tiling.specEnabled = specEnabled;
   tiling.argtopkDebugRow = 0xFFFFFFFFu;
   tiling.argtopkGroupThreads = ascend_kernel::ARGTOPK_GROUP_THREADS;
+  // [v2.2 flags 世代号化] 本次 invocation 的 gen (kernel 据此写/认 flags 的
+  //   hit=gen / spec 移除=gen+1 标记, 取代已删的 OpZeroFlags 全量清零)。
+  tiling.flagsGen = (int32_t)g_echoFlagsGen.fetch_add(4u, std::memory_order_relaxed);
   return tiling;
 }
 

@@ -7,7 +7,7 @@
   - kernel 侧 PerfEnd 只在步末记 t0 的 clock() 低 32 位（int32 绝对时间戳）；本脚本
     用 numpy uint32 视图做回绕差分还原每步耗时（单次 invocation 跨度 ~160K cyc
     ≪ 2^31，回绕安全）。步耗时 = t[i+1] - t[i]，步间间隙自然归属到下一步。
-    槽位 29 = entry（slot 0，Process 进入）+ prologue×2 + 非 spec 18 步 + spec 8 步
+    槽位 27 = entry（slot 0，Process 进入）+ 非 spec 18 步 + spec 8 步
     （名表尾部陈列；spec 构建下实际插在 Step0.SyncGrid 之后，本基准不覆盖）。
   - 频率标定修正：默认常数 1.585 GHz（msprof 实测主频，§10.3①：aiv_total_cycles
     为全核和，4.22M cyc / 32 核 / 83.5 μs，DVFS 无降频）。**旧的 Event P50 标定行
@@ -15,12 +15,13 @@
     Event P50 仍测量并打印，但注明不可信、不参与任何换算。--p50-us 给外部锚点
     （profile_kernel.sh 的 kernel 级 P50）时改用 ΣΔ/P50 标定，并打印两档对照。
   - 对账预期：v2.1 旧口径分步 Σ 只覆盖单核 ~131.5K cyc 的 94%（msprof，full_cache），
-    缺口 = 未打点 prologue ~10K（OpZeroFlags 全量清零 + prologue SyncGrid + 进出/
-    槽间隙）——本轮 prologue 纳入打点、间隙归属下一步，分步覆盖预期 94% → ~100%
-    （Init/kernel 进出仍在 slot 0 之外，残余缺口即该项，见 §9.23）。
+    缺口 = 未打点 prologue ~10K + 槽间隙；v2.1-prof 纳入打点后覆盖 ~100%。[v2.2]
+    prologue 两槽（OpZeroFlags + SyncGrid）已随 flags 世代号化删除（上板实测合计
+    13.7-13.9K cyc、占跨度 8.5-11.9%），槽位 29→27；Init/kernel 进出仍在 slot 0
+    之外（残余缺口即该项，见 §9.23）。
   - 新增 skew 统计：每步 32 核 max−min 的中位（核间不均衡首次可见）。
   - 新增 --matrix <prefix>：每场景导出 <prefix>_<scenario>_abs.csv（行=块/核，
-    列=29 槽原始绝对戳）与 <prefix>_<scenario>_steps.csv（行=块，列=28 步耗时 +
+    列=27 槽原始绝对戳）与 <prefix>_<scenario>_steps.csv（行=块，列=26 步耗时 +
     末列 entry→末戳总跨度），供 prof_report.py 生成 HTML 报告。非 spec 构建下
     8 个 spec 步列恒为空。
 
@@ -66,20 +67,19 @@ _MATCH = re.search(r"constexpr uint32_t ECHO_PERF_NUM_STEPS\s*=\s*(\d+)\s*;", _T
 assert _MATCH, "echo_lru_tiling.h 中找不到 ECHO_PERF_NUM_STEPS"
 ECHO_PERF_NUM_STEPS = int(_MATCH.group(1))
 
-# [v2.1-prof] 槽位名表（29 项，顺序即槽位序 = kernel 侧 perfStepIdx_ 写入序）：
+# [v2.1-prof] 槽位名表（27 项，顺序即槽位序 = kernel 侧 perfStepIdx_ 写入序）：
 #   slot 0  = entry（Process 进入；Init/kernel 进出开销在其外）
-#   slot 1/2 = prologue.OpZeroFlags / prologue.SyncGrid（spec 的 OpFillZero 不打点，
-#     耗时并入 slot 2 差分）
-#   slot 3..20 = 非 spec 18 步（Step0×5, Step1×2, Step2×4, Step3×2, Step4×2, Step5×3）
-#   slot 21..28 = 8 个 spec 步名（陈列位）
+#   slot 1..18 = 非 spec 18 步（Step0×5, Step1×2, Step2×4, Step3×2, Step4×2, Step5×3）
+#   slot 19..26 = 8 个 spec 步名（陈列位）
+#   （[v2.2] prologue.OpZeroFlags / prologue.SyncGrid 两槽已随 flags 世代号化删除；
+#     spec 的 OpFillZero 从不打点，耗时并入 entry→Step0 首 Op 的差分）
 # ⚠ spec 构建下 8 个 spec 戳按 kernel 现行约定（v2 起）插在 Step0.SyncGrid 之后、
-#   Step1 之前——顺序计数器语义下实际落在 slot 8..15，后续非 spec 步顺延至 16..28，
-#   名表 21..28 并非其真实槽位。本基准 spec_enabled=False（compare.py invoke 固定
+#   Step1 之前——顺序计数器语义下实际落在 slot 6..13，后续非 spec 步顺延至 14..26，
+#   名表 19..26 并非其真实槽位。本基准 spec_enabled=False（compare.py invoke 固定
 #   传 False），spec 8 槽恒为哨兵；读回检测到 spec 构建时直接报错（spec 场景的
 #   分步报告属未来工作，§10.3⑥）。
 ECHO_PERF_STEP_NAMES = [
     "entry",
-    "prologue.OpZeroFlags", "prologue.SyncGrid",
     "Step0.OpResetRows", "Step0.OpResetDthLru", "Step0.OpResetFree", "Step0.OpResetAvailFifo",
     "Step0.SyncGrid",
     "Step1.OpHitMiss", "Step1.SyncGrid",
@@ -91,17 +91,17 @@ ECHO_PERF_STEP_NAMES = [
     "Step0.5.SyncGrid", "Step0.5.OpSpecPushFree", "Step0.5.SyncGrid",
     "Step0.5.OpSpecAvailAdd", "Step0.5.SyncGrid",
 ]
-assert ECHO_PERF_NUM_STEPS == len(ECHO_PERF_STEP_NAMES) == 29, (
-    f"ECHO_PERF_NUM_STEPS={ECHO_PERF_NUM_STEPS} 与名表 {len(ECHO_PERF_STEP_NAMES)} 项不符（应为 29 = "
-    "entry + prologue×2 + 非 spec 18 + spec 8），请同步 tiling.h / kernel.h 步表 / 本名表")
+assert ECHO_PERF_NUM_STEPS == len(ECHO_PERF_STEP_NAMES) == 27, (
+    f"ECHO_PERF_NUM_STEPS={ECHO_PERF_NUM_STEPS} 与名表 {len(ECHO_PERF_STEP_NAMES)} 项不符（应为 27 = "
+    "entry + 非 spec 18 + spec 8），请同步 tiling.h / kernel.h 步表 / 本名表")
 
-# 非 spec 构建写入的槽数（entry + prologue×2 + 18 步末 = 21 个绝对戳 → 20 个步耗时）。
-ECHO_PERF_MAIN_STAMPS = 21
+# 非 spec 构建写入的槽数（entry + 18 步末 = 19 个绝对戳 → 18 个步耗时）。
+ECHO_PERF_MAIN_STAMPS = 19
 ECHO_PERF_SPEC_STEPS = 8
 assert ECHO_PERF_MAIN_STAMPS + ECHO_PERF_SPEC_STEPS == ECHO_PERF_NUM_STEPS
-# 非 spec 构建下有效步耗时名（槽 1..20 的差分，= 名表切片）。
+# 非 spec 构建下有效步耗时名（槽 1..18 的差分，= 名表切片）。
 ECHO_PERF_DURATION_NAMES = ECHO_PERF_STEP_NAMES[1:ECHO_PERF_MAIN_STAMPS]
-assert len(ECHO_PERF_DURATION_NAMES) == 20
+assert len(ECHO_PERF_DURATION_NAMES) == 18
 
 # [v2.1-prof] 默认频率常数：msprof 实测主频 1.585 GHz（§10.3①，DVFS 无降频）。
 #   旧口径用每轮 Σ步周期 / Event 微秒标定——Event 含 ~600 μs 级固定开销（§7.8），
@@ -110,6 +110,9 @@ ECHO_FREQ_HZ = 1.585e9
 
 SENTINEL = -12345  # 绝对戳 int32 高位可负（uint32 低 32 位回绕存储），哨兵只认等值；
                    # 与真实戳碰撞概率 2^-32/槽，忽略。
+                   # [v2.2] 采样前全 workspace 填本哨兵（含 flags 区）：-12345 ≡ 3 (mod 4)
+                   # 恒在 flags 世代号窗 {4k+1,4k+2} 之外 → 污染免疫，与 compare.py audit 的
+                   # I32_MAX 同理。
 
 
 def echo_step_region_offset(case, blocks):
@@ -132,7 +135,7 @@ def read_step_stamps(state, case, blocks):
 
 
 def validate_stamps(matrix, where):
-    """非 spec 构建的打点区校验：槽 0..20 全写、槽 21..28 恒为哨兵。
+    """非 spec 构建的打点区校验：槽 0..18 全写、槽 19..26 恒为哨兵。
 
     绝对戳按 int32 回绕存储、高位可负——v2 差值语义时代的 "<0 即异常" 防御在此
     失效（会把一半合法戳误判为异常），哨兵只认等值 -12345。
@@ -146,14 +149,14 @@ def validate_stamps(matrix, where):
         raise RuntimeError(
             f"{where}: 槽 {ECHO_PERF_MAIN_STAMPS}..{ECHO_PERF_NUM_STEPS - 1} 非全哨兵 —— "
             "检测到 spec 构建（specEnabled=true）的打点。spec 8 戳按 kernel 现行约定插在 "
-            "Step0.SyncGrid 之后（实际槽位 8..15，见名表注释），本脚本的名表/差分按非 spec "
+            "Step0.SyncGrid 之后（实际槽位 6..13，见名表注释），本脚本的名表/差分按非 spec "
             "槽位命名，spec 场景的分步报告属未来工作（§10.3⑥）。")
 
 
 def stamp_durations(matrix):
-    """uint32 回绕差分：每块 20 个步耗时（列 k = t[k+1]-t[k]）+ entry→末戳跨度。
+    """uint32 回绕差分：每块 18 个步耗时（列 k = t[k+1]-t[k]）+ entry→末戳跨度。
 
-    返回 (durations[blocks,20] int64, spans[blocks] int64)。逐块看步耗时之和
+    返回 (durations[blocks,18] int64, spans[blocks] int64)。逐块看步耗时之和
     == 该块跨度（望远镜恒等式）——对账以跨度为准，跨核逐峰求和只作参考。
     """
     u = np.ascontiguousarray(matrix[:, :ECHO_PERF_MAIN_STAMPS], dtype=np.int32).view(np.uint32)
@@ -170,7 +173,7 @@ def write_matrix_csvs(args, scenario, blocks, rep_matrix, freq_hz, freq_source):
     """--matrix 导出：代表轮（最慢核跨度最接近中位）的两个 CSV，行=块可互相对照。
 
     <prefix>_<scenario>_abs.csv    原始绝对戳（含哨兵列，忠实于内存）
-    <prefix>_<scenario>_steps.csv  28 步耗时（名表序）+ entry→末戳跨度；非 spec
+    <prefix>_<scenario>_steps.csv  26 步耗时（名表序）+ entry→末戳跨度；非 spec
                                    构建下 8 个 spec 步列为空
     首行 '#' 注释记录口径（生成命令/代表轮/频率），prof_report.py 读取时跳过。
     """
@@ -262,7 +265,8 @@ def main():
             (ROOT / "csrc/echo/echo_lru_kernel.h").read_bytes()).hexdigest(),
         "note": "ECHO_PERF_STEP 打点构建（v2.1-prof：每标记点 t0 绝对 clock 低 32 位，host 回绕"
                 "差分；非正式性能结论，正式对比用 compare.py）",
-        "perf_semantics": "v2.1-prof absolute stamps (slot 0=entry, 1/2=prologue, 3..20=non-spec 18)",
+        "perf_semantics": "v2.2 absolute stamps (slot 0=entry, 1..18=non-spec 18, 19..26=spec names; "
+                          "prologue slots removed with flags generation numbering)",
         "shape": {k: getattr(args, k) for k in ("rows", "topk", "capacity", "max_token")},
         "seed": args.seed, "warmup": args.warmup, "repeat": args.repeat,
         "echo_perf_num_steps": ECHO_PERF_NUM_STEPS,
@@ -285,7 +289,7 @@ def main():
         blocks = int(state["blocks"])
 
         # A. 审计一次：污染输出与 workspace → 调用 → 全量比对参考；同时确认打点确实写入
-        #    且为非 spec 槽位形态（槽 0..20 全写、spec 8 槽全哨兵）。
+        #    且为非 spec 槽位形态（槽 0..18 全写、spec 8 槽全哨兵）。
         restore_state(torch, "echo", initial, state)
         for key in ECHO_OUTPUT:
             state[key].fill_(255 if key == "miss_mask" else -777)
@@ -308,7 +312,7 @@ def main():
         start = torch.npu.Event(enable_timing=True)
         end = torch.npu.Event(enable_timing=True)
         samples = []
-        matrices = []  # 每轮 blocks×29 绝对戳矩阵（--matrix 代表轮挑选用；不进 JSON）
+        matrices = []  # 每轮 blocks×27 绝对戳矩阵（--matrix 代表轮挑选用；不进 JSON）
         for _ in range(args.repeat):
             restore_state(torch, "echo", initial, state)
             state["workspace"].fill_(SENTINEL)
@@ -336,7 +340,7 @@ def main():
         # 统计：每步取"最慢核"（max over blocks）的跨轮中位数；skew = 每轮 32 核
         #   max−min 的中位（核间不均衡）。对账以"最慢核跨度中位"为准（逐块步耗时
         #   之和 == 该块跨度，望远镜恒等式；跨核逐峰求和只作参考）。
-        step_max = np.array([s["step_max_cycles"] for s in samples], dtype=np.float64)  # [repeat, 20]
+        step_max = np.array([s["step_max_cycles"] for s in samples], dtype=np.float64)  # [repeat, 18]
         step_skew = np.array([s["step_skew_cycles"] for s in samples], dtype=np.float64)
         span_max = np.array([s["span_max_cycles"] for s in samples], dtype=np.float64)
         event_us = np.array([s["event_us"] for s in samples])
