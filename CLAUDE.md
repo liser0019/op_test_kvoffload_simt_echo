@@ -33,7 +33,8 @@ SIMT 基线（`csrc/simt/`，同仓对照）竞争。
 1. 本文件
 2. `docs/ascend_vec_simt_stack_overflow.md` — 最阴险的设备坑，先读
 3. `docs/echo_lru_deep_dive.md` — 技术深读（注意头部 **v2 转型 banner**；
-   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.19 最新；§10.3 是方向清单）
+   §5/§6 的 Argtopk 内容是 v1 历史；§9.17-§9.20 最新（§9.20 是 opt3 负结果与
+   微架构实测结论，必读）；§10.3 是方向清单）
 4. `README.md` — 工程全貌
 
 ## 当前状态（2026-10-19，tag `v2.0`）
@@ -51,17 +52,24 @@ v2 维护序重构（lru 顺序数组取代 pri 时间戳 + Argtopk 基数选择
 - v1 终版回退点：tag `v1-argtopk-final`（Argtopk 版，full 120.92）
 - warm 与 SIMT 持平；full 距 50-60 目标还差 ~40-50%
 - 分步热点（warm 口径）：Rebuild 33K（固定开销主导）、HitMiss 25K、
-  Cumsum 16.5K、SetUpdate 14.8K、**FifoAvail 6.2K**（32 行 t0/t1 串行 RMW）
+  Cumsum 16.5K、SetUpdate 14.8K、FifoAvail 6.2K（**地板项**：2 次冷触，
+  opt3 已证伪 ~1K 假设并回退，§9.20）
+- 当前 HEAD = v2.0 基线 + t1024 消融实验（`ab4fb5b`，待测）
 
-## 下一步优先级（deep-dive §10.3，按序）
+## 下一步优先级（deep-dive §10.3，按序；视角 = §9.20 H1/H2）
 
-1. **FifoAvailUpdate 并行化**：32 行 t0/t1 串行 GM RMW → 摊给全线程，
-   6.2K → ~1K。低风险。
-2. **Rebuild 常数削减**：flags staging 跨 Step2/Step4 复用（Step2 的
-   EvictScan 已 stage 过 flags 到 UB，Step4 重复 stage——中间隔 Step3
-   SyncGrid 且无写者，可复用，省 4097 GM 读 + 4097 UB 写）。中风险（UB 生命周期论证）。
-3. cold 专项：OpResetRows 33K = htd 1 MiB/行纯写（带宽地板，向量化存储评估）。
-4. spec 场景测试（golden 未覆盖，需先扩 reference）。
+1. **t1024 消融验证**（`ab4fb5b` 已推送）：v1 的 t512 甜点结论是 Argtopk 时代
+   的产物，v2 构成下重测。预期 HitMiss 28.9→~15-18K、MissCumsum 落 2 元素门
+   （15.5→~9-11K）；风险 = ~14 道栅栏随线程数变贵。净赢保留、净输回退该行。
+2. **Rebuild 常数削减**：栅栏削减（4 道 ×~3.7K/行，B1+scan1 合并、B2/B3 融合
+   评估）+ **EvictScan×Rebuild 融合**（full 专项：两者同为 lru 位置序扫 +
+   flags 判别，共享 staging 甚至单趟同扫，64.5K 目标砍 15-25K）+ flags staging
+   跨 Step2/4 复用（并入融合设计）。中高风险。
+3. **HitMiss 收尾**：t1024 赢则随基线下降；输则只剩 ~4-7K（批量发射实验 +
+   杂项）——t512 下 HitMiss 已近地板（22-25K，§10.2）。
+4. cold 专项：OpResetRows 33K = htd 1 MiB/行纯写（带宽地板，向量化存储评估）。
+5. spec 场景测试（golden 未覆盖，需先扩 reference）。
+6. 远期：fifo/avail 合并单数组（省 1 次冷触 ~3K，host 布局 + golden 改动）。
 
 ## 设备坑速查（详见 stack-overflow 文档与 deep-dive §7）
 
@@ -73,6 +81,10 @@ v2 维护序重构（lru 顺序数组取代 pri 时间戳 + Argtopk 基数选择
 - 507034 = 超时：先 `npu-smi info` 查占用/换卡，再归因代码。
 - GM 跨线程写后读要 dcci 三明治；同地址 atomic ~9K cyc；UB 必须单大数组
   （多数组别名）；无 64 位运算；Event 计时不可信（用 profiler/分步周期）。
+- **冷访存微架构（2026-10-19 实测，§9.20）**：同 warp 冷 GM 访存近似串行
+  （~3-4K/次）；冷行 store 同价（非 fire-and-forget，同样支付行填充）；块内
+  栅栏同步一切——把冷触"搬"线程/搬步骤只换打点槽位，不减总时间。减时间只有：
+  减冷触总数 / 加并行 warp / 跨 Op 融合。
 
 ## 验证工作流（owner 在服务器执行，你负责给命令）
 

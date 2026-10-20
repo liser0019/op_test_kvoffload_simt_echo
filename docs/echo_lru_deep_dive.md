@@ -4,7 +4,8 @@
 >
 > **本文档随代码迭代同步更新**：每次代码合入后由维护者增量修订对应章节，并在文末"文档更新日志"表追加一行。
 >
-> 覆盖范围：v2 维护序重构 + 栈溢出修复 + v2-opt1/2（§9.17–§9.19，2026-10-19）。
+> 覆盖范围：v2 维护序重构 + 栈溢出修复 + v2-opt1/2 + opt3 负结果与 t1024 消融
+> （§9.17–§9.20，2026-10-19）。
 >
 > ⚠ **v2 转型说明（2026-10-19）**：淘汰路径已从 pri 时间戳 + Argtopk 基数选择重构为
 > lru 顺序数组 + 每步重建（§9.17）。本文 §5（20 步表）、§6（Argtopk 深读）及 §9.6–§9.12
@@ -1719,6 +1720,45 @@ freeIdx 写 → OpAllocPop 读，跨 Op 依赖，与 B4 性质不同）。checks
 kernel P50：warm_all 77.25→74.02（0.91×）、warm75 79.18→77.59（0.96×）、
 full 104.06→100.68（1.08×）、cold 111.73→108.19。快照 tag `v2.0`。
 
+### 9.20 opt3 FifoAvail 预置摊销：实测净回退与回退记录（2026-10-19，48610c0 → 266ed64 revert）
+
+**尝试**（commit `48610c0`，已 revert）：基于 "6.2K = t0 单次冷 GM RMW 链延迟、
+store 火 后即忘" 的假设，把 fifo/avail 终值早算进 Step1 OpHitMiss 的 t0 段
+（fifo 冷读与既有 avail 冷读并行在途）存 UB stash，Step4 尾改全员摊开纯存储。
+设计前提、语义等价证明与 checks 双链验证详见该 commit message（git 历史保留）。
+
+**实测**（上板，v2.0 对照；分步为 20 repeat 最慢核中位）：
+
+| 指标 | v2.0 | opt3 | Δ |
+|---|---:|---:|---:|
+| HitMiss cold / warm75 / warm_all / full | 21.0 / 24.8 / 25.1 / 26.2 K | 25.2 / 27.7 / 28.9 / 28.9 K | **+4.2 / +2.9 / +3.8 / +2.7 K** |
+| FifoAvail warm75 / warm_all | ~6.2 K | 6.5 / 6.9 K | 持平略差 |
+| P50 cold / warm75 / warm_all / full（干净跑） | 108.19 / 77.59 / 74.02 / 100.68 | 109.8~111.8 / 79.6~79.7 / 75.1~76.0 / 102.8~103.6 | **+1~3.6 μs 全场景同号** |
+
+净回退 ~+3K 周期，`git revert 266ed64` 回到 v2.0 基线（代码与 checks 均还原）。
+
+**机理修正（负结果的核心价值，三条实测微架构结论）**：
+- **H1 同 warp 冷 GM 访存近似串行，~3-4K/次**：opt3 恰好往 t0 链上加了 1 次
+  独立冷读（fifo），HitMiss 四场景恰好 +~1 次冷读的量级（若独立冷读可重叠
+  在途，应 ≈0）。交叉验证：opt2 删单道 B4 栅栏实测 −3.7K（同量级）。
+- **H2 冷行 store 非 fire-and-forget**：对本 invocation 首触的冷行，store 同样
+  支付 ~3K 行填充往返——opt3 前（1 冷读 + 1 冷写）与后（2 冷写）的 FifoAvail
+  都是 ~6K ≈ 2 次冷触。冷读被搬走后冷写补位，成本被移动而非消除。
+- **块内推论：栅栏同步一切**——把冷触"搬"给其他线程/其他步骤只是换打点槽位
+  记账，不减总时间（Step1 尾/Step3 尾 SyncGrid 会等最慢线程）。真正减时间的
+  只有三件事：①减少冷触总数 ②增加并行 warp（t1024）③跨 Op 融合（消栅栏 +
+  共享 staging）。
+- **歧义注记**：HitMiss 的 +Δ 无法完全区分 "fifo 冷读串行" 与 "stash UB store
+  成本" 两种成因（都拟合实测）；t1024 消融（`ab4fb5b`）与后续微探针可分辨。
+
+**判定**：FifoAvail ~6K = 2 次冷触（fifo/avail 各一次行填充）≈ **该步地板**；
+除非 fifo/avail 状态合并为单数组（host 布局 + golden 改动，省 1 次冷触 ~3K，
+记远期）。CLAUDE.md 原 "6.2K→~1K" 估算的 "store 火 后即忘" 前提在设备上证伪。
+
+**后续影响**：t1024 重测动机成立（H1 ⇒ HitMiss 在 t512 下每 warp 4 轮 gather
+已近地板 ~22-25K，t1024 减半轮数是唯一大杠杆，§10.3①）；Rebuild 方向按
+H1/H2 重排（§10.3②）；OpFifoAvailUpdate 移入地板项清单（§10.2）。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
@@ -1736,27 +1776,41 @@ v1 终版快照：tag `v1-argtopk-final`（§9.14/9.15 数字）。
 | 项 | 场景 | 量级估算 | 依据 |
 |---|---|---|---|
 | OpResetRows 带宽 | cold | 每行 htd 1 MiB（262144 int32）纯写，32 行 = 32 MiB；cold 整 kernel 91.44 μs（t512 口径，§9.10），reset 是其中的主导步（若按整 kernel 摊算已 ≈360 GB/s，步内瞬时带宽更高，接近写带宽地板） | `echo_lru_kernel.h:95-96`，`compare.py:376` |
-| OpHitMiss gather | 全部 | 每行 2048 次随机 GM 读（htd[row, tok]，跨 1 MiB 区间），cache miss 为主 | `echo_lru_kernel.h:281-286` |
+| OpHitMiss gather | 全部 | 每行 2048 次随机 GM 读（htd[row, tok]，跨 1 MiB 区间），cache miss 为主；**同 warp 冷访存近似串行（H1，§9.20）⇒ t512 每线程 4 token = 4 轮串行 gather + t0 的 avail 冷读 ≈ 22-25K 地板**；t1024 轮数减半（§10.3①） | `echo_lru_kernel.h:281-286`，§9.20 H1/H3 |
+| OpFifoAvailUpdate 冷触 | 全部 | fifo/avail 各 1 次冷行触（store 同价，H2，§9.20）≈ 6K；早算 stash 已实测无效（§9.20）；唯一削减路径 = 两数组合并（远期） | §9.20 |
 | 必要 scatter | 全部 | htd/dth/curSlots/flat/mask 的逐 miss 写 + pri 的逐 hit 写 | OpHitMiss（hit 分支）/OpSetUpdate |
 
-### 10.3 已识别方向（按当前优先级排序）
+### 10.3 已识别方向（按当前优先级排序，H1/H2 视角重排，见 §9.20）
 
-1. **v2-opt 第 1 轮验证**（§9.19，已实现待上板）：nm=0 快路径 + 末行免 B4，
-   预期 warm Rebuild −5~8K；随后 FifoAvail 并行化（32 行 t0/t1 串行 RMW 6K →
-   摊给全线程 ~1K）。
-2. **Rebuild 常数削减**（结构性）：固定开销 = flags staging（4097 GM 读）+
-   槽域 O(B) 扫描 + 5 栅栏。候选：staging 合并（flags 与 aAt 清零已合并，lru
-   staging 可与 classify 融合省一趟 UB 写）、栅栏再削（B1 与 scan1 内部栅栏
-   的合并可行性）、EvictScan/Rebuild 共享 flags staging（Step2 已 stage 过一次，
-   Step4 重复 stage —— 跨 Op 缓存到 UB 的可行性：Step2 与 Step4 间隔 Step3
-   SyncGrid，UB 段无写者，理论可复用，省 4097 GM 读 + 4097 UB 写）。
-   注意 O(B) 地板是 v2 设计代价（等价 SIMT 的 O(C) 维护税），常数收益为主。
-3. **冷启动专项**：cold 111.73 中 OpResetRows 33.1K（htd 1 MiB/行纯写，带宽
-   地板项）+ Rebuild 34.8K + SetUpdate 23.4K；reset 向量化存储与 opt-1/2 叠加后
-   重估。
+1. **t1024 消融验证**（`ab4fb5b` 已推送待测）：v1 "t512 全场景甜点" 结论产生于
+   Argtopk（7-8 栅栏/行）主导的构成，v2 换维护序后必须重测。t1024 的杠杆：
+   HitMiss 每 warp gather 轮数 4→2（H1 下预期 28.9→~15-18K）、MissCumsum 落入
+   2 元素路径门（topk ≤ 2×blockDim，单扫描，15.5→~9-11K）、SetUpdate/Rebuild
+   每线程元素减半；风险：~14 道栅栏随线程数变贵（§7.3）。判读以分步表 +
+   P50 为准：净赢 → 保留为新公式并作为后续 HitMiss 优化的基线；净输 →
+   回退该行，HitMiss 转收尾项（批量发射实验 + 杂项，~4-7K 空间）。
+2. **Rebuild 常数削减**（warm/full 双场景的主头）：warm Rebuild 33K 的构成
+   ≈ 4 道栅栏 ×~3.7K（opt2 实测单道价）+ O(B) staging/扫描。候选按收益排序：
+   - **栅栏削减**：B1（staging）与 scan1 内部栅栏的合并、B2/B3 两趟扫描融合
+     评估（§9.17 五相位结构）；每消一道 ≈ −3.7K。
+   - **EvictScan×Rebuild 融合**（full 专项，结构性大项）：两 Op 都做"lru 位置序
+     扫 + flags 判别"（EvictScan 取前 fs 个非 hit 槽；Rebuild B 相位做位置域
+     分类）——共享 lru/flags staging（省 Step4 重复 stage，即原 flags 复用项）
+     甚至单趟同扫同时产出 freeIdx 与 rebuild 分类。full 的 21.4K+43.1K=64.5K
+     有望砍 15-25K。中高风险：算法重设计，v1-pri golden 交叉验证基础设施
+     （checks 跨验证组）可支撑等价性证明。
+   - O(B) 冷读 staging 是 v2 维护税地板（§9.17 设计代价），除非改增量维护
+     （远期，牵动全局状态设计）。
+3. **冷启动专项**：cold 108.19 中 OpResetRows 33.1K（htd 1 MiB/行纯写，带宽
+   地板项）+ Rebuild 31.8K + SetUpdate 22.5K；reset 向量化存储与 t1024 效果
+   叠加后重估。
 4. **投机解码（spec）场景测试**：Step0.5 路径 v2 语义已按 flags bit1 维护
    （§9.17），但 compare.py 的 spl 恒为 max_token，spec golden 仍未覆盖。
-5. ~~行间流水~~（rows>32 形态）与 ~~维护序 v2~~（已落地）从列表移除。
+5. ~~行间流水~~（rows>32 形态）、~~维护序 v2~~（已落地）、~~FifoAvailUpdate
+   并行化~~（opt3 实测证伪，§9.20，已移入 §10.2 地板项）从列表移除。
+6. **远期**：fifo/avail 合并为单状态数组（[rows][2] 交错布局）——FifoAvail 的
+   2 次冷触并 1 次（~−3K），需 host 侧状态布局 + golden 适配，仅在需要凑最后
+   几 μs 时评估。
 
 ---
 
@@ -1772,6 +1826,7 @@ v1 终版快照：tag `v1-argtopk-final`（§9.14/9.15 数字）。
 | 2026-10-16 | 第 6 版 | `d461f5d`（上板复核） | round-3 两批 + UB freeIdx 修复上板复核（第二台服务器）：新增 §9.14（kernel 级 P50 / 分步周期 / full −5.9% 归因 / 两个测量 open question / 事故闭环）与 §1.6（基准单步口径 vs 真实 decode 多步推演）、§7.10（设备占用测量教训）；§9.11/§9.12/§10 复核状态与现状数字刷新；§11 日志表修复孤立行并核对日期 |
 | 2026-10-16 | 第 7 版 | 待提交（round-4：[P-E]+白付清理） | 同步工作区未提交的 round-4：[P-E] 反向 P-D（OpArgtopkRow 行首全员 pack + B0，hist 一律读 key，Argtopk 栅栏 7→8，§6.2/§6.7/§9.15）与白付清理 A/B（非 spec 跳过 prologue FillZero+SyncGrid、anyReset=0 跳过 Step0 四 Op+SyncGrid，打点槽保留，§5.1/§9.15）；§9.11 [P-D] 条目标注已被回退；全文 kernel.h 行号按当前工作区核对修正；附录⑥标记已解决；NPU 验证待做（预期数字与挂起二分顺序见 §9.15） |
 | 2026-10-16 | 第 8 版 | `3906f91`+`9b63e24`（上板验证） | round-4（[P-E]+白付清理）上板验证（空闲设备）结果写入：§9.15 新增上板验证小节（warm 58.28/55.34 μs＝0.72×/0.67× 超出白付清理预期、cold 94.16 μs、full 120.12 μs；P-E 收益重校准——Argtopk −9.1K 远低于静态预期 −30K，Argtopk 转弥散结构无单一主导相位；距 50-60 μs 定量账 → v2 必要性坐实；int16 hist 扩 G=128 候选撤下）；§9.14 open question 1 关闭（SIMT ~2× 确认为设备占用干扰，比值恢复可信）；§7.11 新增"静态延迟链模型高估依赖读成本"方法论教训；§9 总表 round-4 行、§10.1 现状、§2.2 比值引用、头部覆盖范围同步刷新 |
+| 2026-10-19 | 第 12 版 | 48610c0→266ed64（opt3 实测回退）+ `ab4fb5b`（t1024 消融待测） | §9.20 负结果记录：opt3 预置摊销实测净回退 ~+3K（HitMiss 四场景 +2.7~4.2K / FifoAvail 持平 / P50 +1~3.6 μs），机理 = 同 warp 冷访存串行（H1）+ 冷行 store 同价非火后即忘（H2）+ 块内栅栏同步推论，已 revert 回 v2.0 基线；§10.2 补 OpFifoAvailUpdate 冷触地板行、OpHitMiss 行按 H1 重估（t512 地板 22-25K）；§10.3 按 H1/H2 重排（t1024 消融验证列 1、Rebuild 栅栏/融合细化、FifoAvail 并行化证伪移除、fifo/avail 合并记远期）；CLAUDE.md 设备坑速查 + 优先级同步 |
 | 2026-10-19 | 第 11 版 | v2.0（6f4ad92+验证） | §9.19 opt1/2 上板验证（Rebuild warm_all 37.2→30.5K，P50 四场景 −2~−4%）；§10.1 刷新至 v2.0 数字；快照 tag v2.0。交接文档 CLAUDE.md 新增（新 AI 接手用） |
 | 2026-10-19 | 第 10 版 | v2 轮（fe10f91..本轮） | 恢复记录（按 owner 指示跳过中间误判过程）：新增 §9.17 v2 维护序重构全记录（设计/接口变更/上板 P50/分步/warm 回退账目）、§9.18 栈溢出事故（根因+修复，详见 §7.12 与独立文档）、§9.19 v2-opt1/2（待验证）；§7.12 新增 VEC SIMT 栈溢出条目（含 §7.9 grid.sync 关联修订）；头部 v2 转型 banner（§5/§6 Argtopk 内容保留为 v1 历史，checks 50 项）；§10.1/§10.3 按 v2 现状重写 |
 | 2026-10-19 | 第 9 版 | `05046f2`（NPU 待验证） | 恢复按 owner 指示暂停的文档同步：新增 §9.16 round-4b（emission 尾栅栏去重——OpArgtopkRow 函数尾栅栏 GM-only、Process Step2.SyncGrid 槽 UB 路径跳过；Argtopk 栅栏 UB 8→7/行）；§6.7 表追加 round-4b 行并核对头注释（:395-399），§3.5/§5.1（含 §5.2 Step2、§6.2/§6.6 emission 尾部描述）同步更新、行号按 05046f2 核对；§8.1 新增本机/服务器验证分工（本机只跑 checks，编译与 NPU 验证归服务器）；§2.2 补 warm→full 边际成本定量论证（Echo +61.84 vs SIMT +12.01、边际差 49.83 μs，v2 定量动机）；§10.3 附注已评估并搁置的微优化候选（rawSlots/wsMissRank 迁 UB、UB 扩容 192 KiB）+ §3.2 G=64 成因注记 |
