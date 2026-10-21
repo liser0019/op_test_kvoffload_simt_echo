@@ -57,10 +57,10 @@ inline uint64_t SparseKvPlanHashCapacity(int64_t topk) {
   return capacity;
 }
 
-// 单行临时区元素数:keys[H] + firstPos[H] + owner[H] + evictSlots[C] + hitSlots[C]
+// 单行临时区元素数:keys[H] + firstPos[H] + owner[H] + partitionSlots[C]
 // + missPositions[T],单位 int32。移植自 sparse_kv_plan_tiling.cpp。
 inline uint64_t SparseKvPlanRowElements(int64_t topk, int64_t capacity) {
-  return 3U * SparseKvPlanHashCapacity(topk) + 2U * static_cast<uint64_t>(capacity) +
+  return 3U * SparseKvPlanHashCapacity(topk) + static_cast<uint64_t>(capacity) +
          static_cast<uint64_t>(topk);
 }
 

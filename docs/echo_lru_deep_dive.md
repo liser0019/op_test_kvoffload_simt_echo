@@ -2,6 +2,11 @@
 
 > **本文档定位**：面向算子开发协作者的 Echo（`echo_lru`）实现深度解读。目标 是**只读这一份文档就能读懂当前代码**——每个论断都给出代码出处（`文件:行号` 或函数名），所有"为什么"都附依赖分析、硬件特性或不变量证明。
 >
+> **2026-10-21 对照更新**：本分支的 SIMT 已从旧 2048 线程版替换为用户的
+> ABCDF/1024（来源 `9cc99d5`），并新增独立的 per-row 分阶段打点。Echo 计算未改；
+> 本文历史 SIMT 性能数字不代表 ABCDF。接入、边界及服务器命令见
+> [ABCDF 接入与分阶段计时](abcdf_stage_timing.md)，新增验证待服务器执行。
+>
 > **本文档随代码迭代同步更新**：每次代码合入后由维护者增量修订对应章节，并在文末"文档更新日志"表追加一行。
 >
 > 覆盖范围：v2 维护序重构 + 栈溢出修复 + v2-opt1/2 + opt3 负结果 + t1024 消融
@@ -2329,6 +2334,7 @@ Run A 的 aicore.db 逐核 task_cyc 抽取（核间均衡，与 §9.23 的 skew/
 
 | 日期 | 版本 | 覆盖 commit | 变更摘要 |
 |---|---|---|---|
+| 2026-10-21 | 对照更新 | `feat/abcdf-step-timing` | 用 ABCDF/1024 替换旧 SIMT；12 槽 per-row clock，冷/热路径分别报告；源码身份/构建开关校验；普通 profiler 接入新实现；新增 CSV/JSON/HTML 与服务器检查入口。仅静态检查，CPU/NPU 验证待服务器执行；历史性能表保留原基线含义。 |
 | 2026-10-15 | 初版 | `145d3ce` | 首次成文：全量深读 compare.py / csrc/echo / csrc/simt（大结构）/ checks / 构建与打点脚本；含优化迭代日志（P0-P4/B/C1/C2/方向1+2）与 kernel 级现状数字 |
 | 2026-10-15 | 第 2 版 | `d20fc50` | 同步消融基础设施（ECHO_LRU_THREADS 编译期线程数、OpMissCumsum 4 元素路径、`--blocks`/`--rows` 消融入口、README 消融章节）与方向 1+2 kernel 级实测（full_cache 162.16 μs=1.75×、warm 0.95/0.91×、cold 1.38×）；协作机制：本仓代码由 developer-code 子代理按主会话规格实现、文档由 developer-doc 维护、均经主会话审查 |
 | 2026-10-16 | 第 3 版 | `e2ca2fd` | 同步运行时自适应 blockDim（plugin 按 topkDim 计算 launchThreads、`launch_echo_lru` 增加 blockDim 参数、`ECHO_LRU_THREADS` 定位为纯消融 knob）与消融实验结论（§9.10：t512 全场景最优 −9%~−18%、t256 崩塌为串行 MissCumsum 混杂因素、blocks 16/8 单调变差、rows 64/128 行间串行软肋）；§10 现状与后续方向按当前优先级重排 |

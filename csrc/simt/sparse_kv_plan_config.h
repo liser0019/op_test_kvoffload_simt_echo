@@ -9,7 +9,7 @@
 
 namespace sparse_kv_plan {
 
-constexpr uint32_t PLAN_THREADS = 2048U;
+constexpr uint32_t PLAN_THREADS = 1024U;
 constexpr uint32_t PLAN_WARP_SIZE = 32U;
 constexpr uint32_t PLAN_WARP_COUNT = PLAN_THREADS / PLAN_WARP_SIZE;
 constexpr uint32_t PLAN_CONTROL_ELEMENTS = 8U;
@@ -19,6 +19,10 @@ constexpr uint32_t PLAN_SCAN_STORAGE_ELEMENTS = PLAN_SCAN_BYTES / sizeof(int32_t
 constexpr uint32_t PLAN_ROW_UB_LIMIT_BYTES = 112U * 1024U;
 constexpr uint32_t PLAN_ROW_UB_LIMIT_ELEMENTS = PLAN_ROW_UB_LIMIT_BYTES / sizeof(int32_t);
 constexpr uint32_t PLAN_MAX_DYNAMIC_UB_BYTES = PLAN_SCAN_BYTES + PLAN_ROW_UB_LIMIT_BYTES;
+
+constexpr uint64_t RowWorkspaceElements(uint64_t hashCapacity, uint64_t capacity, uint64_t topk) {
+  return 3U * hashCapacity + capacity + topk;
+}
 
 static_assert(PLAN_THREADS > 0U, "Sparse KV Plan requires at least one thread");
 static_assert(PLAN_THREADS % PLAN_WARP_SIZE == 0U, "Sparse KV Plan threads must contain whole warps");

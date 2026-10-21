@@ -1,10 +1,29 @@
 # SIMT 与作者新版 Echo：可阅读的双路性能测试
 
+## 当前分支：ABCDF/1024 + 分阶段打点
+
+旧 SIMT 已替换为用户的 `13_abcdf` 实现（`9cc99d5`，A/B/C/D/F，1024 线程），
+外部接口和原比较入口保持一致。普通性能比较使用 `profile_kernel.sh` 的 kernel duration；
+新增 `simt_perf_step.py` 分析 ABCDF 冷/热路径的内部周期分布，并生成 CSV/JSON/HTML。
+
+```bash
+SIMT_PERF_STEP=OFF ECHO_PERF_STEP=OFF bash build.sh
+python3 compare.py --device 1 --warmup 2 --repeat 4 --verify-each-sample
+bash profile_kernel.sh --device 1 --scenario all --active 50
+SIMT_PERF_STEP=ON ECHO_PERF_STEP=OFF bash build.sh
+python3 simt_perf_step.py --device 1 --scenario all --output results/simt_perf
+```
+
+详见 [ABCDF 接入与分阶段计时](docs/abcdf_stage_timing.md)。本次遵循 `CLAUDE.md` 的
+本机禁跑要求，仅完成静态检查；新增 CPU/NPU 检查和构建均待服务器执行。
+
 这是一个可独立构建的双算子性能测试工程，**包含 SIMT 与作者新版 Echo 的 C++/AscendC 源码**。`compare.py` 把输入生成、状态转换、golden、校验和计时集中在一个文件；`build.sh` 在本目录编译两个算子，Python 直接加载本目录的共享库。
 
 本文提供阅读顺序、输入与状态语义、正确性检查和构建运行命令。建议从第 1 节的函数表开始，再按第 9 节阅读设备计算源码。
 
-工程基线来自 `kv_plan_single_op_test` 的 `main`。SIMT 是对照基线，保留原样；`csrc/echo/` 在基线之上集成了作者 2026-10-13 的新版优化（人工誊抄，已逐处校对修正，见 `source_manifest.json`），并保留 `checks/check_echo_kernel_host.py` 做 CPU 回归。不包含旧 AIV 或跳过排序的 Echo 实验实现。
+工程历史基线来自 `kv_plan_single_op_test` 的 `main`。当前 SIMT 对照已更新为 ABCDF；
+`csrc/echo/` 为同事的 Echo v2.2，历史优化过程见 `docs/echo_lru_deep_dive.md`。
+保留 `checks/check_echo_kernel_host.py` 做 Echo CPU 回归，不包含旧 AIV。
 
 ### NPU：线程数 / blockNum / batch 消融（ablation.sh 一键）
 

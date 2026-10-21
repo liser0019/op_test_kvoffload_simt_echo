@@ -157,6 +157,7 @@ def main():
     if not library.is_file():
         parser.error(f"共享库不存在：{library}；请先 bash build.sh --soc=ascend950")
     torch.ops.load_library(str(library))
+    simt_info = bench.validate_simt_library(torch, require_plain=True)
     for op_name in ("sparse_kv_plan", "echo_lru"):
         if not hasattr(torch.ops.sparse_kv_plan_op, op_name):
             parser.error(f"共享库缺少 {op_name}，请重新构建本目录")
@@ -169,6 +170,7 @@ def main():
     traces.mkdir(parents=True, exist_ok=True)
     run_dir = Path(tempfile.mkdtemp(prefix="run-", dir=str(traces)))
     report = {
+        "simt_build": simt_info,
         "device_index": args.device,
         "device": torch.npu.get_device_name(args.device),
         "library": str(library),

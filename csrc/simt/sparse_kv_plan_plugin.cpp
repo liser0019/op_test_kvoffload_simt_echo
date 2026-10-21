@@ -18,9 +18,12 @@
  *   block_size    KV block 大小(token/block)
  *   host_num_blocks host 侧 KV 缓存物理 block 数(physical block 合法上界)
  */
+#define PLAN_OP_NAME "sparse_kv_plan"
+#include "variant_config.h"
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <string>
 
 #include <torch/all.h>
 #include <torch/library.h>
@@ -29,9 +32,32 @@
 #include "torch_npu/csrc/framework/OpCommand.h"
 
 #include "sparse_kv_plan_launch.h"
+#include "sparse_kv_plan_perf.h"
 
 namespace sparse_kv_plan_op {
 namespace {
+
+static_assert(PLAN_OPT_MASK == 47U && sparse_kv_plan::PLAN_THREADS == 1024U,
+              "This comparison imports the ABCDF/1024 implementation");
+#ifndef SIMT_SOURCE_SHA256
+#error "Build through CMake to freeze the imported ABCDF source identity"
+#endif
+std::string SimtBuildInfo() {
+#ifdef SIMT_PERF_STEP
+  const char* perf = "true";
+#else
+  const char* perf = "false";
+#endif
+#ifdef ECHO_PERF_STEP
+  const char* echoPerf = "true";
+#else
+  const char* echoPerf = "false";
+#endif
+  return std::string("{\"implementation\":\"abcdf\",\"threads\":1024,\"opt_mask\":47,") +
+      "\"perf_enabled\":" + perf + ",\"echo_perf_enabled\":" + echoPerf +
+      ",\"num_stamps\":12,\"stamp_row_stride\":128,\"source_sha256\":\"" SIMT_SOURCE_SHA256 "\"}";
+}
+int64_t SimtCoreCount() { return calc_sparse_kv_plan_block_dim(); }
 
 // 输入校验:取自 vllm-ascend sparse_kv_lru_torch_adpt.h 的
 // CheckSparseKvRuntimeInputs 并补齐状态张量形状检查。
@@ -109,9 +135,9 @@ void CheckSparseKvPlanInputs(const at::Tensor& reqIds, const at::Tensor& topkInd
   const uint64_t rowElements = SparseKvPlanRowElements(topk, capacity);
   TORCH_CHECK(rowElements <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / maxRows),
               "compact_workspace element count overflows int64");
-  const int64_t required =
-      rowElements <= sparse_kv_plan::PLAN_ROW_UB_LIMIT_ELEMENTS ? 1 : static_cast<int64_t>(maxRows * rowElements);
-  TORCH_CHECK(compactWorkspace.numel() >= required, "compact_workspace requires >= ", required,
+  const uint64_t required = SimtWorkspaceElements(static_cast<uint64_t>(maxRows), rowElements);
+  TORCH_CHECK(required <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
+              static_cast<uint64_t>(compactWorkspace.numel()) >= required, "compact_workspace requires >= ", required,
               " elements for this topk/capacity, got ", compactWorkspace.numel());
 }
 
@@ -170,7 +196,7 @@ void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
     return 0;
   };
   // RunOpApi 仅提供算子名标签(直调不真正走 aclnn)。
-  at_npu::native::OpCommand::RunOpApi("SparseKvPlan", launch);
+  at_npu::native::OpCommand::RunOpApi(PLAN_OP_NAME, launch);
 }
 
 }  // namespace
@@ -178,7 +204,9 @@ void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
 // schema 与 vllm-ascend aclnnSparseKvPlan 原型逐参数对应;
 // (a!)..(h!) 标注 kernel 会原地写入的状态/临时张量。
 TORCH_LIBRARY_FRAGMENT(sparse_kv_plan_op, m) {
-  m.def("sparse_kv_plan(Tensor req_ids, Tensor topk_indices, Tensor stable_prefix_lens, "
+  m.def("simt_abcdf_info() -> str", SimtBuildInfo);
+  m.def("simt_abcdf_core_count() -> int", SimtCoreCount);
+  m.def(PLAN_OP_NAME "(Tensor req_ids, Tensor topk_indices, Tensor stable_prefix_lens, "
         "Tensor visible_seq_lens, Tensor token_to_req, Tensor block_table, Tensor active_rows, "
         "Tensor(a!) last_req_ids, Tensor(b!) slot_to_token, Tensor(c!) lru_slots, Tensor(d!) current_slots, "
         "Tensor(e!) miss_count, Tensor(f!) miss_tokens, Tensor(g!) miss_slots, Tensor(h!) compact_workspace, "
@@ -186,11 +214,11 @@ TORCH_LIBRARY_FRAGMENT(sparse_kv_plan_op, m) {
 }
 
 TORCH_LIBRARY_IMPL(sparse_kv_plan_op, Meta, m) {
-  m.impl("sparse_kv_plan", sparse_kv_plan_meta);
+  m.impl(PLAN_OP_NAME, sparse_kv_plan_meta);
 }
 
 TORCH_LIBRARY_IMPL(sparse_kv_plan_op, PrivateUse1, m) {
-  m.impl("sparse_kv_plan", sparse_kv_plan_npu);
+  m.impl(PLAN_OP_NAME, sparse_kv_plan_npu);
 }
 
 }  // namespace sparse_kv_plan_op

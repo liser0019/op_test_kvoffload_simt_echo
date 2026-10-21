@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """阅读入口：main() → make_case() → 两份 reference → NPU 状态 → 校验 → 计时。
 
-仅比较 main 的 sparse_kv_plan 与作者新版 echo_lru；设备源码在本目录 csrc/。
+比较 ABCDF/1024 的 sparse_kv_plan 与作者新版 echo_lru；设备源码在本目录 csrc/。
 先 bash build.sh，再运行本文件.
 
 运行 NPU：python3 compare.py --device 1 --warmup 10 --repeat 50
@@ -31,6 +31,49 @@ SIMT_STATE = ("last_req_ids", "slot_to_token", "lru_slots")
 SIMT_OUTPUT = ("current_slots", "miss_count", "miss_tokens", "miss_slots")
 ECHO_STATE = ("htd", "dth", "lru", "free_slots", "avail", "fifo")
 ECHO_OUTPUT = ("current_slots", "miss_host_pos", "miss_alloc_flat", "miss_mask")
+SIMT_NUM_STAMPS = 12
+SIMT_STAMP_ROW_STRIDE = 128  # int32 elements，观测区按 512B 保守隔离。
+SIMT_IDENTITY_FILES = tuple("csrc/simt/" + name for name in (
+    "sparse_kv_plan_config.h", "sparse_kv_plan_kernel.cpp", "sparse_kv_plan_launch.h",
+    "sparse_kv_plan_perf.h", "sparse_kv_plan_plugin.cpp", "variant_config.h"))
+
+
+def simt_source_identity():
+    """与 CMake 的路径、顺序、换行一致；校验实际加载 so 的冻结身份。"""
+    root = Path(__file__).resolve().parent
+    fingerprint = "".join(f"{p}:{hashlib.sha256((root / p).read_bytes()).hexdigest()}\n"
+                          for p in SIMT_IDENTITY_FILES)
+    return hashlib.sha256(fingerprint.encode()).hexdigest()
+
+
+def validate_simt_library(torch, require_perf=None, require_plain=False):
+    ops = torch.ops.sparse_kv_plan_op
+    if not hasattr(ops, "simt_abcdf_info"):
+        raise RuntimeError("加载了旧 SIMT 共享库，请重新构建本目录的 ABCDF")
+    info = json.loads(ops.simt_abcdf_info())
+    if (info.get("implementation"), info.get("threads"), info.get("opt_mask"),
+            info.get("num_stamps"), info.get("stamp_row_stride"), info.get("source_sha256")) != (
+            "abcdf", 1024, 47, SIMT_NUM_STAMPS, SIMT_STAMP_ROW_STRIDE, simt_source_identity()):
+        raise RuntimeError("ABCDF 共享库与当前源码不一致，请重新构建")
+    if require_perf is not None and info.get("perf_enabled") != require_perf:
+        raise RuntimeError(f"本入口需要 SIMT_PERF_STEP={'ON' if require_perf else 'OFF'} 构建")
+    if require_plain and (info.get("perf_enabled") or info.get("echo_perf_enabled")):
+        raise RuntimeError("正式性能对比需要两路打点均 OFF；请使用普通 build/ 产物")
+    return info
+
+
+def simt_workspace_layout(rows, topk, capacity, perf=False):
+    h = max(32, 1 << (2 * topk - 1).bit_length())
+    row_elements = 3 * h + capacity + topk  # ABCDF 的 C 优化：evict/hit 共用一段。
+    scratch = 1 if row_elements * 4 <= 112 * 1024 else rows * row_elements
+    stamp_offset = (scratch + SIMT_STAMP_ROW_STRIDE - 1) & ~(SIMT_STAMP_ROW_STRIDE - 1)
+    total = stamp_offset + rows * SIMT_STAMP_ROW_STRIDE if perf else scratch
+    if total > I32_MAX:
+        raise ValueError("SIMT workspace 超过 int32 索引范围")
+    return {"hash_capacity": h, "row_elements": row_elements, "scratch_elements": scratch,
+            "stamp_offset": stamp_offset, "stamp_elements": rows * SIMT_STAMP_ROW_STRIDE if perf else 0,
+            "stamp_row_stride": SIMT_STAMP_ROW_STRIDE,
+            "workspace_elements": total, "scratch_location": "UB" if scratch == 1 else "GM"}
 
 
 # =============================================================================
@@ -253,6 +296,7 @@ def check_common_semantics(case, simt, echo):
 # 3. 分配 NPU 张量：初始快照与工作状态分开，避免 copy_ 的源被 kernel 改写
 # =============================================================================
 def prepare_npu(torch, case, echo_initial, device, blocks_override=None):
+    simt_info = validate_simt_library(torch)
     def upload(array):
         return torch.from_numpy(np.ascontiguousarray(array)).to(device)
 
@@ -274,13 +318,9 @@ def prepare_npu(torch, case, echo_initial, device, blocks_override=None):
         dtype = torch.uint8 if key == "miss_mask" else torch.int32
         states["echo"][key] = torch.empty((rows, topk), dtype=dtype, device=device)
 
-    # 与 main 的 plan_workspace_elements / 112 KiB UB 判定逐项对应。
-    hash_capacity = max(32, 1 << (2 * topk - 1).bit_length())
-    row_elements = 3 * hash_capacity + 2 * capacity + topk
-    elements = 1 if row_elements * 4 <= 112 * 1024 else rows * row_elements
-    if elements > I32_MAX:
-        raise ValueError("SIMT workspace 超过 int32 索引范围")
-    states["simt"]["workspace"] = torch.empty(elements, dtype=torch.int32, device=device)
+    layout = simt_workspace_layout(rows, topk, capacity, simt_info["perf_enabled"])
+    states["simt"]["workspace"] = torch.empty(layout["workspace_elements"], dtype=torch.int32, device=device)
+    states["simt"]["layout"] = layout
 
     # Echo 一核处理连续几行；尾核必须非空，不能简单使用 min(rows, cores)。
     cores = torch.ops.sparse_kv_plan_op.echo_lru_core_count()
@@ -443,9 +483,11 @@ def main():
         for name in ("sparse_kv_plan", "echo_lru", "echo_lru_core_count"):
             if not hasattr(torch.ops.sparse_kv_plan_op, name):
                 parser.error(f"共享库缺少 {name}，请重新构建本目录")
+        simt_info = validate_simt_library(torch, require_plain=True)
         manifest_path = Path(__file__).resolve().parent / "source_manifest.json"
         manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
         metadata = {
+            "simt_build": simt_info,
             "device_index": args.device, "device": torch.npu.get_device_name(args.device),
             "torch": torch.__version__, "torch_npu": torch_npu.__version__,
             "library_path": str(library_path),

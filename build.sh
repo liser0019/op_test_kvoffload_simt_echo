@@ -15,6 +15,7 @@ BUILD_PYTHON="${PYTHON:-python3}"
 BUILD_JOBS="${JOBS:-4}"
 SOC_VERSION="ascend950"
 PERF_STEP="${ECHO_PERF_STEP:-OFF}"
+SIMT_PERF="${SIMT_PERF_STEP:-OFF}"
 PERF_DRAIN="${ECHO_PERF_DRAIN:-OFF}"
 ECHO_THREADS="${ECHO_LRU_THREADS:-1024}"
 V2_CUTOFF="${ECHO_V2_DEBUG_CUTOFF:-0}"
@@ -26,10 +27,12 @@ for arg in "$@"; do
     case "$arg" in
         --soc=*) SOC_VERSION="${arg#*=}" ;;
         --perf-step) PERF_STEP=ON ;;
+        --simt-perf-step) SIMT_PERF=ON ;;
         --threads=*) ECHO_THREADS="${arg#*=}" ;;
         --help|-h)
             echo "用法: PYTHON=python3 JOBS=4 bash build.sh --soc=ascend950 [--perf-step] [--threads=N]"
             echo "或:   ECHO_PERF_STEP=ON bash build.sh      # 分步打点构建, 产物在 build_perf/"
+            echo "或:   SIMT_PERF_STEP=ON bash build.sh      # ABCDF 打点构建, 产物在 build_simt_perf/"
             echo "或:   ECHO_PERF_STEP=ON ECHO_PERF_DRAIN=ON bash build.sh  # 打点+每标记排空(扰动测量), 产物在 build_v2dbg/"
             echo "或:   ECHO_LRU_THREADS=512 bash build.sh   # 等价 --threads=512, 产物在 build_t512/"
             echo "--threads=N / 环境变量 ECHO_LRU_THREADS: Echo 每核线程数 (32 的倍数, [64,1024], 默认 1024);"
@@ -47,6 +50,10 @@ if [[ "$SOC_VERSION" != "ascend950" ]]; then
 fi
 if [[ "$PERF_STEP" != "ON" && "$PERF_STEP" != "OFF" ]]; then
     echo "ECHO_PERF_STEP 只能为 ON/OFF" >&2
+    exit 2
+fi
+if [[ "$SIMT_PERF" != "ON" && "$SIMT_PERF" != "OFF" ]]; then
+    echo "SIMT_PERF_STEP 只能为 ON/OFF" >&2
     exit 2
 fi
 if [[ "$PERF_DRAIN" != "ON" && "$PERF_DRAIN" != "OFF" ]]; then
@@ -89,10 +96,20 @@ if [[ "$ECHO_THREADS" != "1024" ]]; then
         BUILD_DIR="$SCRIPT_DIR/build_t${ECHO_THREADS}"
     fi
 fi
+# ABCDF 打点独立存放；调试/线程上限亦编码在目录中，避免互相覆盖。
+if [[ "$SIMT_PERF" == "ON" ]]; then
+    BUILD_DIR="$SCRIPT_DIR/build_simt_perf"
+    [[ "$PERF_STEP" == "ON" ]] && BUILD_DIR="$SCRIPT_DIR/build_both_perf"
+    [[ "$ECHO_THREADS" != "1024" ]] && BUILD_DIR="${BUILD_DIR}_t${ECHO_THREADS}"
+    if [[ "$V2_CUTOFF" != "0" || "$V2_KOPT" != "-O3" || "$PERF_DRAIN" == "ON" ]]; then
+        BUILD_DIR="${BUILD_DIR}_debug"
+    fi
+fi
 CMAKE_ARGS=(
     -S "$SCRIPT_DIR" -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE=Release -DNPU_ARCH="$SOC_VERSION"
     -DECHO_PERF_STEP="$PERF_STEP" -DECHO_PERF_DRAIN="$PERF_DRAIN" -DECHO_LRU_THREADS="$ECHO_THREADS" -DECHO_V2_DEBUG_CUTOFF="$V2_CUTOFF"
+    -DSIMT_PERF_STEP="$SIMT_PERF"
     -DECHO_KERNEL_OPT_LEVEL="$V2_KOPT"
     -DPython3_EXECUTABLE="$BUILD_PYTHON")
 for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
@@ -103,7 +120,9 @@ done
 cmake "${CMAKE_ARGS[@]}"
 cmake --build "$BUILD_DIR" --target simt_vs_echo_ops --parallel "$BUILD_JOBS"
 echo "已构建: $BUILD_DIR/libsimt_vs_echo_ops.so"
-if [[ "$PERF_STEP" == "ON" ]]; then
+if [[ "$SIMT_PERF" == "ON" ]]; then
+    echo "下一步: $BUILD_PYTHON $SCRIPT_DIR/simt_perf_step.py --library $BUILD_DIR/libsimt_vs_echo_ops.so --device 1"
+elif [[ "$PERF_STEP" == "ON" ]]; then
     echo "下一步: $BUILD_PYTHON $SCRIPT_DIR/echo_perf_step.py --device 1"
 else
     echo "下一步: $BUILD_PYTHON $SCRIPT_DIR/compare.py --device 1 --warmup 2 --repeat 4 --verify-each-sample"

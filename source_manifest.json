@@ -1,4 +1,18 @@
 {
+  "simt_revision": "ABCDF-1024-stage-stamps-2026-10-21",
+  "simt_import": {
+    "source_project": "liser0019/op_test_kvoffload_simt_echo",
+    "source_branch": "feat/simt-plan-micro-variants",
+    "source_commit": "9cc99d56c0488d2bb690eb55bb2d9c2731bf8f8e",
+    "entry": "csrc/plan_variants/13_abcdf",
+    "threads": 1024,
+    "opt_mask": 47,
+    "original_common_kernel_sha256": "6564d52abe1b41ca60df8b4bb27dae6cc4fa0430473b6c3bfeb0056a4ef25e84",
+    "original_common_plugin_sha256": "0d344379aa4f7f406f5adfe55f52dc67ec8c8883b544d3e50253d5da58d4bd05",
+    "kernel_changes": "Only compile-time observer parameters, stamps and workspace-tail pointer; original computation and barriers preserved",
+    "adapter_changes": "Keep public sparse_kv_plan schema/name; add perf workspace capacity check and frozen source/build identity",
+    "verification": "Source review only on development machine; server tests and NPU build pending. See checks/check_simt_perf.py and docs/abcdf_stage_timing.md"
+  },
   "manifest_revision": "p-c-index-fix-2026-10-17",
   "description": "以当前状态为本仓库（gitcode 托管）的初始状态；此前溯源不再保留，需要时查 git 历史。",
   "source_commit": "initial-state",

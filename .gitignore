@@ -4,6 +4,8 @@ build/
 build_perf/
 build_t*/
 build_perf_t*/
+build_simt_perf*/
+build_both_perf*/
 *.so
 *.o
 *.log
