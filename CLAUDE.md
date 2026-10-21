@@ -22,8 +22,11 @@ SIMT 基线（`csrc/simt/`，同仓对照）竞争。
 2. **开发机（本机）不运行任何代码**：不 build、不跑程序（计算资源需申请、
    无环境）。所有验证由 owner 在目标服务器执行——**你写好命令给 owner，
    结果由 owner 贴回**。曾允许本机跑 checks，2026-10-19 起废止。
-3. **每次改动必须 commit + push**：owner 的同步链是服务器 `git pull`。
-   git 凭据已配置（credential.helper store），直接 push。
+3. **每次改动必须 commit + push**：owner 的同步链 = Windows PC `git pull` →
+   sftp 同步到服务器（**服务器上没有 git**——给 owner 的服务器侧命令一律禁
+   git；需要历史版本文件时，给 Windows 侧 `git show <rev>:<path>` 命令由
+   owner 提取后传输）。本机（Windows 侧仓库）git 凭据已配置
+   （credential.helper store），直接 push。
 4. **文件一律 LF**（.gitattributes 已强制；曾因 Windows 中转 CRLF 出事故）。
 5. 注释风格：仓库惯例是"为什么"式详注（每个优化/修复带论证），保持。
 6. 代码合入后同步更新 `docs/echo_lru_deep_dive.md`（增量修订 + 文末日志表）。
@@ -57,7 +60,8 @@ v2.1 单趟分类 + 平局松弛 + 尾段追加（§9.22）验证通过——**�
 {4k+1,4k+2}；0/I32_MAX/陈旧值窗外免疫）。**生产契约变化：workspace 分配时
 清零一次**（compare.py 已 empty→zeros）。预期临界路径 −7~10K/场景：full
 ~76-78 / warm75 ~65-67 / warm_all ~63-65 / cold ~90-92 μs；上板实测 <6K 则
-复盘账目。
+复盘账目。（落地当晚触发 bisheng 后端坑 §7.6.3——等值链在 -O1+ 编译崩溃，
+已以 W2 差值判别形态规避，语义不变，见 §9.24 落地后记。）
 
 - 快照链：v2.2 = `284ff71`（未打 tag，验证后打）→ tag `v2.1`（最近已验证）
   → `v2.0`（§9.17-§9.21，含 opt3/t1024 负结果与微架构实测结论）→
@@ -103,6 +107,10 @@ task_cyc（**勿用 msprof op**，对 torch 负载不适配）。
   （多数组别名）；无 64 位运算；Event 计时不可信（用 profiler/分步周期）；
   **两 run 频率可漂移 ~4-5%**（§9.23 验证轮实锤）——决策用 cycles、锚点逐
   场景给、profile_kernel 与 echo_perf_step 背靠背连跑。
+- **bisheng 编译坑（§7.6.3，2026-10-21）**：i32 加载值与**运行时形参**直接
+  eq/ne 比较在 -O1+ 触发后端 fatal "Copy one register into another with a
+  different width"（-O0/与常量比较/非 eq/ne 谓词不触发）——规避 = 差值判别
+  （d=v−形参 再比常量）；该错误不落 run/plog、stack dump 被吞，变体二分定位。
 - **冷访存微架构（2026-10-19/20 实测，§9.20/§9.21）**：单发冷 GM 触（少量
   在途）串行 ~3-4K/次，冷行 store 同价（非 fire-and-forget）；批量 gather 是
   核级吞吐受限（加线程无用）；栅栏随线程数翻倍（t512 ~3.7K / t1024 ~6-8K）

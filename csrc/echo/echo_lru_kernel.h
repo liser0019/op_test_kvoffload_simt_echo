@@ -421,9 +421,17 @@ __attribute__((noinline)) __aicore__ void OpFifoAvailUpdate(
 //   正常路径 (空扫描循环 + padding + 尾零 + 全套栅栏), 逐位复刻旧 EvictScan
 //   的同边界行为。
 // [v2.2 2026-10-20 flags 世代号化] 分类从位判定 (v&1 hit / (v&2)==0 候选) 改为
-//   等值链: v==gen → hit; v==genSpec(=gen+1) → spec 移除跳过; 其余 → 候选。
+//   世代号判别: v==gen → hit; v==genSpec(=gen+1) → spec 移除跳过; 其余 → 候选。
 //   gen 由 plugin 静态计数器随 tiling 传入 (从 1 起, 每次调用 +4, 恒 ≡1 mod 4),
 //   经参数下发 (提取约束见 OpInvalidateSpecSuffix 头注释)。
+// [v2.2 后端坑规避 2026-10-21] 判别不写 `v == gen` 直接比较: i32 加载值与运行时
+//   形参的 eq/ne 比较在 bisheng -O1+ 触发后端 fatal "Copy one register into
+//   another with a different width" (§7.6.3; 实证边界: -O0 不触发、与常量比较
+//   不触发、参数 int32/uint32 无关、结构体尺寸/栅栏删除无关)。规避 = 差值判别
+//   (两处扫描同型, 即当日 W2 变体实测可编的形态): d = v−gen 无符号回绕 →
+//   d==0 ⟺ hit、d==1 ⟺ spec、d>1 ⟺ 窗外候选 —— 与等值链逐位等价。
+//   genSpec 形参自此在本 Op 无读者 (spec 由 d==1 判定), 保留以稳定签名
+//   (本函数 13 参 [v2.1] 与 15 参 [v2.2] 均已实证可编, 不动 ABI)。
 //   语义等价论证: 给定同样的 hit/spec 集合, 新旧对槽的划分恒等 —— hit 槽写 gen
 //   (旧写 1)、spec 槽写 genSpec (旧写 2, 且只写非 hit 槽; Step0.5 先于 Step1,
 //   假想同址时 Step1 覆写为 gen, 旧 bit0 优先同效)、其余槽 ∉ 窗 {4k+1,4k+2}
@@ -499,8 +507,10 @@ __attribute__((noinline)) __aicore__ void OpClassifyEvictRow(
         int32_t slot = lruUb[p];
         int32_t sv = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
         int32_t v = flagsUb[sv];
-        if (v == gen) ++hCnt;
-        else if (v != genSpec) ++kCnt;
+        // [v2.2 后端坑规避] 差值判别 (头注释/§7.6.3): 不与形参 gen 直接 eq/ne。
+        uint32_t d = (uint32_t)v - (uint32_t)gen;   // d==0 hit / d==1 spec / d>1 候选
+        if (d == 0u) ++hCnt;
+        else if (d > 1u) ++kCnt;
     }
     int32_t excl = PackedBlockScan(kCnt | (hCnt << 16), scanScratch);   // B2 (栅栏在 scan 内部)
     int32_t grand = 0;
@@ -524,11 +534,12 @@ __attribute__((noinline)) __aicore__ void OpClassifyEvictRow(
         int32_t slot = lruUb[p];
         int32_t sv = slot < 0 ? 0 : (slot > (int32_t)B ? (int32_t)B : slot);
         int32_t v = flagsUb[sv];
-        if (v == gen) {
+        uint32_t d = (uint32_t)v - (uint32_t)gen;   // [v2.2 后端坑规避] 同 phase B 差值判别
+        if (d == 0u) {
             lruGm[lruRowOff + totalK + (uint32_t)runH] = slot;
             ++runH;
-        } else if (v == genSpec) {
-            // spec 移除 (Step0.5 genSpec): 移出顺序 (v1 语义中其 pri 已无效)
+        } else if (d == 1u) {
+            // spec 移除 (Step0.5 genSpec, d==1): 移出顺序 (v1 语义中其 pri 已无效)
         } else {
             if (runCand < (int32_t)fsClamp) {
                 freeIdxOut[runCand] = slot;   // 受害者 (位置序); fsClamp=0 时恒假 → 零写

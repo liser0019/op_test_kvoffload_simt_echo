@@ -1052,7 +1052,7 @@ CMakeLists.txt:131）纯 SIMT 后端的经验总结，改动相关代码前先�
 - **规避**：argtopk 全部状态（key/hist/globalCnt/seg/scalar/freeIdx）分段塞进单个
   `argtopkUb[32768]`，分段偏移集中在 `Init` 一处管理（§3.3）。
 
-### 7.6 bisheng `-xasc` 前端两个崩溃坑（145d3ce 轮踩到）
+### 7.6 bisheng `-xasc` 编译坑三个（前端两个 145d3ce 轮 + 后端一个 v2.2 轮）
 
 1. **短路式里的文本 UB 被投机求值**：`pass == 0 || (v >> (shift+8)) == 0` 这种写法，
    pass 0 时 `shift+8 == 32`，`v >> 32` 是文本可见的 UB——即使短路逻辑上不会执行到，
@@ -1062,6 +1062,18 @@ CMakeLists.txt:131）纯 SIMT 后端的经验总结，改动相关代码前先�
    `while(true)` + continue 重跑——continue 的跳转目标取决于数据、且跨越栅栏结构，
    bisheng 前端收敛分析崩溃。规避：有界 `for (attempt < 2)` + 迭代边界 break（与旧版
     scalar[3] break 同构，已验证可编译）（`echo_lru_kernel.h:456-460`；commit 145d3ce）。
+3. **后端指令选择崩溃：i32 加载值与运行时形参的 eq/ne 比较（v2.2 轮踩到，2026-10-21）**：
+   `fatal error: error in backend: Copy one register into another with a different
+   width`（clang frontend exit code 70），-O1/-O2/-O3 全触发、**-O0 不触发**。实证边界
+   （当日十二变体定位，§9.24 落地后记）：与**常量**比较（`v == 1`）不触发；差值后跟
+   常量谓词（`d=(uint32_t)v-(uint32_t)gen; d==0/d>1/d==1`）不触发；形参 int32/uint32、
+   tiling 结构体尺寸、prologue 栅栏删除均无关；**非 eq/ne 谓词与形参比较不触发**
+   （v2.1 的 `tok >= spl` 即此型，长期可编）。推测机理（假说，与错误信息字面吻合）：
+   eq/ne 指令需把形参寄存器搬运到谓词比较所需宽度的寄存器，后端生成宽度不匹配的
+   COPY。规避 = 差值判别形态（`OpClassifyEvictRow` 两处扫描，d=v−gen 后比常量）。
+   **取证教训**：该错误不落 `~/ascend/log/run/plog`（那里只有 python 运行时日志），
+   bisheng 也吞掉 clang 后端 fatal 后的 stack dump——变体二分是有效定位手段（每变体
+   = 干净树 + 单点 sed + cp 备份还原；服务器无 git）。
 
 ### 7.7 dav-3510 无 64 位值运算
 
@@ -2223,6 +2235,18 @@ warm_all 68.96 / cold 96.19）→ 分步对照（prologue 两槽应消失；跨�
 136046 / warm75 116156 / warm_all 113432 / cold 160240）。锚点用当轮
 profile_kernel 各场景 P50 逐场景传入（§9.23 操作协议）。
 
+**落地后记（2026-10-21，编译坑插曲）**：首次服务器构建触发 bisheng 后端坑
+§7.6.3——`v == gen` 等值链在 -O1+ 指令选择崩溃。当日以变体二分定位：V0 复现 /
+V0b 对照（因服务器无 git 作废，改 Windows `git show` 提取的备用流程）、V1-V3
+（Init 派生/入口拷贝/参数类型，中和后仍挂）、V6（结构体，排除）、V7（比较回退
+位测试，**定位命中**）、V8（栅栏回补，排除）、W0-W2（修复形态三连测，W2 差值
+判别中选）；其中 V5/V9 两轮因诊断脚本 sed 漏分号产生语法错、结论作废——**教训：
+变体判定必须显式 grep 错误类型（后端 fatal / 其他 error / 编译通过三分）而非只看
+make 退出码**。最终落码 W2 形态（与等值链逐位等价，见 OpClassifyEvictRow 头注释
+[后端坑规避]）；checks/golden/语义论证均不受影响（分类输入相同、划分恒等，
+genSpec 形参保留无读者以稳签名）。定位全程无 plog 可读（错误不落 run/plog、
+stack dump 被吞，§7.6.3 取证教训）——若后续找到编译期日志路径可补证机理假说。
+
 ## 10. 当前状态与后续方向
 
 ### 10.1 kernel 级数字（现状）
@@ -2315,6 +2339,7 @@ Run A 的 aicore.db 逐核 task_cyc 抽取（核间均衡，与 §9.23 的 skew/
 | 2026-10-16 | 第 8 版 | `3906f91`+`9b63e24`（上板验证） | round-4（[P-E]+白付清理）上板验证（空闲设备）结果写入：§9.15 新增上板验证小节（warm 58.28/55.34 μs＝0.72×/0.67× 超出白付清理预期、cold 94.16 μs、full 120.12 μs；P-E 收益重校准——Argtopk −9.1K 远低于静态预期 −30K，Argtopk 转弥散结构无单一主导相位；距 50-60 μs 定量账 → v2 必要性坐实；int16 hist 扩 G=128 候选撤下）；§9.14 open question 1 关闭（SIMT ~2× 确认为设备占用干扰，比值恢复可信）；§7.11 新增"静态延迟链模型高估依赖读成本"方法论教训；§9 总表 round-4 行、§10.1 现状、§2.2 比值引用、头部覆盖范围同步刷新 |
 | 2026-10-20 | 第 13 版 | `ab4fb5b`→`f2acb7c`（t1024 消融实测回退） | §9.21 t1024 消融负结果：P50 四场景 +25~37 μs（Rebuild +11~16K=栅栏翻倍、HitMiss +6~8K 未降反升、MissCumsum −2.5~3.9K 不抵、ResetRows 持平）；三条结论（栅栏随线程数翻倍且占总时间 ~1/3、gather 核吞吐受限非每 warp 串行（H1 修正）、ResetRows 带宽地板佐证）；§10.2 HitMiss 行改"收尾 ~4-7K"；§10.3 重排（EvictScan×Rebuild 融合+栅栏削减列 1、新增 golden 平局规则松弛决策点、t1024 证伪移除）；CLAUDE.md 同步 |
 | 2026-10-20 | 第 17 版 | v2.2（`284ff71`）+ 工具项（`50128d3`）+ v2.1-prof 验证轮 | §9.23 上板验证记录：P50 复现（v2.1-prof 二进制四场景 −3.4~+0.1 μs 于 v2.1 轮，打点构建不改行为）+ 分步新口径全表（绝对戳差分含间隙，与旧表同物异账——ClassifyEvict full 29.0→31.1K 非回退）+ skew/跨度/Σ步max 对账（跨核逐峰求和虚高 +10.8~12.5%，对账以跨度为准）+ 头条结论 prologue 两槽 13.7-13.9K（占跨度 8.5-11.9%，直接触发 v2.2）+ 频率漂移发现（隐含频率 1.63-1.67 GHz 一致高于 msprof 1.585；不可能不等式实锤两 run 差 ~4-5%；锚点=跨度/P50 天然低估；操作协议 = cycles 决策/背靠背连跑/每场景锚点）+ 栅栏步 max 隐藏等待的读法注记；新增 §9.24 v2.2 flags 世代号化全记录（gen 从 1 起 stride 4、窗 {4k+1,4k+2}、stride=4 与 WAW 消失论证、生产契约 = workspace 分配时清零一次（compare.py empty→zeros）、槽位 29→27、checks 54→56、预期临界路径 −7~10K 与验证计划）；§10.1 加 v2.2 待验证注记 + 快照链、§10.2 HitMiss 行新口径转注、§10.3 重排（精确打点收口为前言、ClassifyEvict 31.1K / Step5 簇 38.7K / HitMiss 27.8K / cold reset 簇 53.4K 列 1-4）；头部 banner 覆盖 →§9.24、§3.2/§3.4/§3.5/§8.3 槽位与锚点转注；CLAUDE.md 同步（checks 56、v2.2 状态段、优先级、逐场景锚点语法示例、快照链 v2.2=284ff71 未打 tag）；README checks 项数最小修正 |
+| 2026-10-21 | 第 18 版 | v2.2 编译坑修复（W2 差值判别） | bisheng 后端坑 §7.6.3 登记（节标题"前端两个"→"编译坑三个"）：i32 加载值与运行时形参 eq/ne 比较在 -O1+ 触发 "Copy one register into another with a different width"（-O0/常量比较不触发；参数类型/结构体尺寸/栅栏无关；非 eq/ne 谓词 vs 形参不触发——v2.1 `tok >= spl` 长期可编为证；机理假说 = 形参寄存器宽度搬运 COPY，待编译期日志补证）；OpClassifyEvictRow 两处扫描改差值判别 d=v−gen（d==0 hit / d==1 spec / d>1 候选，与等值链逐位等价——当日 W2 变体实测可编形态原样落码），genSpec 形参保留无读者（签名稳定，13/15 参均实证可编）；§9.24 落地后记（变体定位矩阵 V0-V9/W0-W2、V5/V9 作废教训 = 变体判定必须显式 grep 错误类型、取证教训 = 错误不落 run/plog 且 stack dump 被吞）；CLAUDE.md：协作规则 3 更正同步链（Windows PC git pull + sftp，服务器无 git、服务器侧命令禁 git）+ 设备坑速查加 bisheng 后端坑条 + v2.2 状态段补注 |
 | 2026-10-20 | 第 16 版 | v2.1-prof（NPU 待验证） | §9.23 打点升级全记录：差值→绝对时间戳（29 槽 = entry + prologue×2 + 非 spec 18 + spec 陈列 8；PerfBegin/perfLast_ 删除；host uint32 回绕差分；步间间隙归属下一步）；标定修正（默认 1.585 GHz 常数 + --p50-us 锚点两档对照，Event 标定行废弃 §7.8）；prologue 纳入打点（对账 94%→~100% 预期）+ skew 首见；ECHO_PERF_DRAIN 排空旋钮（build.sh + CMakeLists，产物 build_v2dbg/，需配 ECHO_PERF_STEP=ON）；echo_perf_step.py 重写 + --matrix CSV 导出 + 新增 prof_report.py（单文件 HTML：对账条/逐核×逐步热力图/逐步聚合/op 表/原始折叠表，dataviz skill 已验证调色板原样引用）；§8.3 加 v2.1-prof 指针、§10.3① 刷新（时间戳+标定已落地待验证、可视化结论：自建 prof_report / MindStudio Insight 可开 PROF_* 目录）；checks 常量断言 26→29；遗留三项（debug_v2_stepcycles 写判定、compare.py:299/launch.h 注释）已由主会话审查轮顺手同步、CMakeLists 为白名单外必要管道（旋钮不进 ECHO_FLAGS 即静默失效）一并合入；CLAUDE.md 同步 |
 | 2026-10-20 | 第 15 版 | v2.1（`6188d3b`+验证） | §9.22 上板验证：四场景 golden 全过、P50 warm 71.36/69.33（0.88×/0.85×）/full 82.12（0.88×，−18.5%）/cold 99.59（1.34×）——首次三场景 ≤SIMT、full 破百；分步对照表（ClassifyEvict full 29.0K = 旧两 Op 之和 −56%；cold Rebuild 31.8K→10.7K）；§10.1 刷新；§10.3 重排（精确打点列 1：msprof op 硬件侧视角 + kernel 内绝对时间戳升级 + 标定修正；ClassifyEvict 再削/收尾清单/混合范式 parked）；快照 tag v2.1 |
 | 2026-10-20 | 第 14 版 | v2.1（单趟分类，NPU 待验证） | §9.22 v2.1 全记录：单趟分类 OpClassifyEvictRow（三产出 freeIdx/K 段/H 段+rbBase，融合 EvictScan+Rebuild 位置域扫描，每步必跑，occ==0 快路径）+ 平局松弛（hit 旧位置序/alloc 分配序，owner 2026-10-20 批准）+ 尾段追加 OpAllocAppendRow（零栅栏零扫描）；UB 删 aAt/hExcl/aExcl 三段（峰值 26176→13120 实算链）、numHitsGm 复活为 rbBase（布局零漂移）；reference_echo 改旧序直接法（htd 法判 miss 原样）；checks 重写 54 项（跨验证组改新规则+成员集合不变量）；旋钮清理（SKIP_REBUILD+9 个 RB_*，CUTOFF 保留）；预期收益表（warm_all ~67-69/warm75 ~68-71/full ~79-83/cold ~87-90）与风险预案（trap 预案=Step2.SyncGrid 无条件化）；§10.1 加 v2.1 待验证注记、§10.3 重排（v2.1 验证列 1，融合/松弛移入已完成）；banner 覆盖范围 →§9.17–§9.22；CLAUDE.md 同步 |
