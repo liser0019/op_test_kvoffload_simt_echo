@@ -77,7 +77,7 @@ class ProfilingChecks(unittest.TestCase):
             root = Path(temporary)
             script = root / 'run_plan_suite.sh'
             script.write_bytes((ROOT / script.name).read_bytes())
-            for name in ['compare.py', 'plan_variants_manifest.json', 'profile_plan_variants.py']:
+            for name in ['compare.py', 'plan_variants_manifest.json', 'profile_mtp_matrix.py']:
                 (root / name).touch()
             (root / 'build').mkdir()
             (root / 'build/libsimt_plan_variants_ops.so').touch()
@@ -88,21 +88,24 @@ class ProfilingChecks(unittest.TestCase):
                             '    stream.write(json.dumps(sys.argv[1:])+"\\n")\n')
             stub.chmod(0o755)
             env = dict(os.environ, PYTHON=str(stub), PEER_TEST_CALLS=str(calls),
-                       PLAN_PROFILE_OUTPUT=str(root / 'results'))
+                       PLAN_PROFILE_OUTPUT=str(root / 'results'), REPEAT='68', REQUESTS='32',
+                       FIXED_QUERY_ROWS='32', GROUP='all')
+            env.pop('PLAN_LIBRARY', None)
             result = subprocess.run(['bash', str(script), device], env=env,
                                     text=True, capture_output=True, timeout=10)
             recorded = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
             return result, recorded
 
     def test_runner_audit_before_capture(self):
-        result, calls = self.runner('1')
+        result, calls = self.runner('0')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual([call[2] for call in calls], ['compare.py', 'profile_plan_variants.py'])
-        self.assertIn('--verify-each-sample', calls[0])
-        self.assertNotIn('--verify-each-sample', calls[1])
+        self.assertEqual([Path(call[2]).name for call in calls], ['check_mtp_scan.py', 'profile_mtp_matrix.py'])
+        self.assertIn('--production', calls[0])
+        self.assertIn('--correctness-report', calls[1])
         for call in calls:
-            self.assertEqual(call[call.index('--reference') + 1], 'baseline')
-        self.assertEqual(calls[1][calls[1].index('--repeat') + 1], '72')
+            self.assertEqual(call[call.index('--device') + 1], '0')
+        self.assertEqual(calls[1][calls[1].index('--repeat') + 1], '68')
+        self.assertEqual(calls[1][calls[1].index('--mtp') + 1:calls[1].index('--mtp') + 3], ['0', '3'])
 
     def test_runner_invalid_device(self):
         result, calls = self.runner('invalid')

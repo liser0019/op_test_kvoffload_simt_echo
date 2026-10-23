@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Compare BCDE+fused+1024 and compile-time Plan micro-optimizations.
+"""ABCDF及Scan策略的公共输入、golden、设备审计与Event诊断。
 
---cpu-check checks inputs/goldens only. checks/check_plan_kernels.py executes
-the actual row source with CPU shims. Neither supplies NPU performance.
+--cpu-check只检查输入/golden；新候选的设备门禁为checks/check_mtp_scan.py。
 Event timing includes host submission/tiling H2D gaps; use the profiler for
 real kernel durations. Restore and validation stay outside measured calls.
 """
@@ -14,6 +13,7 @@ import json
 import time
 from pathlib import Path
 import numpy as np
+from mtp_cases import make_mtp_case, describe_case, resolve_shape
 
 ROOT = Path(__file__).resolve().parent
 I32_MAX = np.iinfo(np.int32).max
@@ -32,10 +32,20 @@ def plan_layout(topk, capacity, rows, name):
     threads = VARIANTS[name]["threads"]
     hash_capacity = max(32, 1 << (2 * topk - 1).bit_length())
     row_elements = 3 * hash_capacity + capacity + topk
+    strategy = VARIANTS[name].get("scan_strategy", {})
+    extra_lru = capacity + 4 * ((capacity + 31) // 32) if strategy.get("lru") == 2 else 0
+    extra_miss = 2 * ((topk + 31) // 32) if strategy.get("miss") == 2 else 0
+    row_elements += extra_lru + extra_miss
     scan_bytes = ((2 * (threads // 32) + 8) * 4 + 31) & ~31
     aligned_bytes = (row_elements * 4 + 31) & ~31
     use_ub = aligned_bytes <= CATALOG["row_ub_limit_bytes"]
-    return {"threads": threads, "scan_bytes": scan_bytes, "capacity_arrays": 1,
+    per_tile = 2 if strategy.get("self_reduce") else 3
+    lru_barriers = 3 if strategy.get("lru") == 2 else per_tile * ((capacity + threads - 1) // threads)
+    miss_barriers = 3 if strategy.get("miss") == 2 else per_tile * ((topk + threads - 1) // threads)
+    return {"threads": threads, "scan_bytes": scan_bytes, "capacity_arrays": 1 + int(bool(extra_lru)),
+            "extra_lru_elements": extra_lru, "extra_miss_elements": extra_miss,
+            "warm_scan_barriers_source_model": lru_barriers + miss_barriers,
+            "cold_scan_barriers_source_model": 3 * ((topk + threads - 1) // threads),
             "hash_capacity": hash_capacity, "row_elements": row_elements,
             "scratch_path": "UB" if use_ub else "GM",
             "local_memory_bytes": scan_bytes + (aligned_bytes if use_ub else 0),
@@ -233,7 +243,8 @@ def invoke(torch, name, case, inputs, state):
 
 
 def audit_case(torch, case, names, device, repeats=3):
-    expected = {name: reference_simt(case) for name in names}
+    golden = reference_simt(case)
+    expected = {name: golden for name in names}  # 只读参考；设备工作状态逐版本独立。
     inputs, initial, states = prepare_npu(torch, case, None, device, names)
     for iteration in range(repeats):
         for name in names:
@@ -291,13 +302,15 @@ def array_hash(arrays):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for key, default in [("rows", 32), ("topk", 2048), ("capacity", 4096), ("max-token", 262144),
-                         ("block-size", 64), ("seed", 2026), ("device", 1), ("warmup", 10),
+    for key, default in [("rows", None), ("topk", 2048), ("capacity", 4096), ("max-token", 262144),
+                         ("block-size", 64), ("seed", 2026), ("device", 0), ("warmup", 10),
                          ("repeat", 72), ("audit-repeat", 3)]:
         parser.add_argument("--" + key, type=int, default=default)
     parser.add_argument("--scenario", choices=("all", *SCENARIOS), default="all")
     parser.add_argument("--implementations", nargs="+", choices=IMPLEMENTATIONS, default=list(IMPLEMENTATIONS))
-    parser.add_argument("--reference", choices=IMPLEMENTATIONS, default="baseline")
+    parser.add_argument("--reference", choices=IMPLEMENTATIONS, default="abcdf")
+    parser.add_argument("--requests", type=int, help="固定请求数；默认32。--rows 则固定展开后的行数")
+    parser.add_argument("--mtp", type=int, default=0, help="draft token 数，q_len=1+mtp")
     parser.add_argument("--library", type=Path, default=ROOT / "build/libsimt_plan_variants_ops.so")
     parser.add_argument("--json", type=Path, default=Path("results/plan_variants.json"))
     parser.add_argument("--cpu-check", action="store_true")
@@ -305,6 +318,10 @@ def main():
     parser.add_argument("--audit-edges", action="store_true", help="MTP/duplicates/invalid/owner boundaries before timing")
     parser.add_argument("--verify-each-sample", action="store_true")
     args = parser.parse_args()
+    try:
+        args.requests, args.rows = resolve_shape(args.requests, args.rows, args.mtp)
+    except ValueError as exc:
+        parser.error(str(exc))
     names = tuple(args.implementations)
     if len(set(names)) != len(names) or args.reference not in names:
         parser.error("Implementations must be unique and include --reference")
@@ -319,7 +336,7 @@ def main():
     results = {"metadata": {"source_identity": identity, "implementations": list(names),
                            "reference": args.reference, "shuffle_lru": args.shuffle_lru}, "scenarios": {}}
     results["metadata"]["shape"] = {key: getattr(args, key) for key in
-                                   ("rows", "topk", "capacity", "max_token", "block_size")}
+                                   ("requests", "rows", "mtp", "topk", "capacity", "max_token", "block_size")}
     if not args.cpu_check:
         import torch
         import torch_npu
@@ -340,10 +357,11 @@ def main():
             if not args.cpu_check: audit_case(torch, case, names, device, args.audit_repeat)
             print("Edge audit:", label, "CPU golden only" if args.cpu_check else "NPU passed", flush=True)
     for scenario in scenarios:
-        case = make_case(args.rows, args.topk, args.capacity, args.max_token, scenario, args.seed, args.block_size, args.shuffle_lru)
+        case = make_mtp_case(args.requests, args.topk, args.capacity, args.max_token, scenario,
+                             args.seed, args.mtp, args.block_size, args.shuffle_lru)
         expected_once = reference_simt(case)
         if args.cpu_check:
-            assert np.all(expected_once["miss_count"] == args.topk - case["hits"])
+            print(json.dumps(describe_case(case, expected_once), ensure_ascii=False))
             print(scenario, "CPU golden/layout passed; no kernel execution or performance measurement")
             print(plan_layout(args.topk, args.capacity, args.rows, names[0]))
             continue
@@ -372,6 +390,7 @@ def main():
             print(f"{scenario}/{name}: Event P50={stats[name]['event']['p50_us']:.2f} us, "
                   f"vs {args.reference}={stats[name]['speedup_vs_reference_event_p50']:.3f}x", flush=True)
         results["scenarios"][scenario] = {"correctness": "passed", "statistics": stats,
+                                          "workload": describe_case(case, expected_once),
                                           "execution_orders": orders,
                                           "case_sha256": array_hash({key: value for key, value in case.items()
                                                                      if isinstance(value, np.ndarray)})}

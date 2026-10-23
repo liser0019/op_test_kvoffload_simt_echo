@@ -80,24 +80,36 @@ class GoldenChecks(unittest.TestCase):
         for backend in ("Meta", "PrivateUse1"):
             self.assertIn("TORCH_LIBRARY_IMPL(sparse_kv_plan_op, " + backend, candidate)
 
-    def test_abcdfh_combines_only_abcd_f_h(self):
-        variant = next(v for v in c.CATALOG["variants"] if v["name"] == "abcdfh")
-        self.assertEqual(variant["points"], "ABCDFH")
+    def test_abcdf_is_frozen_reference(self):
+        variant = c.VARIANTS["abcdf"]
+        self.assertEqual(variant["points"], "ABCDF")
         self.assertEqual(variant["threads"], 1024)
-        self.assertEqual(variant["op_name"], "plan_abcdfh")
-        self.assertEqual(variant["kernel_name"], "sparse_kv_plan_kernel_plan_abcdfh")
+        self.assertEqual(variant["op_name"], "plan_abcdf")
+        self.assertEqual(variant["kernel_name"], "sparse_kv_plan_kernel_plan_abcdf")
         config = (ROOT / variant["path"] / "variant_config.h").read_text()
-        self.assertIn("PLAN_OPT_MASK 175U", config)
+        self.assertIn("PLAN_OPT_MASK 47U", config)
+
+    def test_mtp_actual_miss_counts(self):
+        from mtp_cases import make_mtp_case, make_miss_sweep_case, resolve_shape
+        self.assertEqual(resolve_shape(32, None, 3), (32, 128))
+        self.assertEqual(resolve_shape(None, 32, 3), (8, 32))
+        for scenario, counts in (("cold_reset", [33] * 4), ("warm_75pct", [9] * 4),
+                                 ("warm_all_hit", [1, 2, 3, 4]), ("full_cache_75pct", [9] * 4)):
+            case = make_mtp_case(2, 33, 65, 512, scenario, 31, 3)
+            np.testing.assert_array_equal(c.reference_simt(case)["miss_count"], counts * 2)
+        for count in (0, 1, 16, 33):
+            for distribution in ("front", "back", "uniform"):
+                case = make_miss_sweep_case(2, 33, 65, 512, 31, 3, count, distribution)
+                np.testing.assert_array_equal(c.reference_simt(case)["miss_count"], [count] * 8)
 
     def test_only_this_round_is_built(self):
         text = (ROOT / "CMakeLists.txt").read_text()
         start = text.index("set(PLAN_VARIANTS")
         folders = text[start:text.index(")", start)].split()[1:]
-        self.assertEqual(folders, [Path(v["path"]).name for v in c.CATALOG["variants"]])
+        self.assertEqual(folders, [v["path"] for v in c.CATALOG["variants"]])
         self.assertEqual(len(c.IMPLEMENTATIONS), 18)
         self.assertFalse((ROOT / "csrc/echo").exists())
         for v in c.CATALOG["variants"]:
-            if v["name"] == "baseline": continue
             mask = sum(c.CATALOG["feature_bits"][letter] for letter in v["points"])
             self.assertIn(f"PLAN_OPT_MASK {mask}U", (ROOT / v["path"] / "variant_config.h").read_text())
 

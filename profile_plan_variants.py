@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Profile feat/simt-plan-micro-variants without changing or rebuilding kernels.
+"""ABCDF MTP/Scan矩阵的单组torch_npu.profiler采集入口。
 
 Run from this repository root, or pass --project /path/to/the/project.
 Example:
-  python3 profile_plan_variants.py --device 1 --scenario all \
-      --implementations baseline a_no_pending ab abcdefgh \
-      --warmup 13 --repeat 60 --output /dev/shm/plan_micro_profile
+  python3 profile_plan_variants.py --device 0 --requests 32 --mtp 3 \
+      --implementations abcdf v111 --warmup 10 --repeat 50 \
+      --output /dev/shm/abcdf_mtp_profile
 
 Each call restores the original state. Goldens and validation stay outside
 the recorded steps. One profiler warm-up step precedes the recorded steps.
@@ -20,7 +20,6 @@ import importlib.util
 import json
 from pathlib import Path
 import re
-import subprocess
 import sys
 import tempfile
 
@@ -84,18 +83,14 @@ def validate_records(records, names, repeat, reference):
     return by_impl
 
 
-def git_value(project, *args):
-    result = subprocess.run(["git", "-C", str(project), *args],
-                            text=True, capture_output=True, check=False)
-    return result.stdout.strip() if result.returncode == 0 else "unknown"
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", type=Path, default=Path.cwd())
     parser.add_argument("--library", type=Path)
-    parser.add_argument("--device", type=int, default=1)
-    parser.add_argument("--rows", type=int, default=32)
+    parser.add_argument("--device", type=int, default=0)
+    parser.add_argument("--rows", type=int, help="固定 query 行数；须能被 q_len 整除")
+    parser.add_argument("--requests", type=int, help="固定请求数，默认32")
+    parser.add_argument("--mtp", type=int, default=0, help="draft token 数，q_len=1+mtp")
     parser.add_argument("--topk", type=int, default=2048)
     parser.add_argument("--capacity", type=int, default=4096)
     parser.add_argument("--max-token", type=int, default=262144)
@@ -105,15 +100,25 @@ def main():
                         choices=("all", "cold_reset", "warm_75pct", "warm_all_hit", "full_cache_75pct"))
     parser.add_argument("--implementations", nargs="+")
     parser.add_argument("--shuffle-lru", action="store_true")
-    parser.add_argument("--reference", default="baseline")
+    parser.add_argument("--miss-count", type=int, help="仅full_cache_75pct：稳定query的精确miss数")
+    parser.add_argument("--miss-distribution", choices=("front", "back", "uniform"), default="front")
+    parser.add_argument("--reference", choices=("abcdf",), default="abcdf")
     parser.add_argument("--warmup", type=int, default=13)
     parser.add_argument("--repeat", type=int, default=72,
                         help="Recorded calls per implementation, excluding profiler warm-up")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    from mtp_cases import make_mtp_case, make_miss_sweep_case, describe_case, resolve_shape
+    try:
+        args.requests, args.rows = resolve_shape(args.requests, args.rows, args.mtp)
+    except ValueError as exc:
+        parser.error(str(exc))
     if not (args.rows > 0 and 0 < args.topk <= args.capacity and args.max_token > args.topk
             and args.block_size > 0 and args.warmup >= 0 and args.repeat > 0):
         parser.error("Invalid shape, warmup or repeat")
+    if args.miss_count is not None and (args.scenario != "full_cache_75pct"
+                                       or not 0 <= args.miss_count <= args.topk):
+        parser.error("--miss-count需要--scenario full_cache_75pct且0<=miss_count<=topk")
     project = args.project.resolve()
     source = project / "compare.py"
     if not source.is_file():
@@ -170,27 +175,37 @@ def main():
     print("Loaded shared library:", library, flush=True)
     scenarios = list(comparison.SCENARIOS) if args.scenario == "all" else [args.scenario]
     metadata = {"status": "running", "project": str(project), "library": str(library),
-                "project_commit": git_value(project, "rev-parse", "HEAD"),
-                "project_branch": git_value(project, "branch", "--show-current"),
-                "project_status": git_value(project, "status", "--short"),
+                "source_base_commit": comparison.CATALOG.get("experiment_base_commit"),
+                "experiment": "abcdf-mtp-scan",
                 "plan_build": plan_build, "kernel_entries": entries,
                 "library_sha256": hashlib.sha256(library.read_bytes()).hexdigest(),
                 "compare_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "device": args.device, "device_name": torch.npu.get_device_name(args.device),
                 "torch": torch.__version__, "torch_npu": torch_npu.__version__,
-                "shape": {key: getattr(args, key) for key in ("rows", "topk", "capacity", "max_token", "block_size")},
+                "compiler": json.loads(torch.ops.sparse_kv_plan_op.plan_compiler_info()),
+                "shape": {key: getattr(args, key) for key in ("requests", "rows", "mtp", "topk", "capacity", "max_token", "block_size")},
                 "seed": args.seed, "shuffle_lru": args.shuffle_lru, "implementations": list(names),
+                "controlled_miss_count": args.miss_count, "miss_distribution": args.miss_distribution,
                 "reference": args.reference,
                 "warmup": args.warmup, "recorded_calls_per_implementation": args.repeat,
-                "profiler_warmup_steps": 1, "scenarios": {}}
+                "profiler_warmup_steps": 1,
+                "balanced_execution_positions": args.repeat % len(names) == 0, "scenarios": {}}
     metadata_path = capture / "capture_metadata.json"
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
     for scenario in scenarios:
-        case = comparison.make_case(args.rows, args.topk, args.capacity, args.max_token,
-                                    scenario, args.seed, args.block_size, args.shuffle_lru)
+        if args.miss_count is None:
+            case = make_mtp_case(args.requests, args.topk, args.capacity, args.max_token,
+                                 scenario, args.seed, args.mtp, args.block_size, args.shuffle_lru)
+        else:
+            case = make_miss_sweep_case(args.requests, args.topk, args.capacity, args.max_token,
+                                       args.seed, args.mtp, args.miss_count, args.miss_distribution,
+                                       args.block_size, args.shuffle_lru)
         case_digest = comparison.array_hash({key: value for key, value in case.items()
                                              if isinstance(value, comparison.np.ndarray)})
         simt_expected = comparison.reference_simt(case)
+        if args.miss_count is not None:
+            comparison.np.testing.assert_array_equal(simt_expected["miss_count"],
+                                                     comparison.np.full(args.rows, args.miss_count))
         expected = {name: simt_expected for name in names}
         inputs, initial, states = comparison.prepare_npu(torch, case, None, device, names)
 
@@ -245,6 +260,12 @@ def main():
         if not records:
             raise RuntimeError(f"No recognized kernel rows; inspect raw CSV fields/names in {destination}")
         validate_records(records, names, args.repeat, args.reference)
+        for record in records:
+            record["us_per_request_p50"] = record["p50_us"] / args.requests
+            record["us_per_query_row_p50"] = record["p50_us"] / args.rows
+            record["gain_vs_abcdf_percent"] = (
+                1 - record["p50_us"] / next(r["p50_us"] for r in records
+                                           if r["implementation"] == args.reference)) * 100
         summary_path = destination / "kernel_summary.csv"
         with summary_path.open("w", encoding="utf-8", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=list(records[0]))
@@ -256,6 +277,7 @@ def main():
                   f"P95={record['p95_us']:.2f} us, "
                   f"vs {args.reference}={record['speedup_vs_reference_p50']:.3f}x", flush=True)
         metadata["scenarios"][scenario] = {"correctness": "passed",
+                                            "workload": describe_case(case, simt_expected),
                                             "case_sha256": case_digest,
                                             "layouts": {name: states[name]["layout"] for name in names},
                                             "raw_csv": [str(path) for path in files],

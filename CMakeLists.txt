@@ -101,39 +101,49 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 else()
     set(KERNEL_OPT_FLAGS -O3)
 endif()
+option(PLAN_PROFILE_DEBUG_INFO "Add device -g while keeping -O3" OFF)
+option(PLAN_RESOURCE_USAGE "Ask bisheng to print register/stack usage" OFF)
+if(PLAN_PROFILE_DEBUG_INFO)
+    list(APPEND SIMT_FLAGS -g)
+endif()
+if(PLAN_RESOURCE_USAGE)
+    list(APPEND SIMT_FLAGS --cce-res-usage)
+endif()
 set(OP_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/csrc/plan_variants/common")
 set(KERNEL_INCLUDE_ARGS "")
 foreach(_dir IN LISTS CANN_INCLUDE_DIRS OP_INCLUDE_DIRS)
     list(APPEND KERNEL_INCLUDE_ARGS "-I${_dir}")
 endforeach()
-file(GLOB COMMON_HEADERS CONFIGURE_DEPENDS "csrc/plan_variants/common/*.h")
+file(GLOB COMMON_HEADERS CONFIGURE_DEPENDS
+    "csrc/plan_variants/common/*.h" "csrc/scan_experiments/common/*.h")
 set(PLAN_VARIANTS
-    00_baseline
-    01_a_no_pending
-    02_b_scratch_lru
-    03_c_tail_clear
-    04_d_packed_owner
-    05_e_row_context
-    06_f_warp_total
-    07_g_reset_merge
-    08_h_tile_sync
-    09_ab
-    10_abc
-    11_abcd
-    12_abcde
-    13_abcdf
-    14_abcdg
-    15_abcdh
-    16_abcdefgh
-    17_abcdfh)
+    csrc/plan_variants/13_abcdf
+    csrc/scan_experiments/v100
+    csrc/scan_experiments/v010
+    csrc/scan_experiments/v001
+    csrc/scan_experiments/v110
+    csrc/scan_experiments/v101
+    csrc/scan_experiments/v011
+    csrc/scan_experiments/v111
+    csrc/scan_experiments/s01
+    csrc/scan_experiments/s02
+    csrc/scan_experiments/s03
+    csrc/scan_experiments/s04
+    csrc/scan_experiments/s05
+    csrc/scan_experiments/s06
+    csrc/scan_experiments/s07
+    csrc/scan_experiments/s08
+    csrc/scan_experiments/s09
+    csrc/scan_experiments/cold_ballot)
 set(KERNEL_OBJECTS "")
 set(VARIANT_PLUGINS "")
 foreach(_variant IN LISTS PLAN_VARIANTS)
-    set(_dir "${CMAKE_CURRENT_SOURCE_DIR}/csrc/plan_variants/${_variant}")
+    set(_dir "${CMAKE_CURRENT_SOURCE_DIR}/${_variant}")
+    get_filename_component(_variant_name "${_dir}" NAME)
     file(GLOB_RECURSE _headers CONFIGURE_DEPENDS "${_dir}/*.h" "${_dir}/upstream/*")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
         ${_headers} "${_dir}/kernel.cpp" "${_dir}/plugin.cpp")
-    set(_object "${CMAKE_CURRENT_BINARY_DIR}/kernel_${_variant}.o")
+    set(_object "${CMAKE_CURRENT_BINARY_DIR}/kernel_${_variant_name}.o")
     add_custom_command(OUTPUT "${_object}"
         COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
                 ${KERNEL_OPT_FLAGS} ${SIMT_FLAGS} ${KERNEL_INCLUDE_ARGS}
@@ -151,6 +161,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/checks/plan_build_info.py" ${COMMON_HEADERS})
 execute_process(COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/checks/plan_build_info.py" --output "${PLAN_INFO_CPP}"
+    "--compiler=${BISHENG_CXX}" "--flags=${KERNEL_OPT_FLAGS};${SIMT_FLAGS}"
+    "--debug-info=${PLAN_PROFILE_DEBUG_INFO}" "--resource-usage=${PLAN_RESOURCE_USAGE}"
     RESULT_VARIABLE _info_result)
 if(NOT _info_result EQUAL 0)
     message(FATAL_ERROR "Plan source identity check failed")

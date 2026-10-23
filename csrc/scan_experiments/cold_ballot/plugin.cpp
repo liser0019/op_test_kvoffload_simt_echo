@@ -1,0 +1,5 @@
+#include "symbol_aliases.h"
+#include "variant_config.h"
+#include "../common/experiment_launch.h"
+#define PLAN_OP_NAME "plan_scan_cold_ballot"
+#include "../../plan_variants/common/plan_plugin_impl.h"

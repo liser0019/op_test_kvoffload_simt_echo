@@ -15,244 +15,6 @@
   },
   "variants": [
     {
-      "name": "baseline",
-      "op_name": "combo_bcde_fused_1024",
-      "kernel_name": "sparse_kv_plan_kernel_combo_bcde_fused_1024",
-      "path": "csrc/plan_variants/00_baseline",
-      "points": "",
-      "description": "原 BCDE + fused + 1024，计算源码逐字保留",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": true,
-      "hardware_verification_note": "用户已测试原基线",
-      "file_sha256": {
-        "kernel.cpp": "0b4edb82a6dcca1a30e4c80307dc9a03374f94df83576942bcded3372d177136",
-        "plugin.cpp": "cf8fcda79557a1081e478d9fc9a18481c396926f3f8b31034e3b39b8de2f1799",
-        "symbol_aliases.h": "9a31e708f50b68fc73e9978131635dcec1394715df7e29a15c63c035193c6b11",
-        "upstream/plugin_registered.h": "ac5a266bae83c60ce0e0ccfd9c417561ef9ba656781324a70392cdc8298cb3d1",
-        "upstream/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-        "upstream/sparse_kv_plan_kernel.cpp": "1114df2886bcd89986ec3efb57e94e638ddbc4975939c394b5bc44a18b199542",
-        "upstream/sparse_kv_plan_launch.h": "3c835c24a968bc1bff4089d5516a99e439c6534e203247a8a41ed4422007c957",
-        "upstream/sparse_kv_plan_plugin.cpp": "4da3cb003530637eaaa064bd94bd0dde44c28c253ec0db705420b07b88c3b236"
-      }
-    },
-    {
-      "name": "a_no_pending",
-      "op_name": "plan_a_no_pending",
-      "kernel_name": "sparse_kv_plan_kernel_plan_a_no_pending",
-      "path": "csrc/plan_variants/01_a_no_pending",
-      "points": "A",
-      "description": "删除 PENDING_SLOT 中间写入及清理",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "47b037ecb769dcd97259262b72d013d7decdef54130d2ca91db2be61e2d5c452",
-        "symbol_aliases.h": "77da2b073bc28d84bcf6703a119c60e9351fd12a68707969fc6c3d68028ad093",
-        "variant_config.h": "486aed1547345c710e15142e5e3d3efc5c513feaa8fc20cdf0ebb072495cebd7"
-      }
-    },
-    {
-      "name": "b_scratch_lru",
-      "op_name": "plan_b_scratch_lru",
-      "kernel_name": "sparse_kv_plan_kernel_plan_b_scratch_lru",
-      "path": "csrc/plan_variants/02_b_scratch_lru",
-      "points": "B",
-      "description": "LRU 重建读取已有 scratch 槽号，不回读 missSlots",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "316ac9e8b9b770cdbf0c39ed6aed43b6c028cbf87f7448913c4b86edd1e4d441",
-        "symbol_aliases.h": "81c8655cb4828445f5d59b4b083cadd0f7fc63ff93a0b5ef357b564e3bf529d2",
-        "variant_config.h": "576538b6cf02091e999cbfec23536a29fbd972eccaf296a34c9f045b601f479a"
-      }
-    },
-    {
-      "name": "c_tail_clear",
-      "op_name": "plan_c_tail_clear",
-      "kernel_name": "sparse_kv_plan_kernel_plan_c_tail_clear",
-      "path": "csrc/plan_variants/03_c_tail_clear",
-      "points": "C",
-      "description": "miss 输出只清理未分配尾部",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "1067ab721bf2aeafac25ef55b90b00459fa052e4c9e0d811ca9efe5e00cc19dd",
-        "symbol_aliases.h": "23c445fd08a64e35fc8012afb70412b02cc6125df38f1e0cf08f6e101e6f2c4b",
-        "variant_config.h": "e2693f8684f74a1dffbc2ceeaf7e5ba4473febac7b1dbdebf70135a5151096a2"
-      }
-    },
-    {
-      "name": "d_packed_owner",
-      "op_name": "plan_d_packed_owner",
-      "kernel_name": "sparse_kv_plan_kernel_plan_d_packed_owner",
-      "path": "csrc/plan_variants/04_d_packed_owner",
-      "points": "D",
-      "description": "安全范围内打包 order/slot；capacity>32768 保留原路径",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "1d70b81491d299e16b7b5e5c16f23108cbd925f1ddd92787e7493e1a88e874e6",
-        "symbol_aliases.h": "d1ec7e255c8c059f9edf83831d902d4b9b7c2f301068243831dafa1eba92afb6",
-        "variant_config.h": "9cacff6ff7e9794bcf1387dff4b4043b006d88d807baa7b7124e2e46ca381030"
-      }
-    },
-    {
-      "name": "e_row_context",
-      "op_name": "plan_e_row_context",
-      "kernel_name": "sparse_kv_plan_kernel_plan_e_row_context",
-      "path": "csrc/plan_variants/05_e_row_context",
-      "points": "E",
-      "description": "行元数据外提、非负可见长度、二次幂页号移位与稳定前缀区间",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "ebbb59972d5a590ec18cf8c47dabd9701af2f6e9013f26480d08edba12407f42",
-        "symbol_aliases.h": "6a22b62d85d4ab667b83f9d745d79c56cc9b3f2ea13c793b904eefcaec87ca53",
-        "variant_config.h": "d7b1a958380f4fba5c9d604c36cde2589aba785aa596e95607acbf87a6d2dcbc"
-      }
-    },
-    {
-      "name": "f_warp_total",
-      "op_name": "plan_f_warp_total",
-      "kernel_name": "sparse_kv_plan_kernel_plan_f_warp_total",
-      "path": "csrc/plan_variants/06_f_warp_total",
-      "points": "F",
-      "description": "单 warp 的二级 Scan 特化，省略总数回传 shuffle",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "08c16e0ab750aa29537f5e26731e1d845ee1812f899cb921f1b0aa735df9dbbe",
-        "symbol_aliases.h": "163e649f76b0bbc8693c4248251770071c8c7fc6f5f8a75c4a18d7f064da78b9",
-        "variant_config.h": "61bab038b157f7a4b0d38fc13d6c611b2822818b35c7c984ef20bbf254ef07cb"
-      }
-    },
-    {
-      "name": "g_reset_merge",
-      "op_name": "plan_g_reset_merge",
-      "kernel_name": "sparse_kv_plan_kernel_plan_g_reset_merge",
-      "path": "csrc/plan_variants/07_g_reset_merge",
-      "points": "G",
-      "description": "每线程判断 reset，合并热路径输出/hash 初始化同步",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "77aead4dad86b77a87cbe9b54acc27cd417024d41da817806979b96363c75df6",
-        "symbol_aliases.h": "2a7185127a29ce0fc59d086c296952a3b06ef58da3942563029271df002fa48d",
-        "variant_config.h": "718689da37147c0fa4e412a900178cc361375edc970d748134a73eb123370fd9"
-      }
-    },
-    {
-      "name": "h_tile_sync",
-      "op_name": "plan_h_tile_sync",
-      "kernel_name": "sparse_kv_plan_kernel_plan_h_tile_sync",
-      "path": "csrc/plan_variants/08_h_tile_sync",
-      "points": "H",
-      "description": "利用下轮 Scan 同步，保留末 tile 屏障，减少中间 tile 尾屏障",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "a0828acd6939093687f8fa12df8af0332cdf23e1304810cda2935c850d4617e4",
-        "symbol_aliases.h": "19ec079acd21374fdeecb2767f2f289272cf13aa1fa02189cbb93bb189bb8b86",
-        "variant_config.h": "713a641341c8243949b56c9749c06bb29380a33d128d6903b49218106179561b"
-      }
-    },
-    {
-      "name": "ab",
-      "op_name": "plan_ab",
-      "kernel_name": "sparse_kv_plan_kernel_plan_ab",
-      "path": "csrc/plan_variants/09_ab",
-      "points": "AB",
-      "description": "A+B，并删除失去数据依赖的分配后屏障",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "d2a6bc40bf6117e4128b062fadbe0fb291890afc2243f72dcdf47facef107faa",
-        "symbol_aliases.h": "1eac0f9d2ad5084eb7d792ac16e3931ce56d22b747fde7aa933a2e2c0a8a62e8",
-        "variant_config.h": "26d996703beda79dd0aa66b6aac969bf6a077463405ee65a6a640113d21f3fa5"
-      }
-    },
-    {
-      "name": "abc",
-      "op_name": "plan_abc",
-      "kernel_name": "sparse_kv_plan_kernel_plan_abc",
-      "path": "csrc/plan_variants/10_abc",
-      "points": "ABC",
-      "description": "A+B+C",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "d55b482f65d2272c6e06ee495fd50c10080f70b8bd99b9d55b7169aace07a4f8",
-        "symbol_aliases.h": "18e02bf8eab3bd4ba2a7cc3785eae514390ebb7375970bc1f6729c9817c07ce2",
-        "variant_config.h": "7bb9d40c9274de534763c3998c7614d9dd9e71601d3516bc378a4625332a48ab"
-      }
-    },
-    {
-      "name": "abcd",
-      "op_name": "plan_abcd",
-      "kernel_name": "sparse_kv_plan_kernel_plan_abcd",
-      "path": "csrc/plan_variants/11_abcd",
-      "points": "ABCD",
-      "description": "A+B+C+D",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "bb2d922a95cb48b3efccb395dd8de0c19b9bf2220a288409833e66f3a1c1cca8",
-        "symbol_aliases.h": "2cc0da935864c2f6bca7b4f4104e7f0712df7bd0e78f53fe3e0306475dd188be",
-        "variant_config.h": "387819e7fd370cbc97c204b8c9b103f429c7b0dce8e8d35df6db48da37e754cf"
-      }
-    },
-    {
-      "name": "abcde",
-      "op_name": "plan_abcde",
-      "kernel_name": "sparse_kv_plan_kernel_plan_abcde",
-      "path": "csrc/plan_variants/12_abcde",
-      "points": "ABCDE",
-      "description": "ABCD + 行上下文优化",
-      "threads": 1024,
-      "capacity_arrays": 1,
-      "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
-      "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "830822c3f5d6f198b674a894aa89691cc24681cdb482d2d4a21eeb0aee25d18b",
-        "symbol_aliases.h": "abecabc7bb7bb87e9bc09692c888f3763205e95aa9d0256fa2343f0a10de01b1",
-        "variant_config.h": "af934bbc6456c136a32a5b8ab01fc3abf6be48d86fad7d849ab3842214c25ae3"
-      }
-    },
-    {
       "name": "abcdf",
       "op_name": "plan_abcdf",
       "kernel_name": "sparse_kv_plan_kernel_plan_abcdf",
@@ -262,84 +24,444 @@
       "threads": 1024,
       "capacity_arrays": 1,
       "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "hardware_verification_note": "ABCDF计算源由用户先前验证；本轮MTP框架/新编译产物仍需独立上机",
       "file_sha256": {
         "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
         "plugin.cpp": "2f53c4be78e464155a269b7d28690d8fd64fcc1d30ed4adcd3bdd0bb4d1265c0",
         "symbol_aliases.h": "ebd3154a22efcb5a77195e13f090fb0c89ea6541f874f7a8df9c357992796006",
         "variant_config.h": "e46868124d3b5b534852f3fb6ad2044af9671e43414d43b15d677896e7a9ec43"
+      },
+      "experiment_id": "V000/F0",
+      "scan_strategy": {
+        "miss": 0,
+        "lru": 0,
+        "self_reduce": 0,
+        "cold_ballot": 0
       }
     },
     {
-      "name": "abcdg",
-      "op_name": "plan_abcdg",
-      "kernel_name": "sparse_kv_plan_kernel_plan_abcdg",
-      "path": "csrc/plan_variants/14_abcdg",
-      "points": "ABCDG",
-      "description": "ABCD + reset 同步合并",
+      "name": "v100",
+      "op_name": "plan_scan_v100",
+      "kernel_name": "sparse_kv_plan_kernel_scan_v100",
+      "path": "csrc/scan_experiments/v100",
+      "points": "ABCDF",
+      "experiment_id": "V100",
+      "description": "Miss Ballot",
       "threads": 1024,
       "capacity_arrays": 1,
       "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 1,
+        "lru": 0,
+        "self_reduce": 0,
+        "cold_ballot": 0
+      },
       "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "540c46457549988e81f3a9d7e03fcabf9ed2d021f1a1a6f06a1e5f9fb2bf9248",
-        "symbol_aliases.h": "61a01256c236961a522c530fdb03c209ac52ae924ea7a09ff96d2993e61d54dc",
-        "variant_config.h": "335d7325d4851d8484862feae702365b5ceed759ab983b87c76cab5ddeeb9a69"
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "10fae46ec15242d341fed3d10e490b7f3808914e224f766abd4e3afb47df923c",
+        "symbol_aliases.h": "38c5804d9699809af1f7d1d5c784e4a38a8c2c66ff9af31992c2b104424d83db",
+        "variant_config.h": "ce7410fc4abc24beb62ce23ade4af586622af333ba7e0bc7f06ab24940c34bd5"
       }
     },
     {
-      "name": "abcdh",
-      "op_name": "plan_abcdh",
-      "kernel_name": "sparse_kv_plan_kernel_plan_abcdh",
-      "path": "csrc/plan_variants/15_abcdh",
-      "points": "ABCDH",
-      "description": "ABCD + tile 同步削减",
+      "name": "v010",
+      "op_name": "plan_scan_v010",
+      "kernel_name": "sparse_kv_plan_kernel_scan_v010",
+      "path": "csrc/scan_experiments/v010",
+      "points": "ABCDF",
+      "experiment_id": "V010",
+      "description": "LRU Dual Ballot",
       "threads": 1024,
       "capacity_arrays": 1,
       "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 0,
+        "lru": 1,
+        "self_reduce": 0,
+        "cold_ballot": 0
+      },
       "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "9f8af35e39b621c74ebf57e29443bc8421ccab8cd7356ab216dbaeb9328fc8d6",
-        "symbol_aliases.h": "f25981ef5963ded678996c630a6db1699928ba346171eaf256dfcd4329b5cabb",
-        "variant_config.h": "def5840c8fa5935fc2f8c18241510f88bb450e08d1f48e3ca78aff5b60f9aef1"
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "fb6be98ab2acaa51ad77869366fa2cefed8a464b8d21b62d7a67476406ee1a17",
+        "symbol_aliases.h": "d835e183e3050bd2bebd9af16057d412b41c8552d79167c97b60ba1083eed0dc",
+        "variant_config.h": "8d292dfab29184b79b17bb3cf0520a7bbd38a745b62498dc1bb18616f836c4b1"
       }
     },
     {
-      "name": "abcdefgh",
-      "op_name": "plan_abcdefgh",
-      "kernel_name": "sparse_kv_plan_kernel_plan_abcdefgh",
-      "path": "csrc/plan_variants/16_abcdefgh",
-      "points": "ABCDEFGH",
-      "description": "全部八项组合；收益需实测",
+      "name": "v001",
+      "op_name": "plan_scan_v001",
+      "kernel_name": "sparse_kv_plan_kernel_scan_v001",
+      "path": "csrc/scan_experiments/v001",
+      "points": "ABCDF",
+      "experiment_id": "V001",
+      "description": "Warp SelfReduce",
       "threads": 1024,
       "capacity_arrays": 1,
       "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 0,
+        "lru": 0,
+        "self_reduce": 1,
+        "cold_ballot": 0
+      },
       "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "3e5b1c1307b646693893b59cc9b119d9f129e407d7100d777b00bacfb4ffba7f",
-        "symbol_aliases.h": "3511e66ff96165c8f2e17923236b5353728a334c4afe9e9281dc910c4a6cd0c7",
-        "variant_config.h": "ffea0aff7164ffc70cd15198c6839aa035bb3be8dcddadd0629e67214e60b0cb"
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "20c779b8062ccd8cf9ae686b7c3a430894189b27bc8990b5227c8299b97e4ad4",
+        "symbol_aliases.h": "ceb73f7a4bcc6769a47fa1052aece681f6a111d6892edfe054b4ff4d0d067129",
+        "variant_config.h": "6f2c4bde8904e8f9f22bfa898e3c4e0ac70d05e569519afefe33ac7bbd1d6207"
       }
     },
     {
-      "name": "abcdfh",
-      "op_name": "plan_abcdfh",
-      "kernel_name": "sparse_kv_plan_kernel_plan_abcdfh",
-      "path": "csrc/plan_variants/17_abcdfh",
-      "points": "ABCDFH",
-      "description": "ABCD + Scan 总数特化 + tile 同步削减",
+      "name": "v110",
+      "op_name": "plan_scan_v110",
+      "kernel_name": "sparse_kv_plan_kernel_scan_v110",
+      "path": "csrc/scan_experiments/v110",
+      "points": "ABCDF",
+      "experiment_id": "V110",
+      "description": "Miss + LRU Ballot",
       "threads": 1024,
       "capacity_arrays": 1,
       "hardware_verified": false,
-      "hardware_verification_note": "待 CANN 编译与 NPU 实测",
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 1,
+        "lru": 1,
+        "self_reduce": 0,
+        "cold_ballot": 0
+      },
       "file_sha256": {
-        "kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
-        "plugin.cpp": "daa0d211d4cb80c3f74150e4554f5d4fe19e4c5e670e6593bdc69a028b3880bb",
-        "symbol_aliases.h": "838b577aa2cf93f8c6332aa8c18a7f16a051345501f3649ce015c25aba328b95",
-        "variant_config.h": "01af6f79f0f76395adfa47d7178add879fed5c1179a8286e06b25223254e3f9a"
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "7b283fde3124500cd1d7191ae9c9ea4f17b520ed90632035ca8c7401436c5dab",
+        "symbol_aliases.h": "83608cc57cf77fe51daeb1c510941641087d2e2b711e7cb954ede76f560bb2b3",
+        "variant_config.h": "9694ebac4023b542dea5228cfa130706addc0b9aaebdc73ade13890be18b2d19"
+      }
+    },
+    {
+      "name": "v101",
+      "op_name": "plan_scan_v101",
+      "kernel_name": "sparse_kv_plan_kernel_scan_v101",
+      "path": "csrc/scan_experiments/v101",
+      "points": "ABCDF",
+      "experiment_id": "V101",
+      "description": "Miss Ballot + SelfReduce",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 1,
+        "lru": 0,
+        "self_reduce": 1,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "d82e5e6fe7990b3f28410af7a26cbf5317da5943709e4e42d134c8e32f795338",
+        "symbol_aliases.h": "fccd1f257c4cce809043ada001decc42087b52bf8d312cf19480577705e19997",
+        "variant_config.h": "500aabb070c6fdbf20f3805bdba1ff9c9a6ed86a1d4ab0599b9329fb2fca0925"
+      }
+    },
+    {
+      "name": "v011",
+      "op_name": "plan_scan_v011",
+      "kernel_name": "sparse_kv_plan_kernel_scan_v011",
+      "path": "csrc/scan_experiments/v011",
+      "points": "ABCDF",
+      "experiment_id": "V011",
+      "description": "LRU Ballot + SelfReduce",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 0,
+        "lru": 1,
+        "self_reduce": 1,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "7a64c7fbd856254df749d3d5240b274f044eebe32a84b055c6a73df5272f0d71",
+        "symbol_aliases.h": "015b519cd51ee7383f7250d444f50666cf24ddc9dc0385c4222a01dd454d6190",
+        "variant_config.h": "a51b58f9720215fabde1699e4034b1c8dfec6ae69fc65b46755b84caa258498a"
+      }
+    },
+    {
+      "name": "v111",
+      "op_name": "plan_scan_v111",
+      "kernel_name": "sparse_kv_plan_kernel_scan_v111",
+      "path": "csrc/scan_experiments/v111",
+      "points": "ABCDF",
+      "experiment_id": "V111",
+      "description": "Miss + LRU Ballot + SelfReduce",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 1,
+        "lru": 1,
+        "self_reduce": 1,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "243bbb6d31c59fc0fd0c4b1d02bc63af633560b4166b4929d26713793088abaa",
+        "symbol_aliases.h": "aa6533dac5b08d62683ff6e2bf98795a0199398242d044e8a5fe7aba11d88443",
+        "variant_config.h": "446931a6f7dd46c9f6d0385f67438bede354a533fc1b142114287f0924532cf4"
+      }
+    },
+    {
+      "name": "s01",
+      "op_name": "plan_scan_s01",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s01",
+      "path": "csrc/scan_experiments/s01",
+      "points": "ABCDF",
+      "experiment_id": "S01",
+      "description": "Whole LRU",
+      "threads": 1024,
+      "capacity_arrays": 2,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 0,
+        "lru": 2,
+        "self_reduce": 0,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "790b4b4735424add1c71ef9bc4f7becac73eb3793af6684b0b6586c05c20bc5c",
+        "symbol_aliases.h": "05b956607a0f1f16416d487f0a59ea735cfc35205bd164f3340f7bb70c69434d",
+        "variant_config.h": "c7a362bdfe87fcec6486784eb6c0b18d633110c5c40526f64108a32b972ef09a"
+      }
+    },
+    {
+      "name": "s02",
+      "op_name": "plan_scan_s02",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s02",
+      "path": "csrc/scan_experiments/s02",
+      "points": "ABCDF",
+      "experiment_id": "S02",
+      "description": "Whole LRU + Miss Ballot",
+      "threads": 1024,
+      "capacity_arrays": 2,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 1,
+        "lru": 2,
+        "self_reduce": 0,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "53977b59ea3ee49f3f0772d07675dd0eb7a26651b66cfff871cd854c172fa2de",
+        "symbol_aliases.h": "6df35b90e00d787783b999c06e417439f1249a0bed09388082888243f033ed81",
+        "variant_config.h": "8f5c50025b2fa300923bbfbbf2db51f30b300ce644f397c38dd8debb30bb9745"
+      }
+    },
+    {
+      "name": "s03",
+      "op_name": "plan_scan_s03",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s03",
+      "path": "csrc/scan_experiments/s03",
+      "points": "ABCDF",
+      "experiment_id": "S03",
+      "description": "Whole LRU + Miss SelfReduce",
+      "threads": 1024,
+      "capacity_arrays": 2,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 0,
+        "lru": 2,
+        "self_reduce": 1,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "1609a4b3a2de2f5278e5bc23125fbb03a9943aeb460b93bac12c11ea9d585be9",
+        "symbol_aliases.h": "8ca38c5e3117f3258d9a42f9db78b4dd07c305a2c9c72cc887829e12949f8138",
+        "variant_config.h": "34967db76b0d7542556870a0c1938a9815f6f8083db3eac1d73544128fc6179d"
+      }
+    },
+    {
+      "name": "s04",
+      "op_name": "plan_scan_s04",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s04",
+      "path": "csrc/scan_experiments/s04",
+      "points": "ABCDF",
+      "experiment_id": "S04",
+      "description": "Whole LRU + Miss Ballot/SelfReduce",
+      "threads": 1024,
+      "capacity_arrays": 2,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 1,
+        "lru": 2,
+        "self_reduce": 1,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "6c42470fef3847b6c4577d1eafb1229827eee45397df3c8a732e919f519db7d6",
+        "symbol_aliases.h": "3e6c5ff23140fc2ad6c886cfffd71f198d5f32b8a602d1a745ce49e7466a6d0f",
+        "variant_config.h": "5ad7b5e43d9807dbcaa17a784fb131972c8a2bb41b1d123e5748e04e9fc8dc04"
+      }
+    },
+    {
+      "name": "s05",
+      "op_name": "plan_scan_s05",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s05",
+      "path": "csrc/scan_experiments/s05",
+      "points": "ABCDF",
+      "experiment_id": "S05",
+      "description": "Whole Miss",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 2,
+        "lru": 0,
+        "self_reduce": 0,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "481a3107fff04a6e1491a82a1e6aa4e25a01ab560f60cebbbb887c8d6c11e50c",
+        "symbol_aliases.h": "df7a16aefc58ee925c48ffa6b8fd6fcffe2021434b846a24f3bf17131ed5f749",
+        "variant_config.h": "eb695a9bdd8a45dba7d11fa24737dd926e2e7e5ab758abe96bb6d05ff8455d8d"
+      }
+    },
+    {
+      "name": "s06",
+      "op_name": "plan_scan_s06",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s06",
+      "path": "csrc/scan_experiments/s06",
+      "points": "ABCDF",
+      "experiment_id": "S06",
+      "description": "Whole Miss + LRU Ballot",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 2,
+        "lru": 1,
+        "self_reduce": 0,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "d3f5cc7207b7eb09b81be3c2ed66f07d8655f320a54b5ec53334b159a5d3663f",
+        "symbol_aliases.h": "6d059faf6d0eb333e0959d801deaec9a3a8f80d6b0600c8eedd7b0fc7974aec7",
+        "variant_config.h": "07556637076d8e88fae969f885a53812a0be42e2899099cb9298a96a1a17e8e0"
+      }
+    },
+    {
+      "name": "s07",
+      "op_name": "plan_scan_s07",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s07",
+      "path": "csrc/scan_experiments/s07",
+      "points": "ABCDF",
+      "experiment_id": "S07",
+      "description": "Whole Miss + LRU SelfReduce",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 2,
+        "lru": 0,
+        "self_reduce": 1,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "2064133179f2b9073ff22ab0dbb60be7d99b0bdab687ebac84f09aeb472c2ebb",
+        "symbol_aliases.h": "a4415abd68f3cee77308462e9b82223aa374396206c716f8be8e56396566c239",
+        "variant_config.h": "ff7f48df783e60aa349926d94fc9bc9765700e1c09413db776dd638e07bb4927"
+      }
+    },
+    {
+      "name": "s08",
+      "op_name": "plan_scan_s08",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s08",
+      "path": "csrc/scan_experiments/s08",
+      "points": "ABCDF",
+      "experiment_id": "S08",
+      "description": "Whole Miss + LRU Ballot/SelfReduce",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 2,
+        "lru": 1,
+        "self_reduce": 1,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "c3c4fa38aaf317afee0edafe9ecea8f965cdf243df2aa206ef773b4b20c5a30d",
+        "symbol_aliases.h": "1dd56e59940349e9131c7b11ce00a244476a2333f64b7fdf8e8162a08b850205",
+        "variant_config.h": "11bccb776570ac66913ce8acd21e04457ebd1a0c1d0d2f93e3360d8f5c3363eb"
+      }
+    },
+    {
+      "name": "s09",
+      "op_name": "plan_scan_s09",
+      "kernel_name": "sparse_kv_plan_kernel_scan_s09",
+      "path": "csrc/scan_experiments/s09",
+      "points": "ABCDF",
+      "experiment_id": "S09",
+      "description": "Whole LRU + Whole Miss",
+      "threads": 1024,
+      "capacity_arrays": 2,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 2,
+        "lru": 2,
+        "self_reduce": 0,
+        "cold_ballot": 0
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "cf883a03f75a706495f30877a679847173deafa47cb746aefe03a6a31ef9ac51",
+        "symbol_aliases.h": "56b573820fb08796492e9271f90b4f9b083b8c70f0af8411264302a573e7147d",
+        "variant_config.h": "b68c3fc7d84048031f41d8daf2f8e6f3969d8c447ba5c3dfaa397d75c8d55561"
+      }
+    },
+    {
+      "name": "cold_ballot",
+      "op_name": "plan_scan_cold_ballot",
+      "kernel_name": "sparse_kv_plan_kernel_scan_cold_ballot",
+      "path": "csrc/scan_experiments/cold_ballot",
+      "points": "ABCDF",
+      "experiment_id": "F1",
+      "description": "Cold-only Ballot (F1)",
+      "threads": 1024,
+      "capacity_arrays": 1,
+      "hardware_verified": false,
+      "hardware_verification_note": "仅完成源码实现；待CANN 9.1编译、NPU正确性与性能验证",
+      "scan_strategy": {
+        "miss": 0,
+        "lru": 0,
+        "self_reduce": 0,
+        "cold_ballot": 1
+      },
+      "file_sha256": {
+        "kernel.cpp": "83bf8502a062ff187d8d779249dde90d807d6e67da01a93390c281e79007112a",
+        "plugin.cpp": "7403abfe288cdbc34d0fb93fce2729820f9747b1d6aa550af451f746aa33c934",
+        "symbol_aliases.h": "fd312711a9340b2423daf24b2a675db8088cce8443aac5d2c4d709b9e6c2e173",
+        "variant_config.h": "3fab49e769af5836d83d8532400bb83dee124bf89919555f8606cca4b7fb319d"
       }
     }
   ],
@@ -347,6 +469,36 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "6564d52abe1b41ca60df8b4bb27dae6cc4fa0430473b6c3bfeb0056a4ef25e84",
     "csrc/plan_variants/common/plan_plugin_impl.h": "0d344379aa4f7f406f5adfe55f52dc67ec8c8883b544d3e50253d5da58d4bd05",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "csrc/plan_variants/common/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222"
-  }
+    "csrc/plan_variants/common/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222",
+    "csrc/scan_experiments/common/experiment_kernel_impl.h": "4314fa4e850c271c5fc02a6939b03ea3b6a7d09e72f09b9b011b74608abf5e5a",
+    "csrc/scan_experiments/common/experiment_launch.h": "2c0961ce62f089ffbe48df26bd2968105ab183f2fe0872bed7707db53fe12075",
+    "mtp_cases.py": "72bc420b5751f2d17cd21c32b04079c36e36d94ca49c9f4e6f7f7454a0325195",
+    "compare.py": "a0a1850a24203d005ad321ab1fd5b0af2c979da7f03399626628594b0e474bcf",
+    "profile_plan_variants.py": "e08ba8f87ef7c87773502a558c2a4388f1f919fe9001f741e77fab593719900c",
+    "profile_mtp_matrix.py": "fed9dcd44fd04d64b522e1d0fc37b1982611de5cc194852c04b51d9d8fca1be9",
+    "run_msopprof.py": "36aed7e5ddee45e54b528546dc4843fb9f9377d53c08bf439155045eebdb135b",
+    "checks/check_mtp_scan.py": "ac4254ef0de7854720f46bb189c5d8a2a567758e1ddb9555ad3a2b915f4c57cb",
+    "checks/plan_build_info.py": "199107cdfb4cc67d8edc4db5025edb13384641af177290338ef6240c0102e9fc",
+    "checks/check_plan_goldens.py": "552672b6d4a82aa3308752cbe30734fbd6e5d4d8d7f1e3824e99a13f4f01dc55",
+    "checks/check_plan_layouts.py": "d818e847e3df907e0870546630936a237939cc7886bcab5529dee998db534faa",
+    "checks/check_plan_profiling.py": "6692bbd6dfbbb5d03fcada3822eaa5c516ab79096546ceba9f7509d4b7210cf2",
+    "CMakeLists.txt": "7193d600e2680cea25607ca5bfefbb29fabbf108d52198a34a8cb7daca5f28e4",
+    "build.sh": "2038d2c7df960f0d9384c5dbf1955b3f12ff9bfcfcbc81bf9d5e7a4ad96ff164",
+    "run_plan_suite.sh": "8b7ea4f2b3858f85b387a69041c548a9b3ca7897beb3b1db70ecd55685c66844",
+    "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462"
+  },
+  "reference": "abcdf",
+  "experiment_base_commit": "9cc99d5",
+  "experiment_feature_names": {
+    "A": "Miss Ballot",
+    "B": "LRU Dual Ballot",
+    "C": "Warp SelfReduce",
+    "D": "Whole LRU",
+    "E": "Whole Miss",
+    "F1": "Cold Ballot"
+  },
+  "hardware_validation": "not_run_on_development_machine",
+  "mtp_semantics": "mtp=draft_tokens; q_len=1+mtp; independent query-row state",
+  "reference_source_commit": "9cc99d5",
+  "historical_mask": 47
 }

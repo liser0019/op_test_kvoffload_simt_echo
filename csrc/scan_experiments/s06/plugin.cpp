@@ -1,0 +1,5 @@
+#include "symbol_aliases.h"
+#include "variant_config.h"
+#include "../common/experiment_launch.h"
+#define PLAN_OP_NAME "plan_scan_s06"
+#include "../../plan_variants/common/plan_plugin_impl.h"

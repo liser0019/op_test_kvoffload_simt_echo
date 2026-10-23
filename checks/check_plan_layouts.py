@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 from plan_build_info import ROOT, catalog_identity
+sys.path.insert(0, str(ROOT))
 
 spec = importlib.util.spec_from_file_location('comparison', ROOT / 'compare.py')
 b = importlib.util.module_from_spec(spec)
@@ -23,8 +25,9 @@ with tempfile.TemporaryDirectory(prefix='plan_host_layout_') as temporary:
         names.append(variant['name'])
         code = '#include <iostream>\n#include <cstddef>\n'
         code += f'#include "{path / "symbol_aliases.h"}"\n'
-        header = (path / "upstream/sparse_kv_plan_launch.h" if variant["name"] == "baseline"
-                  else ROOT / "csrc/plan_variants/common/sparse_kv_plan_launch.h")
+        code += f'#include "{path / "variant_config.h"}"\n'
+        header = (ROOT / "csrc/plan_variants/common/sparse_kv_plan_launch.h"
+                  if variant["name"] == "abcdf" else ROOT / "csrc/scan_experiments/common/experiment_launch.h")
         code += f'#include "{header}"\n'
         code += 'static_assert(sizeof(SparseKvPlanTilingData) == 80);\n'
         code += f'void probe_{index}() {{\n'
@@ -39,7 +42,9 @@ with tempfile.TemporaryDirectory(prefix='plan_host_layout_') as temporary:
         # At O0 the inline helpers are emitted; no mangled helper may alias another variant.
         symbols = subprocess.check_output(['nm', '-C', str(obj)], text=True)
         for helper in ['MakeSparseKvPlanTiling', 'SparseKvPlanRowElements', 'SparseKvPlanLocalMemoryBytes']:
-            assert helper + '_' + variant['op_name'] in symbols, (variant['name'], helper)
+            aliases = (path / 'symbol_aliases.h').read_text()
+            actual_name = re.search(r'^#define ' + helper + r' (\w+)$', aliases, re.M).group(1)
+            assert actual_name in symbols, (variant['name'], helper)
         objects.append(str(obj))
     main = directory / 'main.cpp'
     main.write_text(''.join(f'void probe_{index}();\n' for index in range(len(names))) +

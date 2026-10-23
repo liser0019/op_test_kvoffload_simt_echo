@@ -56,6 +56,9 @@ def driver_source():
 
 def main():
     catalog = catalog_identity()
+    if any('scan_strategy' in variant for variant in catalog['variants']):
+        raise SystemExit('旧CPU shim不支持本轮Ballot/SelfReduce/整段Scan，禁止把原版计算冒充候选验证。'
+                         '请在服务器运行checks/check_mtp_scan.py --device 0 --production。')
     names = [x['name'] for x in catalog['variants']]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--variants', nargs='+', choices=names, default=names)
