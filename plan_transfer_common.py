@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 import compare as plan
+from harness_io import add_storage_arguments
 from full_cache_cases import (HIT_PERCENTAGES, make_full_cache_case, payload_pattern,
                               physical_tokens, reference_transfer_ids, assert_case, describe)
 
@@ -27,6 +28,8 @@ GLM_PRESET = {
 
 
 def add_arguments(parser):
+    add_storage_arguments(parser)
+    parser.add_argument("--launch-mode", choices=("legacy", "prepared"), default="legacy")
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--rows", type=int, default=32, help="本实验MTP关闭，一行一个请求")
     parser.add_argument("--topk", type=int, default=2048)
@@ -120,7 +123,7 @@ def prepare_sources(torch, case, bytes_k, bytes_v):
     return pools
 
 
-def prepare_case(torch, case, sources, bytes_k, bytes_v):
+def prepare_case(torch, case, sources, bytes_k, bytes_v, launch_mode="legacy"):
     golden = plan.reference_simt(case)
     assert_case(case, golden)
     expected_ids = reference_transfer_ids(case, golden["miss_count"], golden["miss_tokens"], golden["miss_slots"])
@@ -144,7 +147,28 @@ def prepare_case(torch, case, sources, bytes_k, bytes_v):
         state["payload"][key] = {"tensor": tensor, "initial": tensor.clone(),
                                   "storage": storage, "width": width, "kind": kind}
     torch.npu.synchronize()
+    state["launch_mode"] = launch_mode
+    if launch_mode == "prepared":
+        state["prepared"] = torch.classes.sparse_kv_plan_op.PreparedPlanTransfer(
+            *prepared_arguments(case, inputs, state))
+        state["prepared_info"] = json.loads(state["prepared"].info())
+        torch.npu.synchronize()
+    elif launch_mode != "legacy":
+        raise ValueError("未知launch_mode")
     return inputs, initial, state, golden, expected_ids
+
+
+def prepared_arguments(case, inputs, state):
+    """与C++上下文绑定的唯一顺序；每次run用同一组Tensor做元信息校验。"""
+    p = [inputs[key] for key in ("req_ids", "topk_indices", "stable_prefix_lens",
+        "visible_seq_lens", "token_to_req", "block_table", "active_rows")]
+    p += [state[key] for key in (*plan.SIMT_STATE, *plan.SIMT_OUTPUT, "workspace")]
+    sources = state["sources"]
+    x = [sources["bases"], sources["k"], sources["v"],
+         state["payload"]["k"]["tensor"], state["payload"]["v"]["tensor"]]
+    attrs = [case[key] for key in ("topk", "capacity", "max_token", "block_size", "host_num_blocks")]
+    attrs += [state["payload"][key]["width"] for key in ("k", "v")]
+    return p, x, attrs
 
 
 def restore(torch, initial, state, mode, poison=False):
@@ -162,6 +186,9 @@ def restore(torch, initial, state, mode, poison=False):
 
 
 def invoke(torch, mode, case, inputs, state):
+    if state.get("launch_mode") == "prepared":
+        state["prepared"].run(*prepared_arguments(case, inputs, state), mode)
+        return
     if mode != "transfer":
         plan.invoke(torch, "abcdf", case, inputs, state)
     if mode != "plan":
@@ -200,7 +227,7 @@ def check_result(case, state, golden, expected_ids, mode, phase):
 def prime_transfer(torch, case, inputs, initial, state, golden):
     """Transfer-only也由真实ABCDF产生miss输入，禁止用golden重写设备miss输出。"""
     restore(torch, initial, state, "plan", poison=True)
-    plan.invoke(torch, "abcdf", case, inputs, state)
+    invoke(torch, "plan", case, inputs, state)
     torch.npu.synchronize()
     plan.check_npu_result("abcdf", state, {"abcdf": golden}, "transfer-only/real-plan")
 

@@ -218,9 +218,9 @@ extern "C" uint32_t sparse_kv_transfer_block_dim() {
   return cores < 64U ? cores : 64U;
 }
 extern "C" void launch_sparse_kv_transfer(
-    void* missCount, void* missTokens, void* missSlots, void* tokenToReq, void* blockTable,
-    void* hostCacheBases, void* activeRows, void* residentK, void* residentV,
-    void* tiling, uint32_t blockDim, void* stream) {
+    GM_ADDR missCount, GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR tokenToReq, GM_ADDR blockTable,
+    GM_ADDR hostCacheBases, GM_ADDR activeRows, GM_ADDR residentK, GM_ADDR residentV,
+    GM_ADDR tiling, uint32_t blockDim, void* stream) {
   sparse_kv_transfer_kernel<<<blockDim, TRANSFER_DIRECT_UB_BYTES, stream>>>(
       missCount, missTokens, missSlots, tokenToReq, blockTable, hostCacheBases,
       activeRows, residentK, residentV, tiling);

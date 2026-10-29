@@ -219,4 +219,5 @@ if(NOT _transfer_info_result EQUAL 0)
     message(FATAL_ERROR "Transfer source identity check failed")
 endif()
 target_sources(simt_plan_variants_ops PRIVATE
-    "${TRANSFER_DIR}/plugin.cpp" "${TRANSFER_INFO_CPP}" "${TRANSFER_OBJECT}")
+    "${TRANSFER_DIR}/plugin.cpp" "${TRANSFER_DIR}/prepared.cpp"
+    "${TRANSFER_INFO_CPP}" "${TRANSFER_OBJECT}")

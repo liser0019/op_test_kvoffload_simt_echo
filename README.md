@@ -1,6 +1,6 @@
 # 满缓存75% / 90% / 100%：ABCDF Plan 与 Transfer
 
-当前分支：`feat/abcdf-transfer-full-cache`，基于 `85ebbb6`。
+当前分支：`fix/abcdf-plan-transfer-harness`，基于 `feat/abcdf-transfer-full-cache@fcbaa31`。
 保留原ABCDF，接入生产SparseKvTransfer，默认抓串联两条kernel各自延时。
 默认模型预设为你提供的GLM MLA BF16：**压缩KV 1024B + RoPE K 128B/token**。
 
@@ -10,10 +10,15 @@
 
 ```bash
 bash build.sh --soc=ascend950 --plan-transfer
-bash run_plan_transfer.sh 0
+bash run_plan_transfer.sh 0 --launch-mode legacy --temp-dir /dev/shm/plan_transfer_tmp
+bash run_plan_transfer.sh 0 --launch-mode prepared --temp-dir /dev/shm/plan_transfer_tmp
 ```
 
-第二条先做正确性门禁，再采集75%、90%、100%三档。
+两个采集入口先对所选启动方式做完整正确性门禁，再采集75%、90%、100%三档。
+独立checks/check_plan_transfer.py默认同时检查legacy/prepared，便于上机验收。
+legacy保留逐次tiling上传；prepared在setup阶段准备两条kernel的tiling与核数，
+由调用方持有上下文，通过一次队列回调连续下发原kernel。默认仍为legacy。
+尚未上机验证prepared，不预先承诺gap缩小或消失。
 默认生产尺寸32请求、TopK2048、capacity4096、max_token262144；
 每行miss分别512、205、0。90%报告实际比例89.990234375%；
 所有槽初始占满，ID匹配且stable覆盖全部token，因此100%确实零miss。
@@ -23,6 +28,9 @@ bash run_plan_transfer.sh 0
 小尺寸试跑与Host内存预算见教程。默认一层Host池9GiB、resident payload144MiB，
 此外保留同等大小的设备恢复快照。
 结果包括每条kernel的P50/P95、实际配对busy/span与原始CSV；没有用Event代替设备duration。
+本轮补全gap的逐对P50/P95/样本数；运行前检查实际输出/临时目录的字节/inode余量及可写性。
+最低余量可配置，不是profiling大小预测；不检查源码分区空间，不自动清理或切换位置。
+详细日志为session下profile.log；只有COMPLETE.json和complete元数据同时存在才表示整轮成功。
 
 **本轮仅做源码修改和静态检查，未在本机执行构建、CPU检查或NPU测试。
 新Transfer接入及整套采集仍需服务器验证，不预先宣称可编译或有性能收益。**

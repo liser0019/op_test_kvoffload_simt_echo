@@ -1,6 +1,6 @@
 # 满缓存下的 ABCDF Plan / SparseKvTransfer 实验
 
-分支：`feat/abcdf-transfer-full-cache`，基于 `feat/abcdf-mtp-scan@85ebbb6`。
+分支：`fix/abcdf-plan-transfer-harness`，基于 `feat/abcdf-transfer-full-cache@fcbaa31`。
 Plan固定为原ABCDF（1024线程）；新接入生产工程中的SparseKvTransfer。
 本轮仅完成源码和静态检查，未在开发机执行Python、编译、CPU检查或NPU测试。
 下面所有运行命令均交给950PR服务器，不代表已验证成功。
@@ -119,6 +119,7 @@ python3 profile_plan_transfer.py --describe-only
 
 ```bash
 bash run_plan_transfer.sh 0 \
+  --launch-mode legacy --temp-dir /dev/shm/plan_transfer_tmp \
   --rows 2 --topk 256 --capacity 512 --max-token 8192 \
   --warmup 2 --repeat 3 --verify-each-sample \
   --output /dev/shm/plan_transfer_smoke
@@ -132,6 +133,7 @@ bash run_plan_transfer.sh 0 \
 
 ```bash
 bash run_plan_transfer.sh 0 \
+  --launch-mode legacy --temp-dir /dev/shm/plan_transfer_tmp \
   --rows 32 --topk 2048 --capacity 4096 --max-token 262144 \
   --warmup 10 --repeat 50 --output /dev/shm/plan_transfer_formal
 ```
@@ -144,6 +146,7 @@ bash run_plan_transfer.sh 0 \
 
 ```bash
 bash run_plan_transfer.sh 0 --modes plan transfer chain \
+  --launch-mode legacy --temp-dir /dev/shm/plan_transfer_tmp \
   --warmup 10 --repeat 50 --output /dev/shm/plan_transfer_three_modes
 ```
 
@@ -228,10 +231,140 @@ session_*/full_cache_hit75/chain/**/kernel_details.csv
 
 ```bash
 python3 checks/check_full_cache_inputs.py
-python3 -X faulthandler checks/check_plan_transfer.py --device 0 --production
+python3 checks/check_transfer_harness.py
+python3 -X faulthandler checks/check_plan_transfer.py --device 0 --production \
+  --launch-mode prepared --temp-dir /dev/shm/plan_transfer_tmp \
+  --report /dev/shm/plan_transfer_correctness/report.json
 ```
 
 官方Host映射依据：
 [aclrtHostRegisterV2，CANN9.1](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/API/runtimeapi/aclcppdevg_03_2128.html)、
 [Host锁页内存使用说明](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/others/acldevg/runtime_doc_dev_0006.html)。
 实际支持以目标950PR驱动/CANN环境及门禁结果为准。
+
+## 7. 本轮接入修复：GM_ADDR
+
+Transfer的10个设备地址参数在launch声明与定义中统一为GM_ADDR。
+Host编译时通过ifndef GM_ADDR回退为void*；设备编译先包含kernel_operator.h，
+保留其地址空间定义。调用kernel时直接传参，不用reinterpret_cast跨地址空间。
+原SparseKvTransferRuntimeKernel计算类及原ABCDF文件保持不变。
+用户报告该签名修复已在服务器验证；本次开发机没有编译或运行，不把历史结果当成本次验证。
+
+## 8. legacy / prepared如何对照
+
+### 两种路径的区别
+
+- legacy（默认）：沿用原来两个torch.ops调用。每次Plan、Transfer接入层各自创建、
+  上传tiling并查询核数；Transfer的阻塞tiling上传位于两次kernel下发之间。
+  这在源码上确认是可能引入同步/Host调度等待的路径，不能凭历史P50计算它的精确贡献。
+- prepared（显式选择）：每个用例创建调用方持有的C++ PreparedPlanTransfer对象，
+  在采集前上传两份tiling、取得两个blockDim，绑定原Plan的15张量与Transfer的5份资源。
+  chain用一次RunOpApi队列回调，在同一current stream连续下发原Plan和原Transfer。
+  回调两次launch之间没有tiling申请/上传、设备值CPU读取或显式同步。
+- prepared只改变Host启动方式，不改变计算kernel、query、状态恢复、golden、Host来源或cache policy。
+  它仍有框架派发/运行时启动成本；实际gap是否缩小须看本次CSV，不能预先声称已消除。
+
+上下文不使用全局缓存，资源由调用方与已排队回调持有。
+每次run校验属性、TensorImpl身份、地址、尺寸、步长、dtype和device；
+setup验证Host注册映射与DVA匹配，DVA表版本变化会拒绝。
+内容允许恢复或更新，但替换/resize绑定缓冲后必须重新prepare。
+close后拒绝run；最后释放资源时在目标调用之外等待设备，防止异步缓冲提前释放。
+本实验单线程、单current stream串行使用上下文；不要并发修改其绑定数据。
+采集入口只对所选启动方式过完整门禁；独立checker默认检查两路。
+因此prepared运行时失败不会阻止另一次显式legacy采集，失败路径也不会静默回退。
+资源清理遇到设备同步失败会告警并保留资源至进程退出，避免释放仍可能被访问的缓冲。
+
+### 服务器操作顺序
+
+进入新分支的源码目录并激活匹配环境，所有设备命令都使用逻辑卡0：
+
+```bash
+source /usr/local/Ascend/cann-9.1.0/set_env.sh
+unset ASCEND_LAUNCH_BLOCKING ASCEND_RT_VISIBLE_DEVICES
+ulimit -c 0
+export PYTHONDONTWRITEBYTECODE=1
+
+PYTHON=python3 JOBS=3 bash build.sh --soc=ascend950 --plan-transfer
+
+# CPU辅助回归：仅服务器执行
+python3 checks/check_transfer_harness.py
+
+# 两种启动路径及prepared失效上下文门禁（还没有正式profiling）
+python3 -X faulthandler checks/check_plan_transfer.py --device 0 \
+  --temp-dir /dev/shm/plan_transfer_tmp \
+  --report /dev/shm/plan_transfer_checks/report.json
+
+# 相同小尺寸、seed与字节宽度，分别试跑
+for launch in legacy prepared; do
+  bash run_plan_transfer.sh 0 --launch-mode "$launch" \
+    --temp-dir /dev/shm/plan_transfer_tmp \
+    --rows 2 --topk 256 --capacity 512 --max-token 8192 \
+    --seed 2026 --warmup 2 --repeat 3 --verify-each-sample \
+    --output "/dev/shm/plan_transfer_smoke_$launch"
+done
+
+# 同一生产尺寸/seed/预热次数/采集次数，顺序完成正式对照
+for launch in legacy prepared; do
+  bash run_plan_transfer.sh 0 --launch-mode "$launch" \
+    --temp-dir /dev/shm/plan_transfer_tmp \
+    --rows 32 --topk 2048 --capacity 4096 --max-token 262144 \
+    --seed 2026 --warmup 10 --repeat 50 \
+    --output "/dev/shm/plan_transfer_formal_$launch"
+done
+```
+
+两次采集是独立进程，虚拟地址可能不同；逻辑输入、payload生成规则与预热条件一致。
+报告记录launch_mode、case_sha256、库身份及实际字节数。对照前核对两次输入指纹相同。
+不要同时在同一卡运行两个采集；有条件时交换legacy/prepared执行先后再做复测。
+
+## 9. 目录门禁、日志与失败判断
+
+运行正式采集前（早于import torch_npu、NPU初始化和Host大池申请）：
+
+1. 检查实际输出目录及临时目录，解析符号链接后输出真实路径。
+2. 检查可写性、普通用户可用字节数和可用inode。
+3. 同一文件系统上，按两项字节最低余量之和检查；不重复承诺同一份空间。
+4. 设置TMPDIR并覆盖tempfile缓存路径，后续解析子进程继承该配置。
+5. Host池的9GiB是内存需求，profiling文件的磁盘余量另列。/dev/shm也会消耗主机内存，
+   需要同时容纳Host池、框架内存和采集文件。
+
+默认门限：输出1GiB、临时1GiB，各需1024个可用inode。
+门限只用于早期拒绝明显不足的环境，不能精确预测本次profiling文件大小，
+也不能保证采集期间其他进程不占空间。可以显式覆盖：
+
+```bash
+bash run_plan_transfer.sh 0 --launch-mode prepared \
+  --output /dev/shm/plan_transfer_capture --temp-dir /dev/shm/plan_transfer_tmp \
+  --min-output-free-bytes 1073741824 --min-temp-free-bytes 1073741824 \
+  --min-free-inodes 1024
+```
+
+只检查输出/临时文件系统，不因源码分区满而拒绝读取源码。
+不自动删除用户文件，也不静默切换位置；失败时需手动释放空间或显式改路径。
+程序只清理自己创建的空可写性探针。/dev/shm属于临时存储，测试后及时转存完整session。
+
+每轮会打印session路径和profile.log路径。详细日志捕获Python、原生库以及继承stdio的解析子进程输出。
+缺CSV或解析失败时，同时输出采集目录、详细日志路径和日志中首个可定位异常；
+原始采集文件保留。部分子进程可能另写日志，诊断还会扫描采集目录中的log/err文件。
+子进程重定向到其他位置的日志需按其错误提示继续查找。
+
+失败写capture_metadata.json采用best effort；再次遇到ENOSPC只告警并保留原始异常链，
+未完成的原子写入可能留下pending文件，不会删除已有采集文件。
+只有同时满足以下条件才可当作成功：
+
+- 本轮退出码为0；
+- capture_metadata.json的status是complete；
+- session根目录存在最后写入的COMPLETE.json；
+- report.md、原始CSV和各用例summary.json均在同一session中。
+
+即使满盘导致旧元数据未能从complete改成failed，缺失COMPLETE.json也必须判未完成。
+成功报告在所有状态/标记写入完成后才发布为report.md；发布前只会有partial/pending文件。
+如果最后发布失败，即使已写标记，缺失report.md也判未完成。
+部分用例的passed状态不能代表整轮通过。
+
+report.md和stage_summary.csv都展示Plan、Transfer、pair_busy、pair_span、
+between_kernel_gap的P50/P95及样本数。
+busy与gap均逐次配对计算后再统计，禁止用P50之和/差代替。
+span包含两kernel间隙；单kernel duration、busy、span均不是公共Python接口端到端延时。
+CSV继续严格验证目标名、μs单位、样本数、调用顺序和不重叠；
+导出stream/device列时也校验其一致性，恢复/TensorMove不混入单kernel duration。

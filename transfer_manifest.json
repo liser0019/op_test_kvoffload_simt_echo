@@ -12,7 +12,7 @@
   "compute_class_policy": "SparseKvTransferRuntimeKernel is byte-identical to the preserved upstream class",
   "transfer_core_policy": "min(64, platform AIV count), same as upstream tiling",
   "transfer_buffer_bytes": 32768,
-  "plan_manifest_sha256": "5362340a374e1b0380b36a6a2f32c256313422bb3b081ac76b06fc7ae4aa080d",
+  "plan_manifest_sha256": "a70d85248bc9c645e98328df7d91ef6aeb3175614be4940f71bb23194bdfd761",
   "hardware_validation": "not_run_on_development_machine",
   "local_execution": "source review and static diff/hash checks only; no Python/build/tests",
   "hit_percentages": [
@@ -35,18 +35,30 @@
   "source_memory": "aclrtMallocHost + ACL_HOST_REG_MAPPED + aclrtHostGetDevicePointer; no HBM/CPU-pointer fallback",
   "timing": "torch_npu.profiler kernel_details.csv Duration(us); actual per-call Plan/Transfer pairs",
   "file_sha256": {
-    "CMakeLists.txt": "60895050e27aac1b86a584cb1734101f9ff4cd8c965f8feb4f5bd2177b2294e2",
+    "CMakeLists.txt": "d1a16d9a9f6422983f1b9255590791c13fd561614fa756abd7dd18998dacf301",
     "build.sh": "a3c83b1395116260afcfaa92262b78cbb790b86fd7b527c088dfa543fd50e6f0",
     "csrc/transfer/upstream/sparse_kv_transfer_apt.cpp": "f24d8d6f3ffd34d25c47f4a23336d5341ba4874be77e9078ecb7f25484c0904f",
-    "csrc/transfer/kernel.cpp": "c6895a6fd7bcc72b88c6d931ba5b9807732106c261e142d5c79ac899a4353e44",
-    "csrc/transfer/launch.h": "71a0a6f15b156eb70200e2f3661bf91f6953f848f4c9b7780b498f911d42dc41",
+    "csrc/transfer/kernel.cpp": "9a538ababc33d429e96c3e0e5982e714cc0ce830c9801866de6736340579a8cc",
+    "csrc/transfer/launch.h": "9e9136ea560b6d59ccf9dd6afdc86e18fa1bbc40193b62c54ee089402db4b5bf",
     "csrc/transfer/plugin.cpp": "00bb39e3ff90a6cb21da76ba19d4cb2a9c07e0ce3af7d5145618201762e562c7",
     "full_cache_cases.py": "a7a09b9bbfe0b9509ca63df491804d3c5fc546ce9d27fa5bcdc63a1b8a7801c8",
-    "plan_transfer_common.py": "77f3dfa7abae391ff255dfbfe76b19f71567bdcba456a287e51831f5440671df",
-    "profile_plan_transfer.py": "ea7e57da927873a55bfdfd6d5d83bdece806d4fee88b119e8c2946a489a1385c",
+    "plan_transfer_common.py": "ab58003206234aecb64d2dc9af4dbd7a6c2d072948ac862713d82a7da0f7deef",
+    "profile_plan_transfer.py": "a6859d08903315fdc610550f42159634f48b9c04c26b1ffcd8e005a154cb5888",
     "checks/transfer_build_info.py": "f2c6c181550f981ac71a015fa130c6a104e4c8fa3c8aceba00ffd77b4ca383ac",
-    "checks/check_plan_transfer.py": "4ec8785a8c827ea56ded3f7369e17adb26b7c90970562d98b2a200613bddb67d",
+    "checks/check_plan_transfer.py": "34a75c2f7f7d6136a81acfd6cff1f14c88baf414fdbaef5fca7f7fd69b3dccfe",
     "checks/check_full_cache_inputs.py": "5463fc9735576415ee97ac3fc3a42905f1eabce82ffb13003a8777f2254e5a41",
-    "run_plan_transfer.sh": "0c771510d14d2fc3b6472ce2d0a5c4c06a464034ce8bc9141a505ceb0f854149"
-  }
+    "run_plan_transfer.sh": "0c771510d14d2fc3b6472ce2d0a5c4c06a464034ce8bc9141a505ceb0f854149",
+    "csrc/transfer/prepared.cpp": "14a8ba1cf3f1f9bb094b705c5b828aac623e4bdc9efab6df6ca05c8f9791c081",
+    "harness_io.py": "802c3ea156ead3587c8cb47cbee746870113ad821be908444494a9d06979905f",
+    "checks/check_transfer_harness.py": "c54ee6acc2b94e6b45aede8e7cfb1d847643c03b6d9021392804713b301f0d49"
+  },
+  "harness_fix_base_commit": "fcbaa31a8ee54ccc3ce542caef35d47a9acd7437",
+  "launch_modes": [
+    "legacy",
+    "prepared"
+  ],
+  "default_launch_mode": "legacy",
+  "prepared_scope": "caller-owned bound context; setup-only tiling upload; one queued callback launches original kernels on current stream",
+  "storage_preflight": "output and explicit temp paths before NPU initialization; configurable bytes/inodes; TMPDIR inherited by parser children",
+  "completion_contract": "exit 0 + complete metadata + COMPLETE.json + published report.md and raw captures"
 }
