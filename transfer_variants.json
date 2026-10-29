@@ -1,0 +1,102 @@
+{
+  "base_commit": "e610c618bfe406445cf824274bf53dde12ecb779",
+  "features": {
+    "A": "K/V共用一个队列记录",
+    "B": "每批8个有效token",
+    "C": "block64与1024/128字节生产特化；其他属性走通用路径",
+    "D": "全局miss区间连续分配各核；保持任务数均衡"
+  },
+  "ub_bytes": 32768,
+  "buffer_count": 2,
+  "buffer_bytes": 16384,
+  "batch_with_B": 8,
+  "cache_policy": "unchanged",
+  "hardware_validation": "not_run_on_development_machine",
+  "variants": [
+    {
+      "name": "baseline",
+      "mask": -1,
+      "kernel_name": "sparse_kv_transfer_kernel"
+    },
+    {
+      "mask": 0,
+      "name": "control",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_control"
+    },
+    {
+      "mask": 1,
+      "name": "a",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_a"
+    },
+    {
+      "mask": 2,
+      "name": "b",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_b"
+    },
+    {
+      "mask": 3,
+      "name": "ab",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_ab"
+    },
+    {
+      "mask": 4,
+      "name": "c",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_c"
+    },
+    {
+      "mask": 5,
+      "name": "ac",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_ac"
+    },
+    {
+      "mask": 6,
+      "name": "bc",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_bc"
+    },
+    {
+      "mask": 7,
+      "name": "abc",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_abc"
+    },
+    {
+      "mask": 8,
+      "name": "d",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_d"
+    },
+    {
+      "mask": 9,
+      "name": "ad",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_ad"
+    },
+    {
+      "mask": 10,
+      "name": "bd",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_bd"
+    },
+    {
+      "mask": 11,
+      "name": "abd",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_abd"
+    },
+    {
+      "mask": 12,
+      "name": "cd",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_cd"
+    },
+    {
+      "mask": 13,
+      "name": "acd",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_acd"
+    },
+    {
+      "mask": 14,
+      "name": "bcd",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_bcd"
+    },
+    {
+      "mask": 15,
+      "name": "abcd",
+      "kernel_name": "sparse_kv_transfer_kernel_opt_abcd"
+    }
+  ]
+}

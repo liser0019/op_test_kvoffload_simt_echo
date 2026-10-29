@@ -12,6 +12,7 @@
 #include "torch_npu/csrc/core/npu/NPUStream.h"
 #include "torch_npu/csrc/framework/OpCommand.h"
 #include "launch.h"
+#include "../transfer_variants/launch.h"
 
 namespace {
 void CheckAcl(aclError code, const char* operation) {
@@ -87,13 +88,21 @@ int64_t CheckedProduct(int64_t left, int64_t right) {
   return left * right;
 }
 
+int64_t TransferBlocks(int64_t coreLimit) {
+  TORCH_CHECK(coreLimit > 0 && coreLimit <= 64, "core_limit must be within [1,64]");
+  const auto available = sparse_kv_transfer_block_dim();
+  TORCH_CHECK(available > 0, "Cannot query Transfer AIV cores");
+  return coreLimit < available ? coreLimit : available;
+}
+
 void Transfer(
     const at::Tensor& missCount, const at::Tensor& missTokens, const at::Tensor& missSlots,
     const at::Tensor& tokenToReq, const at::Tensor& blockTable, const at::Tensor& hostCacheBases,
     const at::Tensor& activeRows, const at::Tensor& hostK, const at::Tensor& hostV,
     const at::Tensor& residentK, const at::Tensor& residentV,
     int64_t topk, int64_t capacity, int64_t blockSize, int64_t hostNumBlocks,
-    int64_t bytesK, int64_t bytesV) {
+    int64_t bytesK, int64_t bytesV, int64_t variantMask, int64_t coreLimit) {
+  TORCH_CHECK(variantMask >= -1 && variantMask <= 15, "Transfer variant_mask must be -1..15");
   const auto i32 = std::numeric_limits<int32_t>::max();
   TORCH_CHECK(topk > 0 && topk <= i32 && capacity > 0 && capacity <= i32 &&
               blockSize > 0 && blockSize <= i32 && hostNumBlocks > 0 && hostNumBlocks <= i32 &&
@@ -147,17 +156,24 @@ void Transfer(
   auto cpuTiling = at::empty({static_cast<int64_t>(sizeof(tiling))}, at::TensorOptions().dtype(at::kByte));
   std::memcpy(cpuTiling.data_ptr(), &tiling, sizeof(tiling));
   auto deviceTiling = cpuTiling.to(missCount.device(), false);
-  const uint32_t blocks = sparse_kv_transfer_block_dim();
+  const uint32_t blocks = static_cast<uint32_t>(TransferBlocks(coreLimit));
   TORCH_CHECK(blocks > 0, "Cannot query AIV cores for SparseKvTransfer");
   auto stream = c10_npu::getCurrentNPUStream().stream(false);
   auto launch = [=]() -> int {
     // CPU所有权也被按值捕获；runner另持有映射，直到最终NPU同步结束。
     (void)hostK;
     (void)hostV;
-    launch_sparse_kv_transfer(missCount.data_ptr(), missTokens.data_ptr(), missSlots.data_ptr(),
+    if (variantMask < 0) {
+      launch_sparse_kv_transfer(missCount.data_ptr(), missTokens.data_ptr(), missSlots.data_ptr(),
         tokenToReq.data_ptr(), blockTable.data_ptr(), hostCacheBases.data_ptr(), activeRows.data_ptr(),
         residentK.data_ptr(), residentV.data_ptr(), deviceTiling.data_ptr(), blocks,
         reinterpret_cast<void*>(stream));
+    } else {
+      launch_sparse_kv_transfer_variant(static_cast<int32_t>(variantMask),
+          missCount.data_ptr(), missTokens.data_ptr(), missSlots.data_ptr(), tokenToReq.data_ptr(),
+          blockTable.data_ptr(), hostCacheBases.data_ptr(), activeRows.data_ptr(), residentK.data_ptr(),
+          residentV.data_ptr(), deviceTiling.data_ptr(), blocks, reinterpret_cast<void*>(stream));
+    }
     return 0;
   };
   at_npu::native::OpCommand::RunOpApi("sparse_kv_transfer", launch);
@@ -166,11 +182,12 @@ void Transfer(
 
 TORCH_LIBRARY_FRAGMENT(sparse_kv_plan_op, m) {
   m.def("mapped_host_empty(int bytes) -> (Tensor, int)", MappedHostEmpty);
+  m.def("transfer_block_dim_info(int core_limit) -> int", TransferBlocks);
   m.def("sparse_kv_transfer(Tensor miss_count, Tensor miss_tokens, Tensor miss_slots, "
         "Tensor token_to_req, Tensor block_table, Tensor host_cache_bases, Tensor active_rows, "
         "Tensor host_k, Tensor host_v, Tensor(a!) resident_k, Tensor(b!) resident_v, "
         "int topk, int capacity, int block_size, int host_num_blocks, "
-        "int token_bytes_k, int token_bytes_v) -> ()");
+        "int token_bytes_k, int token_bytes_v, int variant_mask=-1, int core_limit=64) -> ()");
 }
 TORCH_LIBRARY_IMPL(sparse_kv_plan_op, PrivateUse1, m) {
   m.impl("sparse_kv_transfer", Transfer);

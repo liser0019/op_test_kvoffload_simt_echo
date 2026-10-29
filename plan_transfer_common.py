@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 import compare as plan
+import transfer_variants as transfer_catalog
 from harness_io import add_storage_arguments
 from full_cache_cases import (HIT_PERCENTAGES, make_full_cache_case, payload_pattern,
                               physical_tokens, reference_transfer_ids, assert_case, describe)
@@ -27,9 +28,12 @@ GLM_PRESET = {
 }
 
 
-def add_arguments(parser):
+def add_arguments(parser, transfer_selectors=True):
     add_storage_arguments(parser)
     parser.add_argument("--launch-mode", choices=("legacy", "prepared"), default="legacy")
+    if transfer_selectors:
+        parser.add_argument("--transfer-variant", choices=tuple(transfer_catalog.VARIANTS), default="baseline")
+        parser.add_argument("--transfer-core-limit", type=int, default=64)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--rows", type=int, default=32, help="本实验MTP关闭，一行一个请求")
     parser.add_argument("--topk", type=int, default=2048)
@@ -49,6 +53,8 @@ def add_arguments(parser):
 
 
 def resolve_payload(args, parser):
+    if not 1 <= args.transfer_core_limit <= 64:
+        parser.error("transfer-core-limit必须为1..64；实际核数还受平台限制")
     if args.device < 0 or len(args.hit_percentages) != len(set(args.hit_percentages)):
         parser.error("device必须非负，命中率不能重复")
     explicit = args.token_bytes_k is not None or args.token_bytes_v is not None
@@ -123,7 +129,8 @@ def prepare_sources(torch, case, bytes_k, bytes_v):
     return pools
 
 
-def prepare_case(torch, case, sources, bytes_k, bytes_v, launch_mode="legacy"):
+def prepare_case(torch, case, sources, bytes_k, bytes_v, launch_mode="legacy",
+                 transfer_variant="baseline", core_limit=64):
     golden = plan.reference_simt(case)
     assert_case(case, golden)
     expected_ids = reference_transfer_ids(case, golden["miss_count"], golden["miss_tokens"], golden["miss_slots"])
@@ -147,7 +154,21 @@ def prepare_case(torch, case, sources, bytes_k, bytes_v, launch_mode="legacy"):
         state["payload"][key] = {"tensor": tensor, "initial": tensor.clone(),
                                   "storage": storage, "width": width, "kind": kind}
     torch.npu.synchronize()
+    configure_transfer(torch, case, inputs, state, launch_mode, transfer_variant, core_limit)
+    return inputs, initial, state, golden, expected_ids
+
+
+def configure_transfer(torch, case, inputs, state, launch_mode, transfer_variant, core_limit):
+    """计时外更换启动上下文；保留所有输入、输出、payload及恢复快照地址。"""
+    previous = state.pop("prepared", None)
+    if previous is not None:
+        previous.close()
+    state.pop("prepared_info", None)
     state["launch_mode"] = launch_mode
+    bytes_k, bytes_v = (state["payload"][key]["width"] for key in ("k", "v"))
+    state["transfer_info"] = transfer_catalog.layout(transfer_variant, bytes_k, bytes_v, case["block_size"])
+    state["transfer_info"]["requested_core_limit"] = core_limit
+    state["transfer_info"]["actual_blocks"] = int(torch.ops.sparse_kv_plan_op.transfer_block_dim_info(core_limit))
     if launch_mode == "prepared":
         state["prepared"] = torch.classes.sparse_kv_plan_op.PreparedPlanTransfer(
             *prepared_arguments(case, inputs, state))
@@ -155,7 +176,16 @@ def prepare_case(torch, case, sources, bytes_k, bytes_v, launch_mode="legacy"):
         torch.npu.synchronize()
     elif launch_mode != "legacy":
         raise ValueError("未知launch_mode")
-    return inputs, initial, state, golden, expected_ids
+
+
+def binding_hash(inputs, state):
+    tensors = dict(inputs)
+    tensors.update({key: state[key] for key in (*plan.SIMT_STATE, *plan.SIMT_OUTPUT, "workspace")})
+    tensors.update({"payload_" + key: value["tensor"] for key, value in state["payload"].items()})
+    tensors.update({"host_" + key: value for key, value in state["sources"].items()})
+    records = [(key, tensor.data_ptr(), str(tensor.device), tuple(tensor.shape))
+               for key, tensor in sorted(tensors.items())]
+    return hashlib.sha256(repr(records).encode()).hexdigest()
 
 
 def prepared_arguments(case, inputs, state):
@@ -168,6 +198,7 @@ def prepared_arguments(case, inputs, state):
          state["payload"]["k"]["tensor"], state["payload"]["v"]["tensor"]]
     attrs = [case[key] for key in ("topk", "capacity", "max_token", "block_size", "host_num_blocks")]
     attrs += [state["payload"][key]["width"] for key in ("k", "v")]
+    attrs += [state["transfer_info"]["mask"], state["transfer_info"]["requested_core_limit"]]
     return p, x, attrs
 
 
@@ -198,7 +229,8 @@ def invoke(torch, mode, case, inputs, state):
             inputs["token_to_req"], inputs["block_table"], sources["bases"], inputs["active_rows"],
             sources["k"], sources["v"], state["payload"]["k"]["tensor"], state["payload"]["v"]["tensor"],
             case["topk"], case["capacity"], case["block_size"], case["host_num_blocks"],
-            state["payload"]["k"]["width"], state["payload"]["v"]["width"])
+            state["payload"]["k"]["width"], state["payload"]["v"]["width"],
+            state["transfer_info"]["mask"], state["transfer_info"]["requested_core_limit"])
     # chain中不手动插入Plan→Transfer同步；同一current stream依赖保证先后。
 
 

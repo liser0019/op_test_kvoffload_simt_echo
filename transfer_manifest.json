@@ -1,18 +1,37 @@
 {
-  "experiment": "abcdf-plan-transfer-full-cache",
+  "experiment": "abcdf-transfer-abcd-factorial-full-cache",
   "base_commit": "85ebbb69e8859831a5fd413d186732f8fa28c336",
   "plan_reference": "abcdf",
   "plan_threads": 1024,
   "target_kernels": {
     "plan": "sparse_kv_plan_kernel_plan_abcdf",
-    "transfer": "sparse_kv_transfer_kernel"
+    "transfer": "sparse_kv_transfer_kernel",
+    "transfer_variants": [
+      "sparse_kv_transfer_kernel",
+      "sparse_kv_transfer_kernel_opt_control",
+      "sparse_kv_transfer_kernel_opt_a",
+      "sparse_kv_transfer_kernel_opt_b",
+      "sparse_kv_transfer_kernel_opt_ab",
+      "sparse_kv_transfer_kernel_opt_c",
+      "sparse_kv_transfer_kernel_opt_ac",
+      "sparse_kv_transfer_kernel_opt_bc",
+      "sparse_kv_transfer_kernel_opt_abc",
+      "sparse_kv_transfer_kernel_opt_d",
+      "sparse_kv_transfer_kernel_opt_ad",
+      "sparse_kv_transfer_kernel_opt_bd",
+      "sparse_kv_transfer_kernel_opt_abd",
+      "sparse_kv_transfer_kernel_opt_cd",
+      "sparse_kv_transfer_kernel_opt_acd",
+      "sparse_kv_transfer_kernel_opt_bcd",
+      "sparse_kv_transfer_kernel_opt_abcd"
+    ]
   },
   "transfer_upstream_source": "vllmascend_bcde_fused_1024/csrc/attention/sparse_kv_transfer/op_kernel/sparse_kv_transfer_apt.cpp",
   "transfer_upstream_sha256": "f24d8d6f3ffd34d25c47f4a23336d5341ba4874be77e9078ecb7f25484c0904f",
-  "compute_class_policy": "SparseKvTransferRuntimeKernel is byte-identical to the preserved upstream class",
-  "transfer_core_policy": "min(64, platform AIV count), same as upstream tiling",
+  "compute_class_policy": "baseline and large-token fallback byte-identical to preserved upstream class; A/B/C/D template variants validated separately",
+  "transfer_core_policy": "min(requested core_limit [1,64], platform AIV count capped at64); same requested/actual cores required for comparison",
   "transfer_buffer_bytes": 32768,
-  "plan_manifest_sha256": "a70d85248bc9c645e98328df7d91ef6aeb3175614be4940f71bb23194bdfd761",
+  "plan_manifest_sha256": "59a8cbb460c6188fd7bf45acbee9d81f31a187e460304a5408324e9357927fa1",
   "hardware_validation": "not_run_on_development_machine",
   "local_execution": "source review and static diff/hash checks only; no Python/build/tests",
   "hit_percentages": [
@@ -35,22 +54,33 @@
   "source_memory": "aclrtMallocHost + ACL_HOST_REG_MAPPED + aclrtHostGetDevicePointer; no HBM/CPU-pointer fallback",
   "timing": "torch_npu.profiler kernel_details.csv Duration(us); actual per-call Plan/Transfer pairs",
   "file_sha256": {
-    "CMakeLists.txt": "d1a16d9a9f6422983f1b9255590791c13fd561614fa756abd7dd18998dacf301",
+    "CMakeLists.txt": "9bd167e10c882d418d9e7ee0f7a35a4d68d771606e359ef949b2b2c3897e9f63",
     "build.sh": "a3c83b1395116260afcfaa92262b78cbb790b86fd7b527c088dfa543fd50e6f0",
     "csrc/transfer/upstream/sparse_kv_transfer_apt.cpp": "f24d8d6f3ffd34d25c47f4a23336d5341ba4874be77e9078ecb7f25484c0904f",
     "csrc/transfer/kernel.cpp": "9a538ababc33d429e96c3e0e5982e714cc0ce830c9801866de6736340579a8cc",
     "csrc/transfer/launch.h": "9e9136ea560b6d59ccf9dd6afdc86e18fa1bbc40193b62c54ee089402db4b5bf",
-    "csrc/transfer/plugin.cpp": "00bb39e3ff90a6cb21da76ba19d4cb2a9c07e0ce3af7d5145618201762e562c7",
+    "csrc/transfer/plugin.cpp": "18246fa4484e0defd0666d2a35ba8cd2dbae12fb8d69b9ac27b7897924970ac2",
     "full_cache_cases.py": "a7a09b9bbfe0b9509ca63df491804d3c5fc546ce9d27fa5bcdc63a1b8a7801c8",
-    "plan_transfer_common.py": "ab58003206234aecb64d2dc9af4dbd7a6c2d072948ac862713d82a7da0f7deef",
-    "profile_plan_transfer.py": "a6859d08903315fdc610550f42159634f48b9c04c26b1ffcd8e005a154cb5888",
-    "checks/transfer_build_info.py": "f2c6c181550f981ac71a015fa130c6a104e4c8fa3c8aceba00ffd77b4ca383ac",
-    "checks/check_plan_transfer.py": "34a75c2f7f7d6136a81acfd6cff1f14c88baf414fdbaef5fca7f7fd69b3dccfe",
+    "plan_transfer_common.py": "477b06050a0c4a2dff7b236abab5f0a2f73f03b321d3441e07ab4a7ad2ff0a9e",
+    "profile_plan_transfer.py": "9a3f6af86b4102688b9ebfa1fba36a5ec08f439fd7c33b3cafb343f17fa0e2c1",
+    "checks/transfer_build_info.py": "411ff9ad08b31d8944fa2ece6399720186cf7ed1430851f4e6752186729db26a",
+    "checks/check_plan_transfer.py": "ed5341d4a2a9396bf43c8eb95823207b1b650db0f669bcbae96aa57be48ef907",
     "checks/check_full_cache_inputs.py": "5463fc9735576415ee97ac3fc3a42905f1eabce82ffb13003a8777f2254e5a41",
     "run_plan_transfer.sh": "0c771510d14d2fc3b6472ce2d0a5c4c06a464034ce8bc9141a505ceb0f854149",
-    "csrc/transfer/prepared.cpp": "14a8ba1cf3f1f9bb094b705c5b828aac623e4bdc9efab6df6ca05c8f9791c081",
+    "csrc/transfer/prepared.cpp": "c08901bb99b2004c54445dc17935171d30eb9fbcc6807d4441b2971b7a7f0373",
     "harness_io.py": "802c3ea156ead3587c8cb47cbee746870113ad821be908444494a9d06979905f",
-    "checks/check_transfer_harness.py": "c54ee6acc2b94e6b45aede8e7cfb1d847643c03b6d9021392804713b301f0d49"
+    "checks/check_transfer_harness.py": "c54ee6acc2b94e6b45aede8e7cfb1d847643c03b6d9021392804713b301f0d49",
+    "csrc/transfer_variants/kernel.cpp": "4cbe9976132a9911a1c92c02346760a5067f4c853e24aa08d6e4ca87194f3166",
+    "csrc/transfer_variants/launch.h": "d09a347c7a3ad86a05319cd3aafb5d721b60c70a82f5238c7825ee060a5e289d",
+    "csrc/transfer_variants/original_class.h": "eb02ea5efd4080dca926a67745acd4568128aa872cd8ad1a9e2d22ef519e4df5",
+    "csrc/transfer_variants/entries.inc": "67eeef096788bdda69d474eabade900978740ad494347795bb15b3ae7684a4da",
+    "transfer_variants.json": "1ca06989437c52088f95843a4a848d80cff4b61b7f2f3842e913b9961296cfc5",
+    "transfer_variants.py": "5e2ae895ecfb64a6c3b41466b4455a5cb87e6b215c0c44f6959c1777f04b0376",
+    "profile_transfer_variants.py": "eef48aa4e15a7b3579b5edba027f77d85bacc7d4a28aa31fcb3802be97d8edd9",
+    "run_transfer_variants.sh": "2441e187253148fbcf2233d0ebd93b33162d6545faa45aab20d9394044299207",
+    "run_transfer_msopprof.py": "5e3bc51acf5116b5a9c4149848ac19c22398bda0c216653a26eb2f0953414b41",
+    "checks/check_transfer_variants.py": "732edec9ef98135533cfd1486412b8bc6d4533bc57698a51ca7517e6de11f5d4",
+    "checks/check_transfer_factorial_models.py": "cee0c31b5bd42dc6e8c3dc3366badb9587c4329d0089292efc19d530a1347f19"
   },
   "harness_fix_base_commit": "fcbaa31a8ee54ccc3ce542caef35d47a9acd7437",
   "launch_modes": [
@@ -58,7 +88,16 @@
     "prepared"
   ],
   "default_launch_mode": "legacy",
-  "prepared_scope": "caller-owned bound context; setup-only tiling upload; one queued callback launches original kernels on current stream",
+  "prepared_scope": "caller-owned bound context; setup-only tiling upload; original ABCDF and selected Transfer kernel launch on current stream",
   "storage_preflight": "output and explicit temp paths before NPU initialization; configurable bytes/inodes; TMPDIR inherited by parser children",
-  "completion_contract": "exit 0 + complete metadata + COMPLETE.json + published report.md and raw captures"
+  "completion_contract": "exit 0 + complete metadata + COMPLETE.json + published report.md and raw captures",
+  "transfer_factorial_base_commit": "e610c618bfe406445cf824274bf53dde12ecb779",
+  "factorial_default_launch_mode": "prepared",
+  "factorial_catalog": "transfer_variants.json",
+  "factorial_features": {
+    "A": "K/V共用一个队列记录",
+    "B": "每批8个有效token",
+    "C": "block64与1024/128字节生产特化；其他属性走通用路径",
+    "D": "全局miss区间连续分配各核；保持任务数均衡"
+  }
 }

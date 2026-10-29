@@ -16,6 +16,7 @@
 #include "../plan_variants/13_abcdf/symbol_aliases.h"
 #include "../plan_variants/common/sparse_kv_plan_launch.h"
 #include "launch.h"
+#include "../transfer_variants/launch.h"
 
 namespace {
 using Tensors = std::vector<at::Tensor>;
@@ -89,14 +90,17 @@ at::Tensor Upload(const T& value, c10::Device device) {
 class PreparedPlanTransfer : public torch::CustomClassHolder {
  public:
   PreparedPlanTransfer(Tensors p, Tensors x, Attrs attrs) {
-    TORCH_CHECK(p.size() == 15 && x.size() == 5 && attrs.size() == 7,
-                "prepared expects 15 Plan tensors, 5 Transfer tensors and 7 attributes");
+    TORCH_CHECK(p.size() == 15 && x.size() == 5 && attrs.size() == 9,
+                "prepared expects 15 Plan tensors, 5 Transfer tensors and 9 attributes");
+    TORCH_CHECK(attrs[7] >= -1 && attrs[7] <= 15 && attrs[8] > 0 && attrs[8] <= 64,
+                "prepared variant/core limit invalid");
     for (const auto& t : p) TORCH_CHECK(t.defined(), "undefined Plan tensor");
     for (const auto& t : x) TORCH_CHECK(t.defined(), "undefined Transfer tensor");
     const auto device = p[0].device();
     TORCH_CHECK(device.type() == c10::DeviceType::PrivateUse1, "prepared requires NPU");
     const c10::OptionalDeviceGuard guard(device);
-    for (const auto value : attrs) {
+    for (size_t index = 0; index < 7; ++index) {
+      const auto value = attrs[index];
       TORCH_CHECK(value > 0 && value <= std::numeric_limits<int32_t>::max(),
                   "prepared attributes must be positive int32");
     }
@@ -162,6 +166,7 @@ class PreparedPlanTransfer : public torch::CustomClassHolder {
     data->transferTiling = Upload(transfer, device);
     data->planBlocks = calc_sparse_kv_plan_block_dim();
     data->transferBlocks = sparse_kv_transfer_block_dim();
+    if (data->attrs[8] < data->transferBlocks) data->transferBlocks = static_cast<uint32_t>(data->attrs[8]);
     TORCH_CHECK(data->planBlocks > 0 && data->transferBlocks > 0, "prepared AIV query failed");
     for (const auto& tensor : data->p) data->bindings.emplace_back(tensor);
     for (const auto& tensor : data->x) data->bindings.emplace_back(tensor);
@@ -194,10 +199,17 @@ class PreparedPlanTransfer : public torch::CustomClassHolder {
       }
       // 连续原kernel下发：此处没有tiling申请/上传、设备值读取或显式同步。
       if (transfer) {
-        launch_sparse_kv_transfer(
-            p[11].data_ptr(), p[12].data_ptr(), p[13].data_ptr(), p[4].data_ptr(), p[5].data_ptr(),
-            x[0].data_ptr(), p[6].data_ptr(), x[3].data_ptr(), x[4].data_ptr(),
-            data->transferTiling.data_ptr(), data->transferBlocks, reinterpret_cast<void*>(stream));
+        if (data->attrs[7] < 0) {
+          launch_sparse_kv_transfer(
+              p[11].data_ptr(), p[12].data_ptr(), p[13].data_ptr(), p[4].data_ptr(), p[5].data_ptr(),
+              x[0].data_ptr(), p[6].data_ptr(), x[3].data_ptr(), x[4].data_ptr(),
+              data->transferTiling.data_ptr(), data->transferBlocks, reinterpret_cast<void*>(stream));
+        } else {
+          launch_sparse_kv_transfer_variant(static_cast<int32_t>(data->attrs[7]),
+              p[11].data_ptr(), p[12].data_ptr(), p[13].data_ptr(), p[4].data_ptr(), p[5].data_ptr(),
+              x[0].data_ptr(), p[6].data_ptr(), x[3].data_ptr(), x[4].data_ptr(),
+              data->transferTiling.data_ptr(), data->transferBlocks, reinterpret_cast<void*>(stream));
+        }
       }
       return 0;
     };
@@ -214,6 +226,7 @@ class PreparedPlanTransfer : public torch::CustomClassHolder {
     TORCH_CHECK(data != nullptr, "prepared context is closed");
     return "{\"plan_blocks\":" + std::to_string(data->planBlocks) +
            ",\"transfer_blocks\":" + std::to_string(data->transferBlocks) +
+           ",\"variant_mask\":" + std::to_string(data->attrs[7]) +
            ",\"tiling_upload\":\"setup_only\",\"ownership\":\"caller_and_queued_callback\"}";
   }
 

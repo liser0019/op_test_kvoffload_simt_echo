@@ -24,6 +24,16 @@ def identity():
     direct = (ROOT / "csrc/transfer/kernel.cpp").read_text()
     if compute_class(upstream) != compute_class(direct):
         raise ValueError("Transfer computation class differs from preserved upstream source")
+    fallback = (ROOT / "csrc/transfer_variants/original_class.h").read_text()
+    if compute_class(upstream) != compute_class(fallback):
+        raise ValueError("Variant fallback differs from frozen upstream class")
+    catalog = json.loads((ROOT / "transfer_variants.json").read_text())
+    if len(catalog["variants"]) != 17 or {v["mask"] for v in catalog["variants"]} != set(range(-1, 16)):
+        raise ValueError("Transfer factorial catalog must contain baseline plus all16 masks")
+    entries = (ROOT / "csrc/transfer_variants/entries.inc").read_text()
+    for variant in catalog["variants"]:
+        if variant["mask"] >= 0 and f"TRANSFER_VARIANT({variant['mask']}, {variant['name']})" not in entries:
+            raise ValueError(f"Missing compiled Transfer entry: {variant['name']}")
     return manifest
 
 

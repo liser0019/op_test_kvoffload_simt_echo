@@ -1,6 +1,34 @@
-# 满缓存75% / 90% / 100%：ABCDF Plan 与 Transfer
+# Transfer A/B/C/D 组合性能实验
 
-当前分支：`fix/abcdf-plan-transfer-harness`，基于 `feat/abcdf-transfer-full-cache@fcbaa31`。
+当前分支：`feat/transfer-factorial-optimizations`，基于修复分支`e610c61`。
+保留原ABCDF和原Transfer，新增control及A/B/C/D全部16种组合，共17路Transfer。
+完整说明：[Transfer组合优化实验](docs/Transfer组合优化实验.md)。
+
+| 因子 | 改动 |
+|---|---|
+| A | K/V共用队列记录 |
+| B | 每批8个有效token |
+| C | block64、1024/128B生产布局特化 |
+| D | 全局miss连续区间分核 |
+
+同一工况复用全部输入、输出、payload与恢复快照地址，计时外切换上下文。
+默认prepared、Transfer-only、full cache75/90/100%，以kernel_details.csv统计性能。
+原版与无优化control单独保留，不预设组合优于单点；当前未在开发机执行编译/CPU/NPU测试。
+
+```bash
+bash build.sh --soc=ascend950 --plan-transfer
+bash run_transfer_variants.sh 0 --temp-dir /dev/shm/transfer_tmp
+```
+
+先按教程小尺寸门禁/短跑，再跑生产全矩阵。支持--variants、--core-limits、--modes chain、
+--reverse-order；独立外部msopprof入口为run_transfer_msopprof.py。
+90多GB/s参考值需核对payload一次计数与读写累计口径：46GB/s payload可能对应约92GB/s读写累计。
+
+---
+
+# 以下为保留的满缓存 Plan→Transfer 框架说明
+
+框架基线分支：`fix/abcdf-plan-transfer-harness`，基于 `feat/abcdf-transfer-full-cache@fcbaa31`。
 保留原ABCDF，接入生产SparseKvTransfer，默认抓串联两条kernel各自延时。
 默认模型预设为你提供的GLM MLA BF16：**压缩KV 1024B + RoPE K 128B/token**。
 

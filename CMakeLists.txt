@@ -221,3 +221,17 @@ endif()
 target_sources(simt_plan_variants_ops PRIVATE
     "${TRANSFER_DIR}/plugin.cpp" "${TRANSFER_DIR}/prepared.cpp"
     "${TRANSFER_INFO_CPP}" "${TRANSFER_OBJECT}")
+
+# Transfer独立因子kernel：单一计算模板，16个唯一入口；原版object继续保留。
+set(TRANSFER_VARIANT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc/transfer_variants")
+set(TRANSFER_VARIANT_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernel_transfer_variants.o")
+add_custom_command(OUTPUT "${TRANSFER_VARIANT_OBJECT}"
+    COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+            ${KERNEL_OPT_FLAGS} ${TRANSFER_FLAGS} ${KERNEL_INCLUDE_ARGS}
+            -I${TRANSFER_VARIANT_DIR} -c "${TRANSFER_VARIANT_DIR}/kernel.cpp" -o "${TRANSFER_VARIANT_OBJECT}"
+    DEPENDS "${TRANSFER_VARIANT_DIR}/kernel.cpp" "${TRANSFER_VARIANT_DIR}/launch.h"
+            "${TRANSFER_VARIANT_DIR}/original_class.h" "${TRANSFER_VARIANT_DIR}/entries.inc"
+            "${TRANSFER_DIR}/launch.h" "${CMAKE_CURRENT_SOURCE_DIR}/transfer_manifest.json"
+    COMMENT "bisheng compile Transfer A/B/C/D factorial kernels" VERBATIM)
+set_source_files_properties("${TRANSFER_VARIANT_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+target_sources(simt_plan_variants_ops PRIVATE "${TRANSFER_VARIANT_OBJECT}")

@@ -29,8 +29,8 @@ def normalize(text):
     return re.sub(r"[\s_]", "", text).casefold()
 
 
-def read_kernel_rows(paths, mode, repeat):
-    targets = {"plan": common.PLAN_KERNEL, "transfer": common.TRANSFER_KERNEL}
+def read_kernel_rows(paths, mode, repeat, transfer_kernel=common.TRANSFER_KERNEL):
+    targets = {"plan": common.PLAN_KERNEL, "transfer": transfer_kernel}
     selected = ("plan", "transfer") if mode == "chain" else (mode,)
     records = []
     for path in paths:
@@ -116,8 +116,14 @@ def capture_case(torch, torch_npu, case, sources, args, mode, destination):
 
 
 def _capture_case(torch, torch_npu, case, sources, args, mode, destination):
-    inputs, initial, state, golden, ids = common.prepare_case(
-        torch, case, sources, args.token_bytes_k, args.token_bytes_v, args.launch_mode)
+    if getattr(args, "case_bundle", None) is not None:
+        inputs, initial, state, golden, ids = args.case_bundle
+        common.configure_transfer(torch, case, inputs, state, args.launch_mode,
+                                  args.transfer_variant, args.transfer_core_limit)
+    else:
+        inputs, initial, state, golden, ids = common.prepare_case(
+            torch, case, sources, args.token_bytes_k, args.token_bytes_v, args.launch_mode,
+            args.transfer_variant, args.transfer_core_limit)
     common.audit(torch, case, inputs, initial, state, golden, ids, mode)
     for _ in range(args.warmup):
         common.restore(torch, initial, state, mode)
@@ -147,11 +153,13 @@ def _capture_case(torch, torch_npu, case, sources, args, mode, destination):
     paths = sorted(destination.rglob("kernel_details.csv"))
     if not paths:
         raise RuntimeError(f"没有kernel_details.csv，请检查完整采集日志: {destination}")
-    records = read_kernel_rows(paths, mode, args.repeat)
+    records = read_kernel_rows(paths, mode, args.repeat, state["transfer_info"]["kernel_name"])
     workload = describe(case, args.token_bytes_k, args.token_bytes_v)
     stats = summarize(records, mode, workload["payload_bytes_copied"])
     case_hash = plan.array_hash({key: value for key, value in case.items() if isinstance(value, np.ndarray)})
     result = {"status": "passed", "mode": mode, "launch_mode": args.launch_mode,
+              "transfer_variant": state["transfer_info"],
+              "buffer_addresses_sha256": common.binding_hash(inputs, state),
               "prepared_context": state.get("prepared_info"), "workload": workload, "case_sha256": case_hash,
               "plan_layout": state["layout"], "stats": stats,
               "raw_csv": [str(path) for path in paths], "target_kernel_samples": records}
@@ -171,15 +179,17 @@ def write_report(path, report):
     lines = ["# 满缓存：ABCDF / Transfer profiling", "",
              "整轮成功须同时存在COMPLETE.json且capture_metadata.json为complete；缺失标记的部分文件不是成功结果。", "",
              "一层、一次调用处理全部query行；单位μs，数据源为kernel_details.csv。", "",
-             "| 启动方式 | 模式 | 目标命中率 | 实际命中率 | miss/行 | 指标 | 样本数 | P50 μs | P95 μs |",
-             "|---|---|---:|---:|---:|---|---:|---:|---:|"]
+             "| 版本/核数 | 启动方式 | 模式 | 目标命中率 | 实际命中率 | miss/行 | 指标 | 样本数 | P50 μs | P95 μs |",
+             "|---|---|---|---:|---:|---:|---|---:|---:|---:|"]
     for run in report["runs"]:
         workload = run["workload"]
         for stage in ("plan", "transfer", "pair_busy", "pair_span", "between_kernel_gap"):
             if stage not in run["stats"]:
                 continue
             metric = run["stats"][stage]
-            lines.append(f"| {run['launch_mode']} | {run['mode']} | {workload['hit_percent_requested']}% | "
+            variant = run.get("transfer_variant", {})
+            label = f"{variant.get('name', 'baseline')}/{variant.get('actual_blocks', '—')}"
+            lines.append(f"| {label} | {run['launch_mode']} | {run['mode']} | {workload['hit_percent_requested']}% | "
                          f"{workload['hit_percent_actual']:.5f}% | {workload['misses_per_row']} | {stage} | "
                          f"{metric['count']} | {metric['p50_us']:.3f} | {metric['p95_us']:.3f} |")
     lines += ["", "单kernel duration：该条kernel在设备上的执行时间。",
@@ -247,9 +257,11 @@ def main():
     metadata = session / "capture_metadata.json"
     report = {"status": "running", "payload": preset, "storage": storage, "runs": [],
               "launch_mode": args.launch_mode,
+              "transfer_variant": args.transfer_variant, "transfer_core_limit": args.transfer_core_limit,
               "warmup_calls": args.warmup, "profiler_warmup_steps": 1, "recorded_calls": args.repeat,
               "verify_each_sample": args.verify_each_sample, "kernel_entries": {
-                  "plan": common.PLAN_KERNEL, "transfer": common.TRANSFER_KERNEL},
+                  "plan": common.PLAN_KERNEL,
+                  "transfer": common.transfer_catalog.VARIANTS[args.transfer_variant]["kernel_name"]},
               "timing": "device kernel Duration(us), not Event or end-to-end",
               "cache_condition": "fixed addresses; restore state and payload outside targets; warmed source",
               "scenario_order": args.hit_percentages, "modes": args.modes,
@@ -261,7 +273,8 @@ def main():
             torch, torch_npu, environment = common.load_runtime(args)
             report["environment"] = environment
             # 所选启动方式过完整门禁；独立checker默认同时检查两路。
-            report["correctness_gate"] = run_small_gate(torch, (args.launch_mode,))
+            report["correctness_gate"] = run_small_gate(torch, (args.launch_mode,),
+                                                      args.transfer_variant, args.transfer_core_limit)
             write_json(metadata, report)
             sources = common.prepare_sources(torch, cases[0], args.token_bytes_k, args.token_bytes_v)
             for case in cases:

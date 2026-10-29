@@ -16,11 +16,12 @@ from full_cache_cases import make_full_cache_case, reference_transfer_ids
 from harness_io import preflight_args, write_json, record_failure
 
 
-def negative_transfer_gate(torch, launch_mode="legacy"):
+def negative_transfer_gate(torch, launch_mode="legacy", transfer_variant="baseline", core_limit=64, topk=7):
     """Transfer单独验证边界；这些非法描述符不伪称为Plan的正常输出。"""
-    case = make_full_cache_case(2, 7, 17, 256, 75, seed=91)
+    case = make_full_cache_case(2, topk, topk * 2 + 3, max(256, topk * 8), 75, seed=91)
     sources = common.prepare_sources(torch, case, 64, 96)
-    inputs, initial, state, golden, _ = common.prepare_case(torch, case, sources, 64, 96, launch_mode)
+    inputs, initial, state, golden, _ = common.prepare_case(
+        torch, case, sources, 64, 96, launch_mode, transfer_variant, core_limit)
     common.prime_transfer(torch, case, inputs, initial, state, golden)
     rows, topk = case["rows"], case["topk"]
     counts = np.full(rows, topk, np.int32)
@@ -68,7 +69,7 @@ def negative_transfer_gate(torch, launch_mode="legacy"):
     return [entry[0] for entry in specs]
 
 
-def run_small_gate(torch, launch_modes=("legacy", "prepared")):
+def run_small_gate(torch, launch_modes=("legacy", "prepared"), transfer_variant="baseline", core_limit=64):
     records = []
     for rows, topk, capacity, length, block, bytes_k, bytes_v in (
         (1, 1, 3, 64, 7, 1, 31),
@@ -82,7 +83,7 @@ def run_small_gate(torch, launch_modes=("legacy", "prepared")):
             case = make_full_cache_case(rows, topk, capacity, length, percent, 72, block)
             for launch_mode in launch_modes:
                 inputs, initial, state, golden, ids = common.prepare_case(
-                    torch, case, sources, bytes_k, bytes_v, launch_mode)
+                    torch, case, sources, bytes_k, bytes_v, launch_mode, transfer_variant, core_limit)
                 for mode in ("plan", "transfer", "chain"):
                     common.audit(torch, case, inputs, initial, state, golden, ids, mode, repeats=2)
             records.append({"rows": rows, "topk": topk, "capacity": capacity, "block_size": block,
@@ -91,7 +92,7 @@ def run_small_gate(torch, launch_modes=("legacy", "prepared")):
                             "launch_modes": list(launch_modes), "status": "passed"})
             print("正确性通过:", records[-1], flush=True)
     return {"cases": records, "transfer_boundaries": {
-        mode: negative_transfer_gate(torch, mode) for mode in launch_modes},
+        mode: negative_transfer_gate(torch, mode, transfer_variant, core_limit) for mode in launch_modes},
         "prepared_context": prepared_context_gate(torch) if "prepared" in launch_modes else None}
 
 
@@ -112,6 +113,10 @@ def prepared_context_gate(torch):
     altered = list(attrs)
     altered[0] += 1
     tests.append(rejected("attributes", lambda: context.run(p, x, altered, "chain")))
+    for index, label in ((7, "variant_changed"), (8, "core_limit_changed")):
+        altered = list(attrs)
+        altered[index] = 0 if index == 7 else 1
+        tests.append(rejected(label, lambda: context.run(p, x, altered, "chain")))
     tests.append(rejected("length", lambda: context.run(p[:-1], x, attrs, "chain")))
     swapped = list(p)
     swapped[1] = p[1].clone()
@@ -167,7 +172,8 @@ def main():
     try:
         torch, _, environment = common.load_runtime(args)
         report["environment"] = environment
-        report["small_gate"] = run_small_gate(torch)
+        report["small_gate"] = run_small_gate(torch, ("legacy", "prepared"),
+                                              args.transfer_variant, args.transfer_core_limit)
         if args.production:
             prototype = common.case_from_args(args, args.hit_percentages[0])
             sources = common.prepare_sources(torch, prototype, args.token_bytes_k, args.token_bytes_v)
@@ -175,7 +181,8 @@ def main():
             for percent in args.hit_percentages:
                 case = common.case_from_args(args, percent)
                 inputs, initial, state, golden, ids = common.prepare_case(
-                    torch, case, sources, args.token_bytes_k, args.token_bytes_v, args.launch_mode)
+                    torch, case, sources, args.token_bytes_k, args.token_bytes_v, args.launch_mode,
+                    args.transfer_variant, args.transfer_core_limit)
                 for mode in ("plan", "transfer", "chain"):
                     common.audit(torch, case, inputs, initial, state, golden, ids, mode)
                 report["production_cases"].append(common.describe(case, args.token_bytes_k, args.token_bytes_v))
