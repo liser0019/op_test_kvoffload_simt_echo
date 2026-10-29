@@ -137,7 +137,13 @@ set(PLAN_VARIANTS
     csrc/scan_experiments/cold_ballot)
 set(KERNEL_OBJECTS "")
 set(VARIANT_PLUGINS "")
-foreach(_variant IN LISTS PLAN_VARIANTS)
+option(PLAN_TRANSFER_ONLY "Build only frozen ABCDF and Transfer for full-cache experiments" OFF)
+if(PLAN_TRANSFER_ONLY)
+    set(PLAN_BUILD_VARIANTS csrc/plan_variants/13_abcdf)
+else()
+    set(PLAN_BUILD_VARIANTS ${PLAN_VARIANTS})
+endif()
+foreach(_variant IN LISTS PLAN_BUILD_VARIANTS)
     set(_dir "${CMAKE_CURRENT_SOURCE_DIR}/${_variant}")
     get_filename_component(_variant_name "${_dir}" NAME)
     file(GLOB_RECURSE _headers CONFIGURE_DEPENDS "${_dir}/*.h" "${_dir}/upstream/*")
@@ -181,3 +187,36 @@ target_link_libraries(simt_plan_variants_ops PRIVATE
     "${ASCENDC_RUNTIME_LIBRARY}")
 set_target_properties(simt_plan_variants_ops PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# 3. 原SparseKvTransfer的SIMD/AIV编译：不套用SIMT专用同步/缓存选项。
+set(TRANSFER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc/transfer")
+set(TRANSFER_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/kernel_transfer.o")
+set(TRANSFER_FLAGS -Wno-deprecated-declarations)
+if(PLAN_PROFILE_DEBUG_INFO)
+    list(APPEND TRANSFER_FLAGS -g)
+endif()
+if(PLAN_RESOURCE_USAGE)
+    list(APPEND TRANSFER_FLAGS --cce-res-usage)
+endif()
+add_custom_command(OUTPUT "${TRANSFER_OBJECT}"
+    COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+            ${KERNEL_OPT_FLAGS} ${TRANSFER_FLAGS} ${KERNEL_INCLUDE_ARGS}
+            -I${TRANSFER_DIR} -c "${TRANSFER_DIR}/kernel.cpp" -o "${TRANSFER_OBJECT}"
+    DEPENDS "${TRANSFER_DIR}/kernel.cpp" "${TRANSFER_DIR}/launch.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/transfer_manifest.json"
+    COMMENT "bisheng compile SparseKvTransfer" VERBATIM)
+set_source_files_properties("${TRANSFER_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+set(TRANSFER_INFO_CPP "${CMAKE_CURRENT_BINARY_DIR}/transfer_build_info.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/transfer_manifest.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/checks/transfer_build_info.py")
+execute_process(COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/checks/transfer_build_info.py" --output "${TRANSFER_INFO_CPP}"
+    "--compiler=${BISHENG_CXX}" "--flags=${KERNEL_OPT_FLAGS};${TRANSFER_FLAGS}"
+    "--plan-transfer-only=${PLAN_TRANSFER_ONLY}"
+    RESULT_VARIABLE _transfer_info_result)
+if(NOT _transfer_info_result EQUAL 0)
+    message(FATAL_ERROR "Transfer source identity check failed")
+endif()
+target_sources(simt_plan_variants_ops PRIVATE
+    "${TRANSFER_DIR}/plugin.cpp" "${TRANSFER_INFO_CPP}" "${TRANSFER_OBJECT}")

@@ -1,0 +1,52 @@
+{
+  "experiment": "abcdf-plan-transfer-full-cache",
+  "base_commit": "85ebbb69e8859831a5fd413d186732f8fa28c336",
+  "plan_reference": "abcdf",
+  "plan_threads": 1024,
+  "target_kernels": {
+    "plan": "sparse_kv_plan_kernel_plan_abcdf",
+    "transfer": "sparse_kv_transfer_kernel"
+  },
+  "transfer_upstream_source": "vllmascend_bcde_fused_1024/csrc/attention/sparse_kv_transfer/op_kernel/sparse_kv_transfer_apt.cpp",
+  "transfer_upstream_sha256": "f24d8d6f3ffd34d25c47f4a23336d5341ba4874be77e9078ecb7f25484c0904f",
+  "compute_class_policy": "SparseKvTransferRuntimeKernel is byte-identical to the preserved upstream class",
+  "transfer_core_policy": "min(64, platform AIV count), same as upstream tiling",
+  "transfer_buffer_bytes": 32768,
+  "plan_manifest_sha256": "5362340a374e1b0380b36a6a2f32c256313422bb3b081ac76b06fc7ae4aa080d",
+  "hardware_validation": "not_run_on_development_machine",
+  "local_execution": "source review and static diff/hash checks only; no Python/build/tests",
+  "hit_percentages": [
+    75,
+    90,
+    100
+  ],
+  "hit_count_rule": "floor(topk * requested_percent / 100); report actual percent",
+  "mtp": 0,
+  "default_payload": {
+    "name": "glm_moe_dsa_bf16",
+    "cache_dtype": "bfloat16",
+    "cache_heads": 1,
+    "token_bytes_k": 1024,
+    "token_bytes_v": 128,
+    "meaning_k": "compressed KV (kv_lora_rank=512)",
+    "meaning_v": "RoPE K (qk_rope_head_dim=64)",
+    "scope": "one layer, one device; excludes indexer cache"
+  },
+  "source_memory": "aclrtMallocHost + ACL_HOST_REG_MAPPED + aclrtHostGetDevicePointer; no HBM/CPU-pointer fallback",
+  "timing": "torch_npu.profiler kernel_details.csv Duration(us); actual per-call Plan/Transfer pairs",
+  "file_sha256": {
+    "CMakeLists.txt": "60895050e27aac1b86a584cb1734101f9ff4cd8c965f8feb4f5bd2177b2294e2",
+    "build.sh": "a3c83b1395116260afcfaa92262b78cbb790b86fd7b527c088dfa543fd50e6f0",
+    "csrc/transfer/upstream/sparse_kv_transfer_apt.cpp": "f24d8d6f3ffd34d25c47f4a23336d5341ba4874be77e9078ecb7f25484c0904f",
+    "csrc/transfer/kernel.cpp": "c6895a6fd7bcc72b88c6d931ba5b9807732106c261e142d5c79ac899a4353e44",
+    "csrc/transfer/launch.h": "71a0a6f15b156eb70200e2f3661bf91f6953f848f4c9b7780b498f911d42dc41",
+    "csrc/transfer/plugin.cpp": "00bb39e3ff90a6cb21da76ba19d4cb2a9c07e0ce3af7d5145618201762e562c7",
+    "full_cache_cases.py": "a7a09b9bbfe0b9509ca63df491804d3c5fc546ce9d27fa5bcdc63a1b8a7801c8",
+    "plan_transfer_common.py": "77f3dfa7abae391ff255dfbfe76b19f71567bdcba456a287e51831f5440671df",
+    "profile_plan_transfer.py": "ea7e57da927873a55bfdfd6d5d83bdece806d4fee88b119e8c2946a489a1385c",
+    "checks/transfer_build_info.py": "f2c6c181550f981ac71a015fa130c6a104e4c8fa3c8aceba00ffd77b4ca383ac",
+    "checks/check_plan_transfer.py": "4ec8785a8c827ea56ded3f7369e17adb26b7c90970562d98b2a200613bddb67d",
+    "checks/check_full_cache_inputs.py": "5463fc9735576415ee97ac3fc3a42905f1eabce82ffb13003a8777f2254e5a41",
+    "run_plan_transfer.sh": "0c771510d14d2fc3b6472ce2d0a5c4c06a464034ce8bc9141a505ceb0f854149"
+  }
+}

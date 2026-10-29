@@ -482,8 +482,8 @@
     "checks/check_plan_goldens.py": "552672b6d4a82aa3308752cbe30734fbd6e5d4d8d7f1e3824e99a13f4f01dc55",
     "checks/check_plan_layouts.py": "d818e847e3df907e0870546630936a237939cc7886bcab5529dee998db534faa",
     "checks/check_plan_profiling.py": "6692bbd6dfbbb5d03fcada3822eaa5c516ab79096546ceba9f7509d4b7210cf2",
-    "CMakeLists.txt": "7193d600e2680cea25607ca5bfefbb29fabbf108d52198a34a8cb7daca5f28e4",
-    "build.sh": "2038d2c7df960f0d9384c5dbf1955b3f12ff9bfcfcbc81bf9d5e7a4ad96ff164",
+    "CMakeLists.txt": "60895050e27aac1b86a584cb1734101f9ff4cd8c965f8feb4f5bd2177b2294e2",
+    "build.sh": "a3c83b1395116260afcfaa92262b78cbb790b86fd7b527c088dfa543fd50e6f0",
     "run_plan_suite.sh": "8b7ea4f2b3858f85b387a69041c548a9b3ca7897beb3b1db70ecd55685c66844",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462"
   },

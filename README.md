@@ -1,3 +1,39 @@
+# 满缓存75% / 90% / 100%：ABCDF Plan 与 Transfer
+
+当前分支：`feat/abcdf-transfer-full-cache`，基于 `85ebbb6`。
+保留原ABCDF，接入生产SparseKvTransfer，默认抓串联两条kernel各自延时。
+默认模型预设为你提供的GLM MLA BF16：**压缩KV 1024B + RoPE K 128B/token**。
+
+完整教程：[满缓存Plan与Transfer性能测试](docs/满缓存Plan与Transfer性能测试.md)。
+
+在950PR服务器：
+
+```bash
+bash build.sh --soc=ascend950 --plan-transfer
+bash run_plan_transfer.sh 0
+```
+
+第二条先做正确性门禁，再采集75%、90%、100%三档。
+默认生产尺寸32请求、TopK2048、capacity4096、max_token262144；
+每行miss分别512、205、0。90%报告实际比例89.990234375%；
+所有槽初始占满，ID匹配且stable覆盖全部token，因此100%确实零miss。
+本实验MTP关闭；Transfer在零miss时仍实际下发。
+
+独立的 `plan`、`transfer`、`chain` 模式、显式K/V字节数、
+小尺寸试跑与Host内存预算见教程。默认一层Host池9GiB、resident payload144MiB，
+此外保留同等大小的设备恢复快照。
+结果包括每条kernel的P50/P95、实际配对busy/span与原始CSV；没有用Event代替设备duration。
+
+**本轮仅做源码修改和静态检查，未在本机执行构建、CPU检查或NPU测试。
+新Transfer接入及整套采集仍需服务器验证，不预先宣称可编译或有性能收益。**
+
+---
+
+## 以下为保留的MTP / Scan框架说明
+
+该部分来自上一分支；运行其全候选矩阵需不带`--plan-transfer`构建，
+使用build/下的完整库。新Plan/Transfer实验请用上面的入口。
+
 # ABCDF 基线：MTP 开关与 Scan 优化实验
 
 分支：`feat/abcdf-mtp-scan`；起点为 `feat/simt-plan-micro-variants@9cc99d5`。
