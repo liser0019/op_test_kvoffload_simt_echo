@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""新版联合Plan的MTP=0/1/3 profiling；逐行ABCDF作同输入对照。"""
+from __future__ import annotations
+import argparse
+import csv
+import json
+from pathlib import Path
+import re
+import sys
+import tempfile
+import numpy as np
+sys.dont_write_bytecode = True
+import joint_plan_common as common
+from joint_plan_cases import SCENARIOS, OVERLAPS, make_case, describe
+from compare import summary
+from checks.check_joint_plan import run_gate
+from harness_io import preflight_args, write_json, record_failure, diagnostic_log, capture_error
+
+
+def read_kernels(paths, names, repeat, expected_order):
+    """精确kernel名、μs单位、样本数和交错执行顺序；恢复TensorMove一律排除。"""
+    records = []
+    def norm(text):
+        return re.sub(r"[\s_]", "", text).casefold()
+    for path in paths:
+        with path.open(encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            fields = {norm(k): k for k in (reader.fieldnames or [])}
+            def field(*keys):
+                return next((fields[norm(k)] for k in keys if norm(k) in fields), None)
+            nk = field("Name", "Kernel Name", "Op Name")
+            dk = field("Duration(us)", "Duration(µs)", "Duration(μs)")
+            sk = field("Start Time(us)", "Start Time(µs)", "Start Time(μs)")
+            tk, stream_key, device_key = field("Task Type"), field("Stream ID"), field("Device ID")
+            if not nk or not dk or not sk:
+                raise RuntimeError(f"CSV缺少kernel名、Duration(us)或Start Time(us): {path}; {reader.fieldnames}")
+            for row in reader:
+                found = [n for n in names if re.search(r"(?<![A-Za-z0-9_])" +
+                    re.escape(common.KERNELS[n]) + r"(?![A-Za-z0-9_])", row[nk])]
+                if not found:
+                    continue
+                if len(found) != 1:
+                    raise RuntimeError("目标kernel匹配歧义")
+                duration, start = float(row[dk]), float(row[sk])
+                if not np.isfinite(duration) or duration <= 0 or not np.isfinite(start):
+                    raise RuntimeError("设备时间无效")
+                records.append({"implementation": found[0], "kernel_name": row[nk],
+                    "task_type": row.get(tk, ""), "duration_us": duration, "start_us": start,
+                    "stream": row.get(stream_key), "device": row.get(device_key), "csv": str(path)})
+    for name in names:
+        items = [r for r in records if r["implementation"] == name]
+        if len(items) != repeat or len({(r["kernel_name"], r["task_type"]) for r in items}) != 1:
+            raise RuntimeError(f"{name}须为一个kernel分组、恰好{repeat}个样本，实际{len(items)}")
+    for key in ("stream", "device"):
+        if len({r[key] for r in records if r[key] is not None}) > 1:
+            raise RuntimeError(f"目标采集混入多个{key}")
+    records.sort(key=lambda r: r["start_us"])
+    if [r["implementation"] for r in records] != expected_order:
+        raise RuntimeError("CSV目标kernel顺序与本次实际下发顺序不一致")
+    for left, right in zip(records, records[1:]):
+        if right["start_us"] < left["start_us"] + left["duration_us"] - 0.05:
+            raise RuntimeError("同流目标kernel出现重叠，不能按本次串行调用解释")
+    return records
+
+
+def execution_order(names, iteration):
+    return list(names) if iteration % 2 == 0 else list(reversed(names))
+
+
+def capture(torch, torch_npu, case, names, args, destination):
+    inputs = common.upload_inputs(torch, case)
+    bundles = {name: common.prepare(torch, case, name, inputs) for name in names}
+    audits = {name: common.audit(torch, case, bundle) for name, bundle in bundles.items()}
+    for iteration in range(args.warmup):
+        for name in execution_order(names, iteration):
+            common.restore(torch, bundles[name])
+            common.invoke(bundles[name])
+            torch.npu.synchronize()
+    for bundle in bundles.values():
+        # audit已经至少执行过一次，warmup=0也能检查最终状态。
+        if args.warmup:
+            common.check(case, bundle)
+    profiler = torch_npu.profiler
+    config = profiler._ExperimentalConfig(profiler_level=profiler.ProfilerLevel.Level0,
+        aic_metrics=profiler.AiCMetrics.AiCoreNone, export_type=[profiler.ExportType.Text])
+    destination.mkdir(parents=True)
+    orders, expected_order = [], []
+    with profiler.profile(activities=[profiler.ProfilerActivity.CPU, profiler.ProfilerActivity.NPU],
+        schedule=profiler.schedule(wait=0, warmup=1, active=args.repeat, repeat=1),
+        on_trace_ready=profiler.tensorboard_trace_handler(str(destination)),
+        record_shapes=False, profile_memory=False, with_stack=False, experimental_config=config) as prof:
+        for step in range(args.repeat + 1):
+            order = execution_order(names, step)
+            if step:
+                expected_order.extend(order)
+                orders.append(order)
+            for name in order:
+                common.restore(torch, bundles[name])
+                with torch.profiler.record_function(f"joint_plan/mtp{case['mtp']}/{name}"):
+                    common.invoke(bundles[name])
+                    torch.npu.synchronize()
+                if args.verify_each_sample:
+                    common.check(case, bundles[name])
+            prof.step()
+    final = {name: common.check(case, bundle) for name, bundle in bundles.items()}
+    paths = sorted(destination.rglob("kernel_details.csv"))
+    if not paths:
+        raise RuntimeError("采集后未找到kernel_details.csv；检查此目录原始文件和详细日志")
+    records = read_kernels(paths, names, args.repeat, expected_order)
+    stats = {}
+    for name in names:
+        samples = [r["duration_us"] for r in records if r["implementation"] == name]
+        stats[name] = summary(samples) | {"samples_us": samples,
+            "us_per_query_row_p50": float(np.percentile(samples, 50)) / case["rows"],
+            "us_per_request_p50": float(np.percentile(samples, 50)) / case["requests"],
+            "joint_enabled": bundles[name]["joint_enabled"], "layout": bundles[name]["layout"],
+            "correctness": final[name]}
+    result = {"status": "passed", "workload": describe(case), "stats": stats,
+              "execution_orders": orders, "audit": audits, "target_samples": records,
+              "raw_csv": [str(p) for p in paths]}
+    if "private" in stats and "joint" in stats:
+        result["private_over_joint_p50"] = stats["private"]["p50_us"] / stats["joint"]["p50_us"]
+    write_json(destination / "summary.json", result)
+    with (destination / "kernel_summary.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["implementation", "mtp", "requests", "query_rows", "count", "p50_us", "p95_us", "total_misses"])
+        for name, stat in stats.items():
+            writer.writerow([name, case["mtp"], case["requests"], case["rows"], stat["count"], stat["p50_us"],
+                             stat["p95_us"], final[name]["total_transfer_descriptors"]])
+    for bundle in bundles.values():
+        bundle["context"].close()
+    print(f"{case['scenario']}/{case['overlap']}/MTP={case['mtp']}: " +
+          ", ".join(f"{n}={s['p50_us']:.3f}us" for n, s in stats.items()), flush=True)
+    return result
+
+
+def mtp_comparison(runs):
+    result = []
+    for run in runs:
+        workload = run["workload"]
+        if workload["mtp"] == 0:
+            continue
+        off = next(r for r in runs if r["comparison"] == run["comparison"]
+                   and r["workload"]["scenario"] == workload["scenario"]
+                   and r["workload"]["overlap"] == workload["overlap"] and r["workload"]["mtp"] == 0)
+        for name, stat in run["stats"].items():
+            result.append({"comparison": run["comparison"], "scenario": workload["scenario"],
+                "overlap": workload["overlap"], "implementation": name, "mtp": workload["mtp"],
+                "off_requests": off["workload"]["requests"], "on_requests": workload["requests"],
+                "off_rows": off["workload"]["query_rows"], "on_rows": workload["query_rows"],
+                "on_over_off_p50": stat["p50_us"] / off["stats"][name]["p50_us"],
+                "on_over_off_per_query_row": stat["us_per_query_row_p50"] / off["stats"][name]["us_per_query_row_p50"]})
+    return result
+
+
+def report_text(report):
+    lines = ["# 联合Plan MTP=0/1/3 profiling", "",
+        "单次调用处理所有query行；数据来自kernel_details.csv，单位μs。", "",
+        "private为本新版joint关闭后的逐行ABCDF路径，含新增映射发布；不等同历史原版二进制。",
+        "MTP=0时joint列也关闭合并；保持同一实现的非MTP行为。", "",
+        "| 对照 | 工况/TopK重合 | MTP | 请求/行 | 实现 | P50 μs | P95 μs | 样本数 | miss记录总数 | 共享/溢出组数 |",
+        "|---|---|---:|---|---|---:|---:|---:|---:|---|"]
+    for run in report["runs"]:
+        w = run["workload"]
+        for name, stat in run["stats"].items():
+            c = stat["correctness"]
+            lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | "
+                f"{w['requests']}/{w['query_rows']} | {name} | {stat['p50_us']:.3f} | {stat['p95_us']:.3f} | "
+                f"{stat['count']} | {c['total_transfer_descriptors']} | {c['joint_groups']}/{c['overflow_groups']} |")
+    lines += ["", "## 同一MTP输入下：逐行/联合耗时比", "",
+              "| 对照 | 工况/重合模式 | MTP | private P50 / joint P50 |", "|---|---|---:|---:|"]
+    for run in report["runs"]:
+        if "private_over_joint_p50" in run:
+            w = run["workload"]
+            lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | {run['private_over_joint_p50']:.3f} |")
+    lines += ["", "## 相对MTP关闭：一次调用耗时比", "",
+        "| 对照 | 工况/重合模式 | 实现 | MTP | MTP开启 P50 / MTP关闭 P50 |",
+        "|---|---|---|---:|---:|"]
+    for item in report["mtp_comparison"]:
+        lines.append(f"| {item['comparison']} | {item['scenario']}/{item['overlap']} | {item['implementation']} | "
+                     f"{item['mtp']} | {item['on_over_off_p50']:.3f} |")
+    lines += ["", "固定请求数时MTP=0/1/3展开1/2/4倍query行；固定行数仅为辅助控制。",
+        "按行/请求除法是吞吐归一化，不能视作独立请求延时。场景命名指第0行历史缓存构造，实际miss见表。",
+        "每行currentSlots、owner/page映射、全部持久状态、LRU和miss列表已在计时外核对。",
+        "联合miss顺序/槽位可不同，不强求与private的LRU逐字相等。",
+        "计时含union去重/容量判断/回退/映射写出；不含tiling准备和框架恢复。",
+        "不执行真实Transfer或SFA；miss记录减少不能直接换算端到端收益。",
+        "固定输入与地址、恢复后预热；不代表冷cache或生产TopK轨迹。",
+        "只在退出码0、complete元数据、COMPLETE.json和report.md均存在时认定整轮完成。"]
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    common.add_runtime_arguments(parser)
+    parser.add_argument("--implementations", nargs="+", choices=common.IMPLEMENTATIONS, default=list(common.IMPLEMENTATIONS))
+    parser.add_argument("--mtp", nargs="+", type=int, choices=(0, 1, 3), default=[0, 1, 3])
+    parser.add_argument("--requests", type=int, default=32)
+    parser.add_argument("--comparison", choices=("same_requests", "same_query_rows", "both"), default="same_requests")
+    parser.add_argument("--fixed-query-rows", type=int, default=32)
+    parser.add_argument("--scenarios", nargs="+", choices=SCENARIOS, default=list(SCENARIOS[1:]))
+    parser.add_argument("--overlaps", nargs="+", choices=OVERLAPS, default=["shared", "partial"])
+    for name, default in (("topk", 2048), ("capacity", 4096), ("max-token", 262144), ("block-size", 64), ("seed", 2026)):
+        parser.add_argument("--" + name, type=int, default=default)
+    parser.add_argument("--warmup", type=int, default=10)
+    parser.add_argument("--repeat", type=int, default=50)
+    parser.add_argument("--verify-each-sample", action="store_true")
+    parser.add_argument("--describe-only", action="store_true")
+    parser.add_argument("--output", type=Path, default=Path("/dev/shm/mtp_joint_profile"))
+    args = parser.parse_args()
+    if args.warmup < 0 or args.repeat <= 0 or 0 not in args.mtp:
+        parser.error("warmup>=0、repeat>0且mtp列表必须含0")
+    for key in ("mtp", "implementations", "scenarios", "overlaps"):
+        if len(getattr(args, key)) != len(set(getattr(args, key))):
+            parser.error(key + "不得重复")
+    modes = ("same_requests", "same_query_rows") if args.comparison == "both" else (args.comparison,)
+    tasks = []
+    try:
+        for index, (scenario, overlap) in enumerate((s, o) for s in args.scenarios for o in args.overlaps):
+            mtps = args.mtp if index % 2 == 0 else list(reversed(args.mtp))
+            for mode in modes:
+                for mtp in mtps:
+                    requests = args.requests
+                    if mode == "same_query_rows":
+                        if args.fixed_query_rows <= 0 or args.fixed_query_rows % (mtp + 1):
+                            raise ValueError("fixed-query-rows必须为正且能被各MTP的q_len整除")
+                        requests = args.fixed_query_rows // (mtp + 1)
+                    case = make_case(requests, args.topk, args.capacity, args.max_token, mtp,
+                                     scenario, overlap, args.seed, args.block_size)
+                    tasks.append((mode, case))
+                    print(json.dumps({"comparison": mode, "workload": describe(case)}, ensure_ascii=False), flush=True)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.describe_only:
+        return
+    storage = preflight_args(args, args.output)  # NPU初始化和所有device分配之前。
+    session = Path(tempfile.mkdtemp(prefix="joint_matrix_", dir=storage["output"]["path"]))
+    metadata, log = session / "capture_metadata.json", session / "profile.log"
+    current = session
+    report = {"status": "running", "storage": storage, "runs": [], "mtp_comparison": [],
+              "warmup": args.warmup, "repeat": args.repeat, "profiler_warmup_steps": 1,
+              "timing": "torch_npu.profiler kernel duration (us)", "scope": "Plan only; no Transfer/SFA",
+              "implementations": args.implementations, "mtp": args.mtp}
+    print("联合Plan矩阵目录:", session, flush=True)
+    try:
+        with diagnostic_log(log):
+            write_json(metadata, report)
+            torch, torch_npu, environment = common.load_runtime(args)
+            report["environment"] = environment
+            report["gate"] = run_gate(torch)
+            for mode, case in tasks:
+                current = session / mode / case["scenario"] / case["overlap"] / f"mtp{case['mtp']}"
+                result = capture(torch, torch_npu, case, args.implementations, args, current)
+                result["comparison"] = mode
+                report["runs"].append(result)
+                write_json(metadata, report)
+            report["mtp_comparison"] = mtp_comparison(report["runs"])
+            report["status"] = "finalizing"
+            write_json(metadata, report)
+            (session / "report.pending.md").write_text(report_text(report))
+            report["status"] = "complete"
+            write_json(metadata, report)
+            write_json(session / "COMPLETE.json", {"status": "complete", "metadata": str(metadata)})
+            (session / "report.pending.md").replace(session / "report.md")
+    except BaseException as exc:
+        record_failure(metadata, report, exc)
+        try:
+            print(capture_error(current, log, exc), file=sys.stderr, flush=True)
+        except BaseException:
+            pass
+        raise
+    print("联合Plan采集完成:", session, flush=True)
+
+
+if __name__ == "__main__":
+    main()

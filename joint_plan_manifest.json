@@ -1,0 +1,47 @@
+{
+  "experiment": "mtp-joint-plan-profile",
+  "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
+  "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
+  "threads": 1024,
+  "upstream_policy": "ABCDF helpers, joint helper and VF dispatch unchanged; direct entry uses fieldwise GM tiling and dynamic UB launch",
+  "kernels": {
+    "private": "sparse_kv_plan_private_kernel",
+    "joint": "sparse_kv_plan_joint_kernel"
+  },
+  "mtp": [
+    0,
+    1,
+    3
+  ],
+  "mtp_definition": "draft_tokens; q_len=1+mtp; joint disabled when mtp=0",
+  "comparison_default": "same_requests",
+  "scope": "Plan only; no actual Transfer/SFA execution",
+  "correctness": "private independent scalar golden; joint union/miss/LRU/owner/currentSlots semantic invariants",
+  "timing": "torch_npu.profiler kernel_details.csv Duration(us); no Event",
+  "hardware_validation": "not_run_on_development_machine",
+  "local_execution": "source editing/review and static diff/hash checks only; no Python/build/CPU/NPU tests",
+  "file_sha256": {
+    "build_joint_plan.sh": "d201652296871a828ab1faa7a863e4e146e70dd970f3f960c0c6380d04c3ac73",
+    "joint_plan/CMakeLists.txt": "a8139bab626fcd5e67a1b3d969c452243cd47519ffd0851e83a3c54ba38d35c1",
+    "csrc/joint_plan/kernel.cpp": "5d7e1f17bc6f191c19bc17a904d44cda75b2a483d1021831f781ee77a6d5bf97",
+    "csrc/joint_plan/plugin.cpp": "ab0d7d2d850d50b797d5649da0353b34bacf96e94291f367a8d12aa559171972",
+    "csrc/joint_plan/launch.h": "bcb2fabca218780bc01ef27568d3d53f5e93765807582d46b2cae9cfed28907f",
+    "csrc/joint_plan/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
+    "csrc/joint_plan/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
+    "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
+    "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
+    "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
+    "joint_plan_cases.py": "faa44b925226a17edf58c763e7d33218f3ebe4f65c03495593441b7616b85334",
+    "joint_plan_common.py": "3b0956fbd7bcbff7f29113098d92ed8250929eb717625f0fc647e8b8f5458b0d",
+    "profile_joint_mtp.py": "acf6593c6dba6b1427346f54c17889eb20dd9607fce7f9564fb9a1f78be25513",
+    "run_joint_msopprof.py": "1760b431d2d008e6d33912ebbcf66993be21361c92c18e2339d0f39253db847a",
+    "checks/check_joint_plan.py": "1310b28fb6034e6fbd7416fa0c4f0c5f4d2cd87adccc57a4e1bac236dc46c843",
+    "checks/check_joint_models.py": "f87397e2bac0a0c69e93a06065c5d904b83de6097f3ee02d6dda699f0de34544",
+    "checks/joint_build_info.py": "c339f5072a05fbffa2aaa32372d0fdeffb1522f73ccd6760a17509e9b49a0ac8",
+    "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
+    "compare.py": "a0a1850a24203d005ad321ab1fd5b0af2c979da7f03399626628594b0e474bcf",
+    "mtp_cases.py": "72bc420b5751f2d17cd21c32b04079c36e36d94ca49c9f4e6f7f7454a0325195",
+    "plan_variants_manifest.json": "59a8cbb460c6188fd7bf45acbee9d81f31a187e460304a5408324e9357927fa1",
+    "harness_io.py": "802c3ea156ead3587c8cb47cbee746870113ad821be908444494a9d06979905f"
+  }
+}

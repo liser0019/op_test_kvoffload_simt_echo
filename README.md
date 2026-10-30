@@ -1,6 +1,29 @@
-# Transfer A/B/C/D 组合性能实验
+# 新版联合Plan：MTP=0/1/3 profiling
 
-当前分支：`feat/transfer-factorial-optimizations`，基于修复分支`e610c61`。
+当前分支：`feat/mtp-joint-plan-profile`。
+移植`feat/mtp-joint-plan@bba63d057`的联合去重、共享resident和容量溢出回退实现，
+默认比较32请求下MTP=0/1/3，以及同输入逐行ABCDF对照。
+保留原计算辅助函数、1024线程和同步；独立构建，不要求安装vLLM。
+
+完整教程：[MTP联合Plan性能测试](docs/MTP联合Plan性能测试.md)。
+
+```bash
+bash build_joint_plan.sh --soc=ascend950
+python3 -X faulthandler profile_joint_mtp.py --device 0 \
+  --mtp 0 1 3 --requests 32 --overlaps shared partial disjoint \
+  --warmup 10 --repeat 50 --temp-dir /dev/shm/joint_tmp \
+  --output /dev/shm/joint_formal
+```
+
+先按教程小尺寸门禁和短跑，再正式采集。计时来自kernel_details.csv。
+本轮只测Plan，报告实际并集、逐行miss和回退情况；不执行Transfer/SFA。
+源码开发机未执行Python、CPU检查、编译或NPU测试，尚不宣称硬件正确性和收益。
+
+---
+
+# 以下保留Transfer A/B/C/D组合性能实验
+
+原Transfer实验分支：`feat/transfer-factorial-optimizations`，基于修复分支`e610c61`。
 保留原ABCDF和原Transfer，新增control及A/B/C/D全部16种组合，共17路Transfer。
 完整说明：[Transfer组合优化实验](docs/Transfer组合优化实验.md)。
 
