@@ -140,8 +140,34 @@ add_custom_command(OUTPUT "${ABCDF_OBJECT}"
     DEPENDS "${ABCDF_DIR}/kernel.cpp" ${ABCDF_HEADERS} "${JOINT_ROOT}/joint_plan_manifest.json"
     COMMENT "Compile original independent 13_abcdf (mask47, 1024 threads)" VERBATIM)
 set_source_files_properties("${ABCDF_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+# Independent experiment translation units; baseline kernels remain unchanged.
+set(JOINT_VARIANT_DIR "${JOINT_ROOT}/csrc/joint_variants")
+set(JOINT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/joint_variants")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${JOINT_ROOT}/joint_variants.py" "${JOINT_ROOT}/checks/generate_joint_variants.py")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${JOINT_ROOT}/checks/generate_joint_variants.py"
+    --output "${JOINT_GENERATED}" RESULT_VARIABLE _variant_result)
+if(NOT _variant_result EQUAL 0)
+    message(FATAL_ERROR "Failed to generate Joint variant symbols")
+endif()
+set(JOINT_VARIANT_OBJECTS)
+foreach(_name a b ab c ac bc abc d ad bd abd cd acd bcd abcd)
+    set(_object "${JOINT_GENERATED}/variant_${_name}.o")
+    add_custom_command(OUTPUT "${_object}"
+        COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+            ${JOINT_FLAGS} ${JOINT_INCLUDES} -c "${JOINT_GENERATED}/variant_${_name}.cpp" -o "${_object}"
+        DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp"
+            "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h"
+            "${JOINT_DIR}/launch.h" "${JOINT_DIR}/sparse_kv_plan_config.h"
+            "${JOINT_ROOT}/joint_plan_manifest.json"
+        COMMENT "Compile Joint experiment ${_name}" VERBATIM)
+    set_source_files_properties("${_object}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+    list(APPEND JOINT_VARIANT_OBJECTS "${_object}")
+endforeach()
 add_library(mtp_joint_plan_ops SHARED "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
-    "${JOINT_OBJECT}" "${ABCDF_DIR}/plugin.cpp" "${ABCDF_OBJECT}")
+    "${JOINT_OBJECT}" "${ABCDF_DIR}/plugin.cpp" "${ABCDF_OBJECT}"
+    "${JOINT_VARIANT_DIR}/plugin.cpp" ${JOINT_VARIANT_OBJECTS})
+target_include_directories(mtp_joint_plan_ops PRIVATE "${JOINT_GENERATED}")
 separate_arguments(TORCH_FLAGS_LIST NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 target_compile_options(mtp_joint_plan_ops PRIVATE ${TORCH_FLAGS_LIST})
 target_include_directories(mtp_joint_plan_ops SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS}

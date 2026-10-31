@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""构建/运行联合Plan身份校验；CPU检查仅在服务器运行。"""
+"""构建/运行联合Plan身份校验；支持CPU源码检查；不代表NPU验证。"""
 import argparse
 import hashlib
 import json
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT))
 
 def compute_region(text):
     start = text.index("namespace {")
@@ -63,6 +65,17 @@ def identity():
     common_config = (ROOT / "csrc/plan_variants/common/sparse_kv_plan_config.h").read_text()
     if "#define PLAN_OPT_MASK 47U" not in config or "PLAN_THREADS = 1024U" not in common_config:
         raise ValueError("Independent baseline must remain ABCDF(mask47), 1024 threads")
+    variant = (ROOT / "csrc/joint_variants/kernel.cpp").read_text()
+    prefix = variant[:variant.index('#include "options.h"')].replace('../joint_plan/', '')
+    original_prefix = direct[:direct.index('#include "sparse_kv_joint_plan.h"')]
+    if prefix != original_prefix:
+        raise ValueError("Experimental kernels changed original ABCDF helper computation")
+    helper = (ROOT / "csrc/joint_variants/sparse_kv_joint_plan.h").read_text()
+    if "if (thread == 1) {\n      modeOutput[row] = row == first ? ROW_JOINT : ROW_FOLLOWER;" not in helper:
+        raise ValueError("Joint variants must preserve empirical thread1 workaround")
+    from joint_variants import VARIANTS
+    if manifest.get("joint_variant_masks") != VARIANTS:
+        raise ValueError("Joint variant catalog mismatch")
     return manifest
 
 def main():

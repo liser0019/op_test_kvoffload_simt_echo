@@ -222,7 +222,8 @@ class CsvChecks(unittest.TestCase):
         env = {"device": 2, "library_sha256": "library", "identity": {"source": "source"}}
         report = {"status": "passed", "environment": env, "gate": {"status": "passed",
                   "implementations": list(common.IMPLEMENTATIONS),
-                  "input_write_regression": {"status": "passed", "checked_iterations": 100, "input_restore": False}}}
+                  "input_write_regression": {"status": "passed", "checked_iterations": 100, "input_restore": False,
+                      "per_implementation": {name: {"status": "passed"} for name in common.IMPLEMENTATIONS if name != "abcdf"}}}}
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "gate.json"
             import json
@@ -270,6 +271,58 @@ class CsvChecks(unittest.TestCase):
         pairs = mtp_comparison(runs)
         self.assertEqual(pairs[1]["on_over_off_p50"], 2)
         self.assertEqual(pairs[1]["on_over_off_per_query_row"], 0.5)
+
+
+class VariantChecks(unittest.TestCase):
+    def test_independent_indexer_selections_are_unsorted_and_distinct(self):
+        cases = [make_case(2, 65, 160, 2048, m, overlap="independent", block_size=8) for m in (0, 1, 3)]
+        for case in cases:
+            np.testing.assert_array_equal(case["topk_indices"][::case["q_len"]], cases[0]["topk_indices"])
+        query = cases[2]["topk_indices"]
+        self.assertNotEqual(set(query[0]), set(query[1]))
+        self.assertFalse(np.all(query[1][:-1] <= query[1][1:]))
+        self.assertTrue(all(describe(cases[2])["union_fits"]))
+        # 不因独立选词而放松逐行因果可见性。
+        for row, values in enumerate(query):
+            self.assertTrue(np.all(values < cases[2]["visible_seq_lens"][row]))
+
+    def test_all_fifteen_masks_unique_symbols_and_dispatch(self):
+        from joint_variants import MASKS
+        from checks.generate_joint_variants import generate
+        self.assertEqual(set(MASKS.values()), set(range(1, 16)))
+        self.assertEqual(len(set(common.KERNELS.values())), len(common.IMPLEMENTATIONS))
+        with tempfile.TemporaryDirectory() as tmp:
+            generate(tmp)
+            dispatcher = (Path(tmp) / "variant_dispatch.h").read_text()
+            for letters, mask in MASKS.items():
+                source = (Path(tmp) / ("variant_" + letters + ".cpp")).read_text()
+                self.assertIn(f"#define JOINT_OPT_MASK {mask}", source)
+                self.assertIn(f"#define JointDirectBody JointDirectBody_{letters}", source)
+                self.assertIn(f"&launch_joint_plan_{letters}", dispatcher)
+
+    def test_many_way_rotation_and_prefix_kernel_filter(self):
+        names = common.DEFAULT_IMPLEMENTATIONS
+        count = len(names)
+        orders = [execution_order(names, step) for step in range(1, 51)]
+        for name in names:
+            counts = [sum(order[pos] == name for order in orders) for pos in range(count)]
+            self.assertLessEqual(max(counts) - min(counts), 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "kernel_details.csv"
+            path.write_text("Name,Duration(us),Start Time(us)\n" +
+                "\n".join(f"{common.KERNELS[name]},10,{100*i}" for i, name in enumerate(names)))
+            self.assertEqual(len(read_kernels([path], names, 1, list(names))), len(names))
+            # joint_kernel 必须不匹配 joint_kernel_a 或 joint_kernel_abcd。
+            result = read_kernels([path], ["joint"], 1, ["joint"])
+            self.assertEqual(len(result), 1)
+
+    def test_variant_ratio_direction(self):
+        stats = {name: {"p50_us": value} for name, value in
+                 (("abcdf", 50), ("private", 75), ("joint", 150), ("private_a", 60), ("joint_abcd", 100))}
+        ratios = duration_ratios(stats)
+        self.assertAlmostEqual(ratios["private_a_over_private_p50"], .8)
+        self.assertAlmostEqual(ratios["joint_abcd_over_joint_p50"], 2/3)
+        self.assertAlmostEqual(ratios["joint_abcd_over_abcdf_p50"], 2)
 
 
 if __name__ == "__main__":

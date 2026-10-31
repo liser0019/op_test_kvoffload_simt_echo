@@ -1,5 +1,5 @@
 {
-  "experiment": "mtp-joint-plan-profile",
+  "experiment": "joint-plan-abcd-optimizations",
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
@@ -7,7 +7,23 @@
   "kernels": {
     "private": "sparse_kv_plan_private_kernel",
     "joint": "sparse_kv_plan_joint_kernel",
-    "abcdf": "sparse_kv_plan_kernel_plan_abcdf"
+    "abcdf": "sparse_kv_plan_kernel_plan_abcdf",
+    "private_a": "sparse_kv_plan_private_kernel_a",
+    "joint_a": "sparse_kv_plan_joint_kernel_a",
+    "joint_b": "sparse_kv_plan_joint_kernel_b",
+    "joint_ab": "sparse_kv_plan_joint_kernel_ab",
+    "joint_c": "sparse_kv_plan_joint_kernel_c",
+    "joint_ac": "sparse_kv_plan_joint_kernel_ac",
+    "joint_bc": "sparse_kv_plan_joint_kernel_bc",
+    "joint_abc": "sparse_kv_plan_joint_kernel_abc",
+    "joint_d": "sparse_kv_plan_joint_kernel_d",
+    "joint_ad": "sparse_kv_plan_joint_kernel_ad",
+    "joint_bd": "sparse_kv_plan_joint_kernel_bd",
+    "joint_abd": "sparse_kv_plan_joint_kernel_abd",
+    "joint_cd": "sparse_kv_plan_joint_kernel_cd",
+    "joint_acd": "sparse_kv_plan_joint_kernel_acd",
+    "joint_bcd": "sparse_kv_plan_joint_kernel_bcd",
+    "joint_abcd": "sparse_kv_plan_joint_kernel_abcd"
   },
   "mtp": [
     0,
@@ -23,7 +39,7 @@
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
     "build_joint_plan.sh": "3f260db9d4a066fd65e16e1da4c22862a295446ecc44a8c0868a9a81c9d3dccc",
-    "joint_plan/CMakeLists.txt": "fca1e1e12be3bb18042d2a7dba39a8d8db7533e3a662017629c5a0d5d2983a06",
+    "joint_plan/CMakeLists.txt": "3daec2a78d42e793b2af89f8e564d139b44e7859dad217dd09e20585f251d0a9",
     "csrc/joint_plan/kernel.cpp": "18f265213932cf97cc441dd99b14d69f9517fdcb448a51ad6b327b73b2cad5d2",
     "csrc/joint_plan/plugin.cpp": "6ee883de2d08f0d6eee3f03368f25e64ed5f54fa48e863ef5463d1173c6b718c",
     "csrc/joint_plan/launch.h": "bcb2fabca218780bc01ef27568d3d53f5e93765807582d46b2cae9cfed28907f",
@@ -32,13 +48,13 @@
     "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
-    "joint_plan_cases.py": "0a66af3634f946d99acfa32535c63208e12aa68de68a0b2967b1940a37f10354",
-    "joint_plan_common.py": "e81fcfa35fd070c4c0fdf89631ef07eb7eefcb4e809aadd9d3b88263fb3851e5",
-    "profile_joint_mtp.py": "7b56134b421824fece1e7c4d9e3255e9ec5f521786036672661f0acaad89d6cb",
+    "joint_plan_cases.py": "f6e8b85d6b310e4b3ef51c9725b69e81952ccbc1200ac339d100d2d16efdb80f",
+    "joint_plan_common.py": "acebd0bb0d2477e5aed980b9f1d6dc1d53e5ca31659b41469c83c4e23a6f2482",
+    "profile_joint_mtp.py": "8648053bad93b746c05d46dc24e86d7d937441fcd19ab727a3d6f6f311e2f13e",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "2a9b8471878f17c1016c598888651f8b5150134d001899bb83f522a46cd467af",
-    "checks/check_joint_models.py": "4f68a67bf7fa842bc382399db7323c0aaeaf5af285724177f8afb6b66966be82",
-    "checks/joint_build_info.py": "90a19aaa2f78a757b4785ccce2977dddeabfaa127b474671ac674f95427ad8e1",
+    "checks/check_joint_plan.py": "429b75fec470ae6b74e5aeeb08a970b7e3452fb59c2df62e144882a0662d2691",
+    "checks/check_joint_models.py": "1b769c1876ba3003322fba2c55063e9f1ec092b3b871d6df68dc3d3f667ba118",
+    "checks/joint_build_info.py": "3841e15c72f9cbbfc4bbb88c5a232073b60402bbb9f18e01e9b95c6a523106d5",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "a0a1850a24203d005ad321ab1fd5b0af2c979da7f03399626628594b0e474bcf",
     "mtp_cases.py": "72bc420b5751f2d17cd21c32b04079c36e36d94ca49c9f4e6f7f7454a0325195",
@@ -51,7 +67,16 @@
     "csrc/plan_variants/common/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222",
     "csrc/plan_variants/common/plan_kernel_impl.h": "6564d52abe1b41ca60df8b4bb27dae6cc4fa0430473b6c3bfeb0056a4ef25e84",
     "csrc/plan_variants/common/plan_plugin_impl.h": "0d344379aa4f7f406f5adfe55f52dc67ec8c8883b544d3e50253d5da58d4bd05",
-    "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620"
+    "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
+    "joint_variants.py": "b7cdffb58722de83450ac843ffab4ddf70d8c04c42243c1cd7fc19e784d9a753",
+    "checks/generate_joint_variants.py": "b410d150fb8da12d13e7f8952091bd55933f7ec54f675c5e5ef4cb76b7ac1a0d",
+    "checks/check_joint_variant_kernels.py": "15c1692a2d75c494e6c0ff3a7b8e59639f717c53a284fa64056f247cfcc8a1e2",
+    "checks/joint_variant_cpu_driver.cpp": "c463aec16b62b1dd9b4a03c376295572e1549cc6a126fc07395bca606774b917",
+    "checks/simt_variants/cpu_runtime.h": "e2d4f9c81f1cde16be8354489b2f7b79d4310dbe724050573301ef6293e477f3",
+    "csrc/joint_variants/sparse_kv_joint_plan.h": "41b4ca42fea459bbfa6e2a77c8176cffe115c3d664faf8d9aedf905a258f6f82",
+    "csrc/joint_variants/plugin.cpp": "d67c498f891cf0ee7d0d7c555d3861984c47bf0c5160a8a70032e3a8d04b172c",
+    "csrc/joint_variants/options.h": "1c83c717791bf5167027914ffb1c236327a6ee8952a9fc0465d60f90a8ab69a2",
+    "csrc/joint_variants/kernel.cpp": "3809c70f4755557332c631596d6c29748609cdbb704f1c203249135e66dd15a3"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -65,5 +90,30 @@
     "threads": 1024,
     "interface": "original 15 tensors + 5 attributes; no joint metadata",
     "kernel": "sparse_kv_plan_kernel_plan_abcdf"
+  },
+  "optimization_base": "2556a1f004bbc063456d1e2462bd403014533a94",
+  "joint_variant_masks": {
+    "private_a": 1,
+    "joint_a": 1,
+    "joint_b": 2,
+    "joint_ab": 3,
+    "joint_c": 4,
+    "joint_ac": 5,
+    "joint_bc": 6,
+    "joint_abc": 7,
+    "joint_d": 8,
+    "joint_ad": 9,
+    "joint_bd": 10,
+    "joint_abd": 11,
+    "joint_cd": 12,
+    "joint_acd": 13,
+    "joint_bcd": 14,
+    "joint_abcd": 15
+  },
+  "joint_optimizations": {
+    "a": "non-joint VF compile-time isolation (protocol retained)",
+    "b": "reuse per-query union hash bucket",
+    "c": "write resident only on reset/invalidation",
+    "d": "one union overflow reduction per row"
   }
 }

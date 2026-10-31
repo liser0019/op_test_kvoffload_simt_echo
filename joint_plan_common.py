@@ -11,9 +11,12 @@ from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf
 
 ROOT = Path(__file__).resolve().parent
-IMPLEMENTATIONS = ("abcdf", "private", "joint")
+from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description
+IMPLEMENTATIONS = ("abcdf", "private", "joint", *VARIANTS)
 KERNELS = {"abcdf": "sparse_kv_plan_kernel_plan_abcdf",
            "private": "sparse_kv_plan_private_kernel", "joint": "sparse_kv_plan_joint_kernel"}
+KERNELS.update({name: "sparse_kv_plan_" + name.split("_", 1)[0] + "_kernel_" + name.split("_", 1)[1]
+                for name in VARIANTS})
 ABCDF_STATE = ("last_req_ids", "slot_to_token", "lru_slots")
 ABCDF_OUTPUT = ("current_slots", "miss_count", "miss_tokens", "miss_slots")
 TENSOR_ORDER = (*INPUTS, "active_rows", "last_req_ids", "slot_to_token", "lru_slots",
@@ -67,7 +70,9 @@ def update_inputs(torch, bundle, case):
 
 
 def prepare(torch, case, name, inputs=None):
-    enabled = name == "joint" and case["mtp"] > 0
+    if name not in IMPLEMENTATIONS:
+        raise ValueError("Unknown implementation: " + name)
+    enabled = is_joint(name) and case["mtp"] > 0
     info = layout(case["topk"], case["capacity"], case["rows"], enabled)
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name == "abcdf":
@@ -91,7 +96,10 @@ def prepare(torch, case, name, inputs=None):
     context = None
     if name != "abcdf":
         attrs.append(int(enabled))
-        context = torch.classes.mtp_joint_plan.Prepared(ordered, attrs, name == "joint")
+        if name in VARIANTS:
+            context = torch.classes.mtp_joint_plan.PreparedVariant(ordered, attrs, is_joint(name), VARIANTS[name])
+        else:
+            context = torch.classes.mtp_joint_plan.Prepared(ordered, attrs, is_joint(name))
     torch.npu.synchronize()
     native = json.loads(context.info()) if context is not None else {
         "joint_enabled": 0, "dynamic_ub_bytes": info["dynamic_ub_bytes"],
@@ -99,6 +107,9 @@ def prepare(torch, case, name, inputs=None):
         "tiling_upload": "per_call_original_interface; excluded by kernel-duration filter"}
     if native["dynamic_ub_bytes"] != info["dynamic_ub_bytes"] or native["joint_enabled"] != int(enabled):
         raise AssertionError("Python/C++ tiling模型不一致")
+    if name in VARIANTS and native.get("variant_mask") != VARIANTS[name]:
+        raise AssertionError("Prepared variant mask mismatch")
+    native["experiment"] = description(name)
     return {"name": name, "torch": torch, "joint_enabled": enabled, "inputs": inputs, "state": tensors,
             "buffers": buffers, "initial": initial, "host_initial": host,
             "ordered": ordered, "attrs": attrs, "context": context, "layout": info | native}

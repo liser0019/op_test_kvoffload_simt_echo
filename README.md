@@ -1,3 +1,5 @@
+> 本分支增加 Joint A/B/C/D 单点与15种组合，默认候选和重合模式已扩展。最新运行步骤见 [Joint_ABCD优化实验.md](docs/Joint_ABCD优化实验.md)。原三路仍可显式选择 `--implementations abcdf private joint --overlaps shared partial`。
+
 # Joint Plan线程1规避修复：ABCDF/private/joint三方MTP profiling
 
 当前分支：`feat/mtp-joint-plan-profile`。

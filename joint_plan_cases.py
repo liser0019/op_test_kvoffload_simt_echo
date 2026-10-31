@@ -7,7 +7,7 @@ INPUTS = ("req_ids", "topk_indices", "stable_prefix_lens", "visible_seq_lens", "
 PERSISTENT = ("last_req_ids", "slot_to_token", "lru_slots", "row_modes")
 OUTPUTS = ("current_slots", "miss_count", "miss_tokens", "miss_slots", "resident_rows", "resident_block_table")
 SCENARIOS = ("cold_reset", "full_cache_75pct", "full_cache_90pct", "full_cache_stable_hit")
-OVERLAPS = ("shared", "partial", "disjoint")
+OVERLAPS = ("shared", "partial", "independent", "disjoint")
 POISON = -777777
 
 
@@ -69,7 +69,7 @@ def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
     percentage = {"cold_reset": 0, "full_cache_75pct": 75, "full_cache_90pct": 90,
                   "full_cache_stable_hit": 100}[scenario]
     hits = min(topk - 1, topk * percentage // 100)
-    shift = {"shared": 0, "partial": max(1, topk // 4), "disjoint": topk}[overlap]
+    shift = {"shared": 0, "partial": max(1, topk // 4), "disjoint": topk, "independent": 0}[overlap]
     lru = np.empty_like(base)
     for request in range(requests):
         # 全值域排列使MTP=0/1/3的第0行query、初始resident和LRU严格相同。
@@ -83,8 +83,15 @@ def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
         lru[request] = np.random.default_rng(seed + 70001 + request).permutation(capacity)
         for p in range(width):
             row, new = request * width + p, min(topk, p + 1)
-            query[row, :topk - new] = pool[p * shift:p * shift + topk - new]
+            if overlap == "independent" and p > 0:
+                # Indexer 的每条 query 独立选择历史 token；不要求相同前缀/有序。
+                select = np.random.default_rng(seed + 300001 + request * 17 + p)
+                query[row, :topk - new] = select.choice(pool[:2 * topk], topk - new, replace=False)
+            else:
+                query[row, :topk - new] = pool[p * shift:p * shift + topk - new]
             query[row, topk - new:] = np.arange(context + p + 1 - new, context + p + 1)
+            if overlap == "independent":
+                np.random.default_rng(seed + 400001 + request * 17 + p).shuffle(query[row])
     blocks = (max_token + block_size - 1) // block_size
     if requests * blocks > np.iinfo(np.int32).max:
         raise ValueError("Host物理页编号超出int32")
@@ -132,6 +139,9 @@ def describe(case):
     return {"scenario": case["scenario"], "overlap": case["overlap"], "mtp": case["mtp"],
             "requests": case["requests"], "query_rows": case["rows"], "q_len": case["q_len"],
             "topk": case["topk"], "capacity": case["capacity"], "max_token": case["max_token"],
+            "row0_intersections": [[len(sets[first] & sets[row]) for row in range(first, end)]
+                                    for first, end in groups(case, True)],
+            "selection_semantics": "per-query tokens; no sorted/shared-prefix assumption",
             "union_sizes": unions, "union_fits": [u <= case["capacity"] for u in unions],
             "valid_positions_per_row": [sum(source_valid(case, r, int(t)) for t in query)
                                         for r, query in enumerate(case["topk_indices"])],

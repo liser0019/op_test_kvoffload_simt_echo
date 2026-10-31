@@ -64,15 +64,17 @@ def read_kernels(paths, names, repeat, expected_order):
 
 
 def execution_order(names, iteration):
-    # 三路每3轮覆盖所有执行位置，每6轮覆盖全部排列；50次的位置差至多1。
+    # 三路保留六种排列；多候选用循环轮换，任意连续repeat的各位置次数差至多1。
     count = len(names)
-    sequence = list(names) if (iteration // count) % 2 == 0 else list(reversed(names))
+    sequence = list(names) if count != 3 or (iteration // count) % 2 == 0 else list(reversed(names))
     offset = iteration % count
     return sequence[offset:] + sequence[:offset]
 
 
 def duration_ratios(stats):
-    pairs = (("private", "abcdf"), ("joint", "abcdf"), ("private", "joint"))
+    pairs = [("private", "abcdf"), ("joint", "abcdf"), ("private", "joint")]
+    pairs += [(name, base) for name in stats if name in common.VARIANTS
+              for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
     return {f"{left}_over_{right}_p50": stats[left]["p50_us"] / stats[right]["p50_us"]
             for left, right in pairs if left in stats and right in stats}
 
@@ -200,6 +202,19 @@ def report_text(report):
         values = [f"{run[key]:.3f}" if key in run else "—"
                   for key in ("private_over_abcdf_p50", "joint_over_abcdf_p50", "private_over_joint_p50")]
         lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | " + " | ".join(values) + " |")
+    lines += ["", "## Joint A/B/C/D 候选与未优化基线", "",
+              "大于1表示候选更慢；这里的字母是Joint实验，与原ABCDF命名无关。", "",
+              "| 工况/重合 | MTP | 候选 | 候选/原协议路径 P50 | 候选/ABCDF P50 |",
+              "|---|---:|---|---:|---:|"]
+    for run in report["runs"]:
+        w = run["workload"]
+        for name in run["stats"]:
+            if name not in common.VARIANTS:
+                continue
+            base = "joint" if common.is_joint(name) else "private"
+            values = [f"{run[name + '_over_' + ref + '_p50']:.3f}"
+                      if name + '_over_' + ref + '_p50' in run else "—" for ref in (base, "abcdf")]
+            lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | " + " | ".join(values) + " |")
     lines += ["", "## 相对MTP关闭：一次调用耗时比", "",
         "| 对照 | 工况/重合模式 | 实现 | MTP | MTP开启 P50 / MTP关闭 P50 |",
         "|---|---|---|---:|---:|"]
@@ -235,13 +250,13 @@ def report_text(report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     common.add_runtime_arguments(parser)
-    parser.add_argument("--implementations", nargs="+", choices=common.IMPLEMENTATIONS, default=list(common.IMPLEMENTATIONS))
+    parser.add_argument("--implementations", nargs="+", choices=common.IMPLEMENTATIONS, default=list(common.DEFAULT_IMPLEMENTATIONS))
     parser.add_argument("--mtp", nargs="+", type=int, choices=(0, 1, 3), default=[0, 1, 3])
     parser.add_argument("--requests", type=int, default=32)
     parser.add_argument("--comparison", choices=("same_requests", "same_query_rows", "both"), default="same_requests")
     parser.add_argument("--fixed-query-rows", type=int, default=32)
     parser.add_argument("--scenarios", nargs="+", choices=SCENARIOS, default=list(SCENARIOS[1:]))
-    parser.add_argument("--overlaps", nargs="+", choices=OVERLAPS, default=["shared", "partial"])
+    parser.add_argument("--overlaps", nargs="+", choices=OVERLAPS, default=["partial", "independent", "disjoint"])
     for name, default in (("topk", 2048), ("capacity", 4096), ("max-token", 262144), ("block-size", 64), ("seed", 2026)):
         parser.add_argument("--" + name, type=int, default=default)
     parser.add_argument("--warmup", type=int, default=10)
@@ -295,9 +310,9 @@ def main():
             report["environment"] = environment
             if args.correctness_report is not None:
                 from checks.check_joint_plan import validate_gate_report
-                report["gate"] = validate_gate_report(args.correctness_report, environment, args.regression_repeat)
+                report["gate"] = validate_gate_report(args.correctness_report, environment, args.regression_repeat, args.implementations)
             else:
-                report["gate"] = run_gate(torch, args.regression_repeat, session / "gate_failure")
+                report["gate"] = run_gate(torch, args.regression_repeat, session / "gate_failure", args.implementations)
             for mode, case in tasks:
                 current = session / mode / case["scenario"] / case["overlap"] / f"mtp{case['mtp']}"
                 result = capture(torch, torch_npu, case, args.implementations, args, current)
