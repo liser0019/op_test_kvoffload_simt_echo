@@ -17,7 +17,7 @@ def run_one(torch, case, label, failure_dir=None, implementations=common.DEFAULT
     records = []
     for name in implementations:
         bundle = common.prepare(torch, case, name, inputs)
-        result = common.audit(torch, case, bundle, repeats=2, failure_dir=failure_dir)
+        result = common.audit(torch, case, bundle, repeats=5, failure_dir=failure_dir)
         records.append({"implementation": name, "layout": bundle["layout"], "audit": result})
         common.close(bundle)
     print("联合Plan门禁通过:", label, flush=True)
@@ -39,6 +39,8 @@ def continuous_gate(torch, failure_dir=None, implementations=common.DEFAULT_IMPL
             if step == 5:
                 # 同一请求的行不连续：按连续片段分别规划，不越片段共享。
                 current["token_to_req"][:] = [0, 1, 0, 1, 0, 1, 0, 1]
+            bundle["phase"] = f"continuous-step-{step + 1}/{pattern}"
+            bundle["workload"] = {key: current.get(key) for key in bundle["workload"]}
             common.update_inputs(torch, bundle, current)
             common.poison(bundle)
             torch.npu.synchronize()

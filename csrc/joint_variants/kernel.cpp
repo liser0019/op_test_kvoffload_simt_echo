@@ -678,6 +678,9 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
   } else {
+  // mask16 only: single-VF launch-structure candidate workaround; root cause unconfirmed.
+  // VF<true> still dispatches private rows when jointHashCapacity == 0.
+#if JOINT_OPT_MASK != 16
   if (tilingData.jointHashCapacity == 0U) {
   asc_vf_call<SparseKvPlanRuntimeVf<false>>(
       dim3(PLAN_THREADS), scanWorkspace, reinterpret_cast<__gm__ int64_t*>(reqIds),
@@ -693,6 +696,7 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
   } else {
+#endif
   asc_vf_call<SparseKvPlanRuntimeVf<true>>(
       dim3(PLAN_THREADS), scanWorkspace, reinterpret_cast<__gm__ int64_t*>(reqIds),
       reinterpret_cast<__gm__ int64_t*>(lastReqIds), reinterpret_cast<__gm__ int32_t*>(topkIndices),
@@ -706,7 +710,9 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
       tilingData.maxNumBlocks, tilingData.hostNumBlocks, tilingData.blockSize,
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
+#if JOINT_OPT_MASK != 16
   }
+#endif
   }
 #else
   asc_vf_call<SparseKvPlanRuntimeVf>(

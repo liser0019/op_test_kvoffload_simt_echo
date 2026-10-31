@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import time
 import numpy as np
 sys.dont_write_bytecode = True
 import joint_plan_common as common
@@ -98,6 +99,7 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
               for name, bundle in bundles.items()}
     for iteration in range(args.warmup):
         for name in execution_order(names, iteration):
+            bundles[name]["phase"] = f"warmup-{iteration + 1}"
             common.restore(torch, bundles[name])
             common.invoke(bundles[name])
             torch.npu.synchronize()
@@ -116,11 +118,23 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
         on_trace_ready=profiler.tensorboard_trace_handler(str(destination)),
         record_shapes=False, profile_memory=False, with_stack=False, experimental_config=config) as prof:
         for step in range(args.repeat + 1):
+            if step == 1:
+                # schedule warmup=1: preceding prof.step() has started ACTIVE capture.
+                # Acquisition workaround only; never changes correctness or CSV sample gates.
+                wait_record = {"reason": "profiler_active_start_host_wait", "requested_seconds": 1.0,
+                               "start_unix_seconds": time.time(), "status": "waiting"}
+                write_json(destination / "capture_start_wait.json", wait_record)
+                start = time.monotonic()
+                print("Profiler ACTIVE started: host wait 1.0s before first target", flush=True)
+                time.sleep(1.0)
+                wait_record.update(status="completed", elapsed_seconds=time.monotonic() - start)
+                write_json(destination / "capture_start_wait.json", wait_record)
             order = execution_order(names, step)
             if step:
                 expected_order.extend(order)
                 orders.append(order)
             for name in order:
+                bundles[name]["phase"] = f"profiler-step-{step}/active-sample-{step}"
                 common.restore(torch, bundles[name])
                 with torch.profiler.record_function(f"joint_plan/mtp{case['mtp']}/{name}"):
                     common.invoke(bundles[name])
@@ -143,7 +157,7 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
             "correctness": final[name]}
     result = {"status": "passed", "workload": describe(case), "stats": stats,
               "execution_orders": orders, "audit": audits, "target_samples": records,
-              "raw_csv": [str(p) for p in paths]}
+              "raw_csv": [str(p) for p in paths], "capture_start_wait": wait_record}
     result.update(duration_ratios(stats))
     write_json(destination / "summary.json", result)
     with (destination / "kernel_summary.csv").open("w", newline="", encoding="utf-8") as stream:

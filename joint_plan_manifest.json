@@ -1,5 +1,5 @@
 {
-  "experiment": "joint-bitmap-direct-plan",
+  "experiment": "bitmap-single-vf-launch-candidate",
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
@@ -50,10 +50,10 @@
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
     "joint_plan_cases.py": "e3c30d47b958c7026a078e08b46c5ef83ca8d7c9f53a4cd7a5759d519681c664",
-    "joint_plan_common.py": "600221176c66d53aeaf9e0555e57b915e51e022c7ec3a2472bea0ba53dce2a78",
-    "profile_joint_mtp.py": "565654c35ce302131a4696ba47123ce513c588596f26dff2611d0bcc2b96a147",
+    "joint_plan_common.py": "e9d51aab42a6f1c30ff92c35b5e88c62874f807cde34061f6e6c9d97b0386458",
+    "profile_joint_mtp.py": "2cb19d90b7f71aa147c7bc4095f07cc7ccea108210281b940bd73203d48a26cf",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "249d17f90a86b236ac9696282996e874b8b05202e0ae891bafa1de6d611d2ea9",
+    "checks/check_joint_plan.py": "20eee26d4739125421950f913ca76968df287a6e2baca1aae8b95105308eabdd",
     "checks/check_joint_models.py": "d08da47d2d6b6487c0fac8c3f404dbcaf670bad2bcc05b8e06f6d83379434a9c",
     "checks/joint_build_info.py": "3841e15c72f9cbbfc4bbb88c5a232073b60402bbb9f18e01e9b95c6a523106d5",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
@@ -72,13 +72,16 @@
     "joint_variants.py": "7725fc7eb680a33f8f87576cf91e7d13e1506cc2d44ea7dda6e5a9af51b558ba",
     "checks/generate_joint_variants.py": "ed135ce72709e0157730bcb77742fe757d359ee21ef0727cc9c0af363ba10def",
     "checks/check_joint_variant_kernels.py": "58a5cab692063c6c0b47c14def964ccf15fd5f19142df0f59ce5314563298d1b",
-    "checks/joint_variant_cpu_driver.cpp": "b0ec2bbdb6d34f9a9230c0a65a16d6a551edc77c694c4d3c70c2dc00cdf88308",
+    "checks/joint_variant_cpu_driver.cpp": "51e4c1a6ef5428d6b5a08ef08cad4490a3414015d456471cf7add4836a553dfa",
     "checks/simt_variants/cpu_runtime.h": "ff548eac8dbb18c69c6266adb4958f5e1c52b8e5cf096e30edddc452467b7471",
     "csrc/joint_variants/sparse_kv_joint_plan.h": "41b4ca42fea459bbfa6e2a77c8176cffe115c3d664faf8d9aedf905a258f6f82",
     "csrc/joint_variants/plugin.cpp": "dece99c4e987bb1376a80fdb27677016626212ff6fb4ec1060773d91facbac89",
     "csrc/joint_variants/options.h": "d733cb9d518ff20bd0d18a53025034acb988c08da9789a2f4cc58ad7273700f3",
-    "csrc/joint_variants/kernel.cpp": "8da3a2e0f8c2254baaf2b8959799cd9442b522359e0e3c256863c0e709716ffc",
-    "csrc/joint_variants/bitmap_plan.h": "1ef99a8599e32ec129cf118ec3aa60f81b18c5b9d9b9fc0ad5a2f58782988e0e"
+    "csrc/joint_variants/kernel.cpp": "126c2fdec9028ff4acd1ada8152c9a691c26c45c8e5c33da2e76ba7d88e31881",
+    "csrc/joint_variants/bitmap_plan.h": "1ef99a8599e32ec129cf118ec3aa60f81b18c5b9d9b9fc0ad5a2f58782988e0e",
+    "checks/run_bitmap_single_vf_probe.py": "ac44c6b9cfcbe022c568908759dd733326a2693aaa5110ce570a25629bce08d7",
+    "checks/check_bitmap_launch_structure.py": "ab116eb12a3c9565e2e74d984430e7d96a996667e065d57d5eae659e1e47ca42",
+    "scripts/test_bitmap_single_vf.sh": "bc6b036e571f560e05e3943d3bc0094055d40116819339cec42bccc5be19d8b5"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -118,5 +121,10 @@
     "b": "reuse per-query union hash bucket",
     "c": "write resident only on reset/invalidation",
     "d": "one union overflow reduction per row"
+  },
+  "launch_workaround": {
+    "base": "84769ae5d30b9f1ee1cc04ee34e34b27c86c5ee2",
+    "scope": "mask16 AllowJoint=true invokes VF<true> only",
+    "status": "candidate workaround; root cause unconfirmed; not locally CANN/NPU validated"
   }
 }

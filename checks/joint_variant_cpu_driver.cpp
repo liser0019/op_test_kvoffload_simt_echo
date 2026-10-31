@@ -12,7 +12,9 @@ extern "C" __attribute__((visibility("default"))) void run_variant(void** p, con
     (int32_t*)p[12], (int32_t*)p[13], (int32_t*)p[14], \
     d[1], d[2], start, d[0], d[3], d[4], d[5], d[6], d[7], d[8], d[9], \
     (int32_t)d[10], (int32_t*)p[15], (int32_t*)p[16], (int32_t*)p[17], d[11], d[12]
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16
+#if JOINT_OPT_MASK == 16
+      SparseKvPlanRuntimeVf<true>(VF_ARGUMENTS);
+#elif JOINT_OPT_MASK & 1
       if (d[11] == 0) SparseKvPlanRuntimeVf<false>(VF_ARGUMENTS);
       else SparseKvPlanRuntimeVf<true>(VF_ARGUMENTS);
 #else

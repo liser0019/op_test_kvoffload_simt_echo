@@ -110,7 +110,8 @@ def prepare(torch, case, name, inputs=None):
     if name in VARIANTS and native.get("variant_mask") != VARIANTS[name]:
         raise AssertionError("Prepared variant mask mismatch")
     native["experiment"] = description(name)
-    return {"name": name, "torch": torch, "joint_enabled": enabled, "inputs": inputs, "state": tensors,
+    return {"name": name, "torch": torch, "invocation_count": 0,
+            "workload": {key: case.get(key) for key in ("scenario", "overlap", "mtp", "rows", "requests", "topk", "capacity", "max_token", "seed")}, "joint_enabled": enabled, "inputs": inputs, "state": tensors,
             "buffers": buffers, "initial": initial, "host_initial": host,
             "ordered": ordered, "attrs": attrs, "context": context, "layout": info | native}
 
@@ -122,6 +123,7 @@ def restore(torch, bundle):
 
 
 def invoke(bundle):
+    bundle["invocation_count"] = bundle.get("invocation_count", 0) + 1
     if bundle["name"] == "abcdf":
         bundle["torch"].ops.sparse_kv_plan_op.plan_abcdf(*bundle["ordered"], *bundle["attrs"])
     else:
@@ -163,6 +165,9 @@ def dump_failure(case, bundle, destination):
     try:
         destination = Path(destination)
         destination.mkdir(parents=True, exist_ok=True)
+        (destination / (bundle["name"] + "_failure_context.json")).write_text(json.dumps({
+            "implementation": bundle["name"], "invocation_count": bundle.get("invocation_count", 0),
+            "phase": bundle.get("phase"), "workload": bundle.get("workload", {})}, ensure_ascii=False, indent=2))
         values = {"input_actual_" + key: tensor.cpu().numpy().copy()
                   for key, tensor in bundle["inputs"].items()}
         values.update({"input_expected_" + key: case[key] for key in INPUTS})
@@ -178,9 +183,10 @@ def dump_failure(case, bundle, destination):
             pass
 
 
-def audit(torch, case, bundle, repeats=3, failure_dir=None, progress_every=0):
+def audit(torch, case, bundle, repeats=5, failure_dir=None, progress_every=0):
     result = None
     for iteration in range(repeats):
+        bundle["phase"] = f"audit-{iteration + 1}/{repeats}"
         try:
             restore(torch, bundle)
             poison(bundle)
