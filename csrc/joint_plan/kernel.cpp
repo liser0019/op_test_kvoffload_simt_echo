@@ -567,10 +567,10 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
     const bool assigned = jointHashCapacity == 0U || group % rowStride == rowStart;
     if (assigned) {
       if (scratchElements <= PLAN_ROW_UB_LIMIT_ELEMENTS) {
-        ProcessRequestRun(args, row, end, scanWorkspace + PLAN_SCAN_STORAGE_ELEMENTS, scanWorkspace);
+        ProcessRequestRun(args, row, end, scanWorkspace + PLAN_SCAN_STORAGE_ELEMENTS, scanWorkspace, rowModes);
       } else {
         ProcessRequestRun(args, row, end, compactWorkspace + static_cast<uint64_t>(row) * scratchElements,
-                          scanWorkspace);
+                          scanWorkspace, rowModes);
       }
     }
     ++group;

@@ -64,18 +64,41 @@ def read_kernels(paths, names, repeat, expected_order):
 
 
 def execution_order(names, iteration):
-    return list(names) if iteration % 2 == 0 else list(reversed(names))
+    # 三路每3轮覆盖所有执行位置，每6轮覆盖全部排列；50次的位置差至多1。
+    count = len(names)
+    sequence = list(names) if (iteration // count) % 2 == 0 else list(reversed(names))
+    offset = iteration % count
+    return sequence[offset:] + sequence[:offset]
+
+
+def duration_ratios(stats):
+    pairs = (("private", "abcdf"), ("joint", "abcdf"), ("private", "joint"))
+    return {f"{left}_over_{right}_p50": stats[left]["p50_us"] / stats[right]["p50_us"]
+            for left, right in pairs if left in stats and right in stats}
 
 
 def capture(torch, torch_npu, case, names, args, destination):
+    bundles = {}
+    try:
+        return _capture(torch, torch_npu, case, names, args, destination, bundles)
+    except BaseException:
+        for bundle in bundles.values():
+            common.dump_failure(case, bundle, destination / "failure_state")
+        raise
+
+
+def _capture(torch, torch_npu, case, names, args, destination, bundles):
     inputs = common.upload_inputs(torch, case)
-    bundles = {name: common.prepare(torch, case, name, inputs) for name in names}
-    audits = {name: common.audit(torch, case, bundle) for name, bundle in bundles.items()}
+    for name in names:
+        bundles[name] = common.prepare(torch, case, name, inputs)
+    audits = {name: common.audit(torch, case, bundle, failure_dir=destination / "failure_state")
+              for name, bundle in bundles.items()}
     for iteration in range(args.warmup):
         for name in execution_order(names, iteration):
             common.restore(torch, bundles[name])
             common.invoke(bundles[name])
             torch.npu.synchronize()
+            common.check(case, bundles[name])
     for bundle in bundles.values():
         # audit已经至少执行过一次，warmup=0也能检查最终状态。
         if args.warmup:
@@ -99,8 +122,7 @@ def capture(torch, torch_npu, case, names, args, destination):
                 with torch.profiler.record_function(f"joint_plan/mtp{case['mtp']}/{name}"):
                     common.invoke(bundles[name])
                     torch.npu.synchronize()
-                if args.verify_each_sample:
-                    common.check(case, bundles[name])
+                common.check(case, bundles[name])  # 逐样本必检；错误输入不恢复，不继续调用。
             prof.step()
     final = {name: common.check(case, bundle) for name, bundle in bundles.items()}
     paths = sorted(destination.rglob("kernel_details.csv"))
@@ -111,6 +133,7 @@ def capture(torch, torch_npu, case, names, args, destination):
     for name in names:
         samples = [r["duration_us"] for r in records if r["implementation"] == name]
         stats[name] = summary(samples) | {"samples_us": samples,
+            "raw_csv": sorted({r["csv"] for r in records if r["implementation"] == name}),
             "us_per_query_row_p50": float(np.percentile(samples, 50)) / case["rows"],
             "us_per_request_p50": float(np.percentile(samples, 50)) / case["requests"],
             "joint_enabled": bundles[name]["joint_enabled"], "layout": bundles[name]["layout"],
@@ -118,8 +141,7 @@ def capture(torch, torch_npu, case, names, args, destination):
     result = {"status": "passed", "workload": describe(case), "stats": stats,
               "execution_orders": orders, "audit": audits, "target_samples": records,
               "raw_csv": [str(p) for p in paths]}
-    if "private" in stats and "joint" in stats:
-        result["private_over_joint_p50"] = stats["private"]["p50_us"] / stats["joint"]["p50_us"]
+    result.update(duration_ratios(stats))
     write_json(destination / "summary.json", result)
     with (destination / "kernel_summary.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
@@ -128,7 +150,7 @@ def capture(torch, torch_npu, case, names, args, destination):
             writer.writerow([name, case["mtp"], case["requests"], case["rows"], stat["count"], stat["p50_us"],
                              stat["p95_us"], final[name]["total_transfer_descriptors"]])
     for bundle in bundles.values():
-        bundle["context"].close()
+        common.close(bundle)
     print(f"{case['scenario']}/{case['overlap']}/MTP={case['mtp']}: " +
           ", ".join(f"{n}={s['p50_us']:.3f}us" for n, s in stats.items()), flush=True)
     return result
@@ -156,7 +178,8 @@ def mtp_comparison(runs):
 def report_text(report):
     lines = ["# 联合Plan MTP=0/1/3 profiling", "",
         "单次调用处理所有query行；数据来自kernel_details.csv，单位μs。", "",
-        "private为本新版joint关闭后的逐行ABCDF路径，含新增映射发布；不等同历史原版二进制。",
+        "abcdf为原13_abcdf独立kernel及原15-tensor接口；不经过RunPrivateRow，不生成联合协议元数据。",
+        "private为本新版joint关闭后的逐行ABCDF路径，含新增映射发布。",
         "MTP=0时joint列也关闭合并；保持同一实现的非MTP行为。", "",
         "| 对照 | 工况/TopK重合 | MTP | 请求/行 | 实现 | P50 μs | P95 μs | 样本数 | miss记录总数 | 共享/溢出组数 |",
         "|---|---|---:|---|---|---:|---:|---:|---:|---|"]
@@ -166,13 +189,17 @@ def report_text(report):
             c = stat["correctness"]
             lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | "
                 f"{w['requests']}/{w['query_rows']} | {name} | {stat['p50_us']:.3f} | {stat['p95_us']:.3f} | "
-                f"{stat['count']} | {c['total_transfer_descriptors']} | {c['joint_groups']}/{c['overflow_groups']} |")
-    lines += ["", "## 同一MTP输入下：逐行/联合耗时比", "",
-              "| 对照 | 工况/重合模式 | MTP | private P50 / joint P50 |", "|---|---|---:|---:|"]
+                f"{stat['count']} | {c['total_transfer_descriptors']} | " +
+                ("不适用 |" if name == "abcdf" else f"{c['joint_groups']}/{c['overflow_groups']} |"))
+    lines += ["", "## 同一MTP输入下：三方耗时比", "",
+              "比值均为左侧P50除以右侧P50；大于1表示左侧耗时更长。", "",
+              "| 对照 | 工况/重合模式 | MTP | private/abcdf | joint/abcdf | private/joint |",
+              "|---|---|---:|---:|---:|---:|"]
     for run in report["runs"]:
-        if "private_over_joint_p50" in run:
-            w = run["workload"]
-            lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | {run['private_over_joint_p50']:.3f} |")
+        w = run["workload"]
+        values = [f"{run[key]:.3f}" if key in run else "—"
+                  for key in ("private_over_abcdf_p50", "joint_over_abcdf_p50", "private_over_joint_p50")]
+        lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | " + " | ".join(values) + " |")
     lines += ["", "## 相对MTP关闭：一次调用耗时比", "",
         "| 对照 | 工况/重合模式 | 实现 | MTP | MTP开启 P50 / MTP关闭 P50 |",
         "|---|---|---|---:|---:|"]
@@ -181,12 +208,27 @@ def report_text(report):
                      f"{item['mtp']} | {item['on_over_off_p50']:.3f} |")
     lines += ["", "固定请求数时MTP=0/1/3展开1/2/4倍query行；固定行数仅为辅助控制。",
         "按行/请求除法是吞吐归一化，不能视作独立请求延时。场景命名指第0行历史缓存构造，实际miss见表。",
-        "每行currentSlots、owner/page映射、全部持久状态、LRU和miss列表已在计时外核对。",
+        "每行currentSlots、全部持久状态、LRU和miss列表均核对；private/joint另核对owner/page映射。",
         "联合miss顺序/槽位可不同，不强求与private的LRU逐字相等。",
-        "计时含union去重/容量判断/回退/映射写出；不含tiling准备和框架恢复。",
+        "private/joint计时含其调度、union/回退和映射发布；abcdf只测原独立kernel。",
+        "abcdf保留原接口逐次tiling上传，private/joint采用prepared；上传/恢复均不计入目标kernel时长。",
         "不执行真实Transfer或SFA；miss记录减少不能直接换算端到端收益。",
         "固定输入与地址、恢复后预热；不代表冷cache或生产TopK轨迹。",
         "只在退出码0、complete元数据、COMPLETE.json和report.md均存在时认定整轮完成。"]
+    env = report.get("environment", {})
+    lines += ["", "## 设备、库与编译身份", "",
+        f"- 设备：{env.get('device')} / {env.get('device_name')}；主机：{env.get('hostname')}",
+        f"- 库：{env.get('library')}；SHA256：{env.get('library_sha256')}",
+        f"- 编译器：{env.get('identity', {}).get('compiler')}",
+        f"- 编译选项：{env.get('identity', {}).get('flags')}",
+        "- 完整源码身份、输入指纹与原始样本：capture_metadata.json；原始数据索引：data_index.json。",
+        "", "## 原始CSV索引", "",
+        "| 对照 | 工况/重合模式 | MTP | 实现 | 原始CSV路径 |", "|---|---|---:|---|---|"]
+    for run in report["runs"]:
+        w = run["workload"]
+        for name, stat in run["stats"].items():
+            lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | " +
+                         "<br>".join(stat["raw_csv"]) + " |")
     return "\n".join(lines) + "\n"
 
 
@@ -204,11 +246,14 @@ def main():
         parser.add_argument("--" + name, type=int, default=default)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repeat", type=int, default=50)
-    parser.add_argument("--verify-each-sample", action="store_true")
+    parser.add_argument("--verify-each-sample", action="store_true", default=True,
+                        help="兼容旧命令；三方现在始终逐样本校验，不能关闭")
+    parser.add_argument("--regression-repeat", type=int, default=100)
+    parser.add_argument("--correctness-report", type=Path, help="复用同库/同设备完整门禁，避免重复运行100次回归")
     parser.add_argument("--describe-only", action="store_true")
-    parser.add_argument("--output", type=Path, default=Path("/dev/shm/mtp_joint_profile"))
+    parser.add_argument("--output", type=Path, default=Path("/workspace/joint_plan_results/profile"))
     args = parser.parse_args()
-    if args.warmup < 0 or args.repeat <= 0 or 0 not in args.mtp:
+    if args.warmup < 0 or args.repeat <= 0 or args.regression_repeat <= 0 or 0 not in args.mtp:
         parser.error("warmup>=0、repeat>0且mtp列表必须含0")
     for key in ("mtp", "implementations", "scenarios", "overlaps"):
         if len(getattr(args, key)) != len(set(getattr(args, key))):
@@ -239,6 +284,7 @@ def main():
     current = session
     report = {"status": "running", "storage": storage, "runs": [], "mtp_comparison": [],
               "warmup": args.warmup, "repeat": args.repeat, "profiler_warmup_steps": 1,
+              "verify_each_sample": True, "regression_repeat": args.regression_repeat,
               "timing": "torch_npu.profiler kernel duration (us)", "scope": "Plan only; no Transfer/SFA",
               "implementations": args.implementations, "mtp": args.mtp}
     print("联合Plan矩阵目录:", session, flush=True)
@@ -247,7 +293,11 @@ def main():
             write_json(metadata, report)
             torch, torch_npu, environment = common.load_runtime(args)
             report["environment"] = environment
-            report["gate"] = run_gate(torch)
+            if args.correctness_report is not None:
+                from checks.check_joint_plan import validate_gate_report
+                report["gate"] = validate_gate_report(args.correctness_report, environment, args.regression_repeat)
+            else:
+                report["gate"] = run_gate(torch, args.regression_repeat, session / "gate_failure")
             for mode, case in tasks:
                 current = session / mode / case["scenario"] / case["overlap"] / f"mtp{case['mtp']}"
                 result = capture(torch, torch_npu, case, args.implementations, args, current)
@@ -255,6 +305,12 @@ def main():
                 report["runs"].append(result)
                 write_json(metadata, report)
             report["mtp_comparison"] = mtp_comparison(report["runs"])
+            # 原始数据索引只引用本机路径；不上传源码、输入、采集数据或二进制。
+            write_json(session / "data_index.json", {"status": "data_index_only", "runs": [
+                {"comparison": run["comparison"], "workload": run["workload"],
+                 "implementations": {name: {"kernel_name": common.KERNELS[name],
+                     "count": stat["count"], "raw_csv": stat["raw_csv"]}
+                     for name, stat in run["stats"].items()}} for run in report["runs"]]})
             report["status"] = "finalizing"
             write_json(metadata, report)
             (session / "report.pending.md").write_text(report_text(report))

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# 联合Plan独立直调构建：依赖 → 原SIMT编译选项 → private/joint两个入口。
+# 原独立ABCDF + 联合框架private/joint：相同-O3与SIMT编译选项。
 # 不使用算子自动发现、子目录注册宏、setup.py 或 wheel 打包。
 cmake_minimum_required(VERSION 3.16)
 project(mtp_joint_plan LANGUAGES CXX)
@@ -127,7 +127,21 @@ add_custom_command(OUTPUT "${JOINT_OBJECT}"
         "${JOINT_ROOT}/joint_plan_manifest.json"
     COMMENT "Compile preserved ABCDF + MTP joint Plan" VERBATIM)
 set_source_files_properties("${JOINT_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
-add_library(mtp_joint_plan_ops SHARED "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}" "${JOINT_OBJECT}")
+# Compile the actual frozen 13_abcdf translation unit and its original plugin.
+# This path never calls RunPrivateRow and never publishes joint metadata.
+set(ABCDF_DIR "${JOINT_ROOT}/csrc/plan_variants/13_abcdf")
+set(ABCDF_COMMON "${JOINT_ROOT}/csrc/plan_variants/common")
+set(ABCDF_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/abcdf_original.o")
+file(GLOB ABCDF_HEADERS CONFIGURE_DEPENDS "${ABCDF_DIR}/*.h" "${ABCDF_COMMON}/*.h")
+add_custom_command(OUTPUT "${ABCDF_OBJECT}"
+    COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+        ${JOINT_FLAGS} ${JOINT_INCLUDES} -I${ABCDF_DIR} -I${ABCDF_COMMON}
+        -c "${ABCDF_DIR}/kernel.cpp" -o "${ABCDF_OBJECT}"
+    DEPENDS "${ABCDF_DIR}/kernel.cpp" ${ABCDF_HEADERS} "${JOINT_ROOT}/joint_plan_manifest.json"
+    COMMENT "Compile original independent 13_abcdf (mask47, 1024 threads)" VERBATIM)
+set_source_files_properties("${ABCDF_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+add_library(mtp_joint_plan_ops SHARED "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
+    "${JOINT_OBJECT}" "${ABCDF_DIR}/plugin.cpp" "${ABCDF_OBJECT}")
 separate_arguments(TORCH_FLAGS_LIST NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 target_compile_options(mtp_joint_plan_ops PRIVATE ${TORCH_FLAGS_LIST})
 target_include_directories(mtp_joint_plan_ops SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS}

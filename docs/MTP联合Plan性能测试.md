@@ -1,258 +1,198 @@
-# 新版联合 Plan：MTP=0、1、3 性能测试
+# Joint Plan 输入错写修复与三方 MTP profiling
 
-## 1. 本分支测什么
+## 1. 本轮修改与边界
 
-分支：`feat/mtp-joint-plan-profile`。
-框架基线为 `feat/transfer-factorial-optimizations@a5beb25`，
-联合算子来自 `/home/welt/workspace/kvoffload/vllmascend_mtp_joint_plan` 的
-`feat/mtp-joint-plan@bba63d05762a467e496c0f8a8ae687dc632a706f`。
+基线：`de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd`。
+当前分支：`feat/mtp-joint-plan-profile`，保留原分支上的工作。
 
-默认固定32请求，TopK2048、capacity4096、max_token262144、block64：
+### 线程1发布的规避修复
 
-| 参数 | 关闭MTP | MTP=1 | MTP=3 |
-|---|---:|---:|---:|
-| draft token数 | 0 | 1 | 3 |
-| 每请求query行数 | 1 | 2 | 4 |
-| query总行数 | 32 | 64 | 128 |
+`rowModes`已经是VF参数；本次不增加VF入口参数，不增加tensor或workspace。
+从这个参数显式传递`__gm__ int32_t* modeOutput`，经过ProcessRequestRun到PlanJointUnion。
 
-同时测两条路径：
+仅末尾逐行循环中的模式发布改成：
 
-- `joint`：MTP开启时按请求组联合去重；并集超过容量则整个组回退逐行规划。
-  MTP=0时关闭联合功能，沿用新版的非MTP路径。
-- `private`：始终关闭联合功能，逐行ABCDF，作为同输入的对照。
+```cpp
+if (thread == 0) {
+    int64_t remaining = misses - (row - first) * a.topk;
+    a.missCount[row] =
+        remaining <= 0 ? 0 : (remaining < a.topk ? remaining : a.topk);
+}
+if (thread == 1) {
+    modeOutput[row] = row == first ? ROW_JOINT : ROW_FOLLOWER;
+}
+// 原JointTokenValid、哈希查询及currentSlots循环继续位于本逐行循环中。
+```
 
-private包含新版的row_modes处理和owner/page映射发布，
-不是历史旧库的原始ABCDF入口。两条路径在同一新库内，使用相同计算辅助函数。
+其他rowModes读写、request reset、LRU、查询循环和barrier保持原业务逻辑。
+没有Tag、阶段拆分循环、CPU归一化或只读输入恢复。
+上游原文件保留；身份检查通过精确补丁模型核对仅允许的修复，没有关闭指纹校验。
 
-本次只执行Plan，不执行真实Transfer、SFA或draft模型。
-miss记录总数可体现后续搬运工作量的变化，但不能直接换算Transfer/SFA时延或整网收益。
+用户的服务器实验：线程0版本复现只读visible_seq_lens被模式值覆盖；
+线程1候选通过100次原始语义检查与18工况profiling。
+这是有实验依据的规避方案，**底层根因仍未确认**，不宣称证明编译器Bug，
+也不解释为补足跨线程同步。本开发机的CPU检查不替代新构建产物的设备验证。
 
-## 2. 保留了哪些代码
+## 2. 三个实现的区别
 
-原联合辅助头、配置、ABCDF计算辅助函数和SIMT VF调度逐字保留。
-来源文件保存在 `csrc/joint_plan/upstream/`，构建/运行身份检查会核对其哈希及计算区一致性。
+| 名称 | 实际设备路径 | 接口与元数据 |
+|---|---|---|
+| abcdf | 原`csrc/plan_variants/13_abcdf/kernel.cpp`及公共实现，mask47、1024线程 | 原15个tensor+5个属性；不产生row_modes、residentRows或residentBlockTable |
+| private | 联合工程关闭合并，仍调用RunPrivateRow | 保留联合调度、模式处理、映射发布和原同步 |
+| joint | 联合去重，容量足够时共享首行resident，溢出回退；线程1发布模式 | 保留每行currentSlots与联合owner/page协议 |
 
-接入改动是：
-
-1. 将注册算子入口换为独立kernel直调入口。
-2. GM tiling采用逐字段加载，避免跨地址空间整结构体复制。
-3. 启动参数显式传动态UB大小，保留1024线程和原同步。
-4. private/joint各有唯一kernel名，用于CSV精确过滤。
-5. 由调用方持有prepared上下文，预先上传tiling，持有全部tensor。
-
-两个kernel名：
+abcdf的原kernel、variant_config、公共实现和原plugin均未改写；
+它是独立编译单元和真实独立kernel，不是private别名。
+三者在同一共享库内链接，各有唯一kernel名：
 
 ```text
-private: sparse_kv_plan_private_kernel
-joint:   sparse_kv_plan_joint_kernel
+abcdf   sparse_kv_plan_kernel_plan_abcdf
+private sparse_kv_plan_private_kernel
+joint   sparse_kv_plan_joint_kernel
 ```
 
-没有增加clock打点、阶段写GM或跨核同步。
-新库由 `build_joint_plan.sh` 单独构建，不需要安装vLLM，也不编译Transfer或旧Scan候选。
+abcdf保留原接口的逐次tiling准备/上传，private/joint采用prepared上下文。
+本轮比较设备kernel Duration，上传、状态恢复、校验和CPU等待不加入目标耗时。
+不能把这些结果解释为三种接口的端到端调用延迟。
 
-## 3. 输入控制与TopK重合模式
+独立ABCDF按原接口核对3个持久状态、currentSlots、miss_count和有效miss前缀；
+不存在的联合元数据不伪造、不加进独立kernel。private/joint额外核对所有联合协议字段。
 
-相同seed、请求数和场景下，MTP=0/1/3共用：
+## 3. 主矩阵和输入控制
 
-- 每个请求的第0行query；
-- 原始resident内容及LRU顺序；
-- request ID和随机物理页表。
+默认requests=32、TopK=2048、capacity=4096、max_token=262144、
+block_size=64、seed=2026，MTP表示draft token数：
 
-每个位置p的可见长度为 `context+p+1`。
-MTP开启时stable=context；关闭时stable=visible。
-各行query含自身可见的新token，不能通过未来行的共享缓存绕过因果可见性。
-预埋的相同旧投机后缀在三种配置下均会失效。
+| MTP | q_len | query_rows |
+|---|---:|---:|
+| 0 | 1 | 32 |
+| 1 | 2 | 64 |
+| 3 | 4 | 128 |
 
-| overlap | 构造 | 作用 |
-|---|---|---|
-| shared | 历史TopK高度重合，新token按位置增加 | 联合规划的主要收益场景 |
-| partial | 每个后续位置将历史窗口右移topk/4 | 覆盖稳定历史选择也不同的情况 |
-| disjoint | 历史窗口右移topk | 压测大并集及溢出回退成本 |
+MTP=0时joint列同样关闭联合规划。
+默认三个场景：full_cache_75pct、full_cache_90pct、full_cache_stable_hit；
+两种重合度：shared、partial，共18个输入工况，每工况三路各50个正式样本。
 
-在默认生产尺寸、所有来源有效时，每请求的理论并集大小为：
+沿用原用例生成器。固定请求数时三种MTP的第0行query、初始resident、LRU和页表相同。
+三路共用同一组只读设备输入，各自持有独立的可变状态，调用前恢复相应初始状态。
+warm joint按可联合/溢出布局初始化模式，避免把首次布局切换的冷加载冒充稳定命中场景。
 
-| MTP | shared | partial | disjoint |
-|---|---:|---:|---:|
-| 0 | 2048 | 2048 | 2048 |
-| 1 | 2049 | 2560 | 4095 |
-| 3 | 2051 | 3584 | 8186 |
+visible=context+p+1；MTP开启时stable=context。
+每行保留自身TopK顺序、重复位置和因果可见性。
+后续行加载了未来token，不能使前面的行读取它。
+shared高度重合，partial按位置错开历史选择；disjoint可选，用于大并集和容量回退。
+默认生产尺寸下shared的U为2048/2049/2051，partial为2048/2560/3584；
+disjoint在MTP=3时可溢出。这些是构造输入的集合大小，不是设备性能结果。
 
-这些是输入构造的集合大小，不是实测时延。实际报告重新计算并核对各组U。
-MTP=1时两行最多2*TopK=4096项，因此默认容量下disjoint也不必溢出；不能只凭模式名宣称回退。
+场景名称指第0行历史构造的名义命中率；新token和其他位置的选择影响实际miss。
+full_cache_stable_hit的稳定历史命中，新token仍miss，不表示整次零搬运。
+报告记录实际每行miss、总descriptor、U、共享/回退组数和逻辑输入SHA256。
 
-默认场景为full_cache_75pct、full_cache_90pct、full_cache_stable_hit；均从满resident开始。
-前两者名称指第0行历史构造的名义命中比例，不保证其他query行也有相同命中率。
-第三种是第0行历史稳定部分全命中，新增token仍miss，不能称为整次调用零miss。
-每路实际miss_count、去重后搬运记录数均写入报告。
-可显式加入cold_reset，核对请求身份变化后的冷路径。
+## 4. 验证门禁
 
-warm联合输入按当前实际布局初始化row_modes：能联合的组为leader/follower；
-溢出组保持private。这样重复采集测量稳定布局；布局转换成本在另外的连续状态门禁验证。
-两路原始缓存内容相同，编码/owner映射不同，不能要求输入状态tensor逐字相同。
+- 既有重复token、非法来源、因果可见性、LRU、capacity边界、UB/GM及设备保护区保留。
+- 既有共享→溢出→共享、请求变化、非连续请求片段和NPU自身状态连续续用保留。
+- 每个正式工况先做污染审计，所有预热调用和正式样本均校验只读输入与完整输出。
+- 默认100次错写回归，尺寸固定为已复现的32请求/MTP1/2048/4096/262144/shared/75%。
+  每次只恢复可变状态；**从不恢复只读输入**。发现一次错误立即停止，不能继续采样。
+- 默认不跑1000次；可用--regression-repeat调整正整数次数。
+- 可复用同主机、同设备、同库SHA、同源码/编译身份、覆盖三路且回归次数足够的完整门禁报告。
+  仅regression-only报告不能代替完整门禁。
+- 失败在运行机器保存`*_failure_state.npz`，包括实际/期望输入、可变状态及保护区。
+  二次保存失败只警告，保留原异常；不恢复输入掩盖错写。
 
-## 4. 正确性门禁
+CPU模型检查只验证标量语义、补丁范围、调用接口及CSV/报告逻辑；
+不能复现或证明NPU编译后错写已经消失。
 
-`checks/check_joint_plan.py`覆盖：
+## 5. 服务器一次性操作
 
-- MTP=0/1/3、三种重合模式、冷/热状态。
-- U=capacity及U=capacity+1边界。
-- 重复query、未来位置、非法token/request/page、非2次幂block。
-- active_rows负值/0/截断到组中间/超过上限、非活动尾部保持不变。
-- 超过64个请求组、一核顺序处理多组与scratch复用。
-- 同一shape下private走UB、joint走GM。
-- 共享→溢出回退→共享、请求身份变化、非连续同请求片段。
-- prepared上下文关闭、重绑定、属性/形状改变在下发前拒绝。
-
-连续用例直接使用上一轮NPU写出的持久状态，不从golden重写设备状态。
-每个矩阵正式工况还会独立做3轮污染审计，并在采集后再检查。
-每个可写tensor与workspace都有前后保护区；输出和scratch会填充哨兵，排除旧答案假通过。
-
-private使用独立列表/字典golden核对持久状态、currentSlots、有效miss前缀。
-joint由CPU集合模型计算合法并集与应缺失集合，再检查：
-
-1. 每个唯一missing恰好输出一次，分配槽符合可淘汰LRU前缀。
-2. 全量slot_to_token、LRU、last_req_id、row_modes正确；follower未被擅自改写。
-3. 每行currentSlots通过自己的owner，指向自身选择的合法token；未来token仍为-1。
-4. residentRows与供SFA使用的residentBlockTable一致。
-
-联合miss可以有不同的桶遍历顺序，不要求它与private的槽号和LRU逐字相等。
-这验证Plan的索引/元数据语义，没有声称验证了真实KV payload或SFA数值结果。
-
-## 5. 服务器构建和小尺寸试跑
-
-以下命令仅在950PR服务器执行。开发机遵守禁跑要求，未执行Python、CPU检查、构建或NPU测试。
-上游实现此前的CPU回归结果不等同于本直调移植已通过验证。
+先进入包含本次修改的仓库根目录。产物使用持久化/workspace，不上传公司数据或二进制。
+源码/共享库所在文件系统需允许加载.so。以下明确使用设备2和指定Python。
 
 ```bash
-source /usr/local/Ascend/cann-9.1.0/set_env.sh  # 按实际安装位置调整
-unset ASCEND_LAUNCH_BLOCKING ASCEND_RT_VISIBLE_DEVICES
+source /usr/local/Ascend/cann-9.1.0/set_env.sh
+export PYTHON=/usr/local/python3.11.10/bin/python3
 export PYTHONDONTWRITEBYTECODE=1
+export TMPDIR=/workspace/joint_plan_results/tmp
+mkdir -p "$TMPDIR" /workspace/joint_plan_results
+unset ASCEND_LAUNCH_BLOCKING ASCEND_RT_VISIBLE_DEVICES
 ulimit -c 0
+set -eo pipefail
 
-# 独立新库；不要运行旧build.sh后误用旧共享库
-PYTHON=python3 JOBS=3 bash build_joint_plan.sh --soc=ascend950
+# 同一-O3和既有SIMT选项，构建三条真实设备路径
+bash build_joint_plan.sh --soc=ascend950 2>&1 | tee /workspace/joint_plan_results/build.log
 
-# 服务器CPU辅助检查：输入控制、语义拒错、CSV和统计
-python3 checks/check_joint_models.py
+# CPU模型/源码身份/CSV/报告回归，不调用NPU
+"$PYTHON" checks/check_joint_models.py 2>&1 | tee /workspace/joint_plan_results/cpu_checks.log
 
-# NPU专项门禁，默认逻辑卡0
-python3 -X faulthandler checks/check_joint_plan.py --device 0 \
-  --temp-dir /dev/shm/joint_tmp --report /dev/shm/joint_gate/report.json
+# 默认一轮100次错写回归，再做完整三方门禁
+"$PYTHON" -X faulthandler checks/check_joint_plan.py --device 2 \
+  --regression-repeat 100 --temp-dir "$TMPDIR" \
+  --report /workspace/joint_plan_results/correctness.json \
+  2>&1 | tee /workspace/joint_plan_results/correctness.log
 
-# 小尺寸矩阵：包括真实的并集溢出
-python3 -X faulthandler profile_joint_mtp.py --device 0 \
-  --requests 2 --topk 7 --capacity 16 --block-size 8 --max-token 512 \
-  --mtp 0 1 3 --overlaps shared partial disjoint \
-  --warmup 2 --repeat 4 --verify-each-sample \
-  --temp-dir /dev/shm/joint_tmp --output /dev/shm/joint_smoke
+# 主矩阵：复用刚才的完整门禁，避免重复跑100次；逐样本检查始终开启
+"$PYTHON" -X faulthandler profile_joint_mtp.py --device 2 \
+  --implementations abcdf private joint \
+  --requests 32 --mtp 0 1 3 --comparison same_requests \
+  --topk 2048 --capacity 4096 --max-token 262144 --block-size 64 --seed 2026 \
+  --scenarios full_cache_75pct full_cache_90pct full_cache_stable_hit \
+  --overlaps shared partial --warmup 10 --repeat 50 \
+  --correctness-report /workspace/joint_plan_results/correctness.json \
+  --temp-dir "$TMPDIR" --output /workspace/joint_plan_results/formal \
+  2>&1 | tee /workspace/joint_plan_results/formal.log
 ```
 
-输出/临时目录可写性、剩余字节及inode检查先于NPU初始化；阈值可配置。
-Plan-only不分配之前Transfer测试的9GiB Host池。
-不检查源码分区是否有空余空间，不自动清理文件或切换采集目录。
-/dev/shm是临时存储，结束后转存报告和原始采集。
+每一步确认退出码0再继续；pipeline的退出码由pipefail保留。
+100次是回归调用数，不是正式性能样本数；正式保留18*3*50=2700条目标kernel样本。
+门禁不能复用时脚本明确拒绝，不静默跳过。
+未提供--correctness-report时，profiling入口会自行运行一次完整门禁与100次回归。
 
-## 6. 正式MTP对比
+如只先定位输入错写，可单独运行：
 
 ```bash
-python3 -X faulthandler profile_joint_mtp.py --device 0 \
-  --requests 32 --topk 2048 --capacity 4096 --max-token 262144 \
-  --mtp 0 1 3 --comparison same_requests \
-  --overlaps shared partial disjoint \
-  --warmup 10 --repeat 50 --verify-each-sample \
-  --temp-dir /dev/shm/joint_tmp --output /dev/shm/joint_formal
+"$PYTHON" -X faulthandler checks/check_joint_plan.py --device 2 \
+  --regression-only --regression-repeat 100 --temp-dir "$TMPDIR" \
+  --report /workspace/joint_plan_results/input_write_only.json
 ```
 
-默认三种满缓存构造，以上显式加入三种重合模式；每例都采private/joint各50个样本。
-只看新版可加 `--implementations joint`，但建议第一次保留private对照。
-只想先看高度重合可改为 `--overlaps shared`，减小矩阵。
+这份报告不能拿来跳过完整三方门禁。
 
-固定行数辅助对照：
+## 6. 报告与原始数据索引
 
-```bash
-python3 -X faulthandler profile_joint_mtp.py --device 0 \
-  --mtp 0 1 3 --comparison both --requests 32 --fixed-query-rows 32 \
-  --overlaps shared --scenarios full_cache_75pct \
-  --warmup 10 --repeat 50 --temp-dir /dev/shm/joint_tmp \
-  --output /dev/shm/joint_row_control
-```
+唯一session目录位于指定output下，包括：
 
-same_query_rows时MTP=0/1/3分别是32/16/8请求，各32行。
-请求数和页表工作集不同，因此它是辅助控制，不能消除所有输入差异。
+- report.md：各路P50/P95、样本数、descriptor数量、设备/库/编译身份和原始CSV路径。
+- data_index.json：按工况、MTP、实现索引精确kernel名、样本数、原始CSV路径和输入指纹。
+- capture_metadata.json：完整原始样本、轮换顺序、只读输入指纹、源码/编译/库身份和门禁。
+- 各例summary.json、kernel_summary.csv及原始kernel_details.csv；解析前原始采集保留。
+- profile.log与COMPLETE.json。失败时保留现场，不发布成功report.md。
 
-## 7. 如何看报告
+三路按轮换与反序组合，在每6轮覆盖全部顺序；repeat=50时各执行位置次数差至多1。
+CSV解析精确匹配三个目标kernel，核对μs单位、一个分组、样本数、同流时序和实际顺序。
+TensorMove、tiling上传、辅助kernel、恢复拷贝和CPU等待均不加进目标Duration。
 
-每次目标调用前恢复对应布局的初始状态；同例两版共用同一份query/页表输入。
-tiling及设备buffer在采集前准备完毕；热路径没有结果D2H判断或tiling上传。
-每组手动预热10次，profiler额外1个warmup step，再记录50个active step。
-private/joint逐轮交换先后，MTP顺序在工况间正反轮换。
-开启逐样本检查会增加计时外的D2H和等待；两路均采用相同条件，报告仍只统计目标kernel。
+比值方向严格为分子耗时除分母耗时：
 
-目录内容：
+- private/abcdf：联合框架逐行路径相对原独立kernel。
+- joint/abcdf：联合路径相对原独立kernel。
+- private/joint：框架内逐行路径相对联合路径。
+- 各实现MTP开启/MTP关闭：同一实现相对自身MTP0。
 
-- report.md：各例P50/P95/样本数、miss总数、共享/溢出组数、两路比值、MTP开关比值。
-- capture_metadata.json：源码/编译/库身份、实际U、shape、逐行miss与原始样本。
-- COMPLETE.json：整轮成功标记。
-- 各例kernel_summary.csv、summary.json、原始kernel_details.csv及原始采集文件。
-- profile.log：采集与解析日志；失败会报告具体目录、日志路径和首个可定位异常。
+大于1表示分子耗时更长。没有预填历史58μs或其他性能阈值。
+单次Duration处理全部query行；按行或请求除法只是吞吐归一化。
+固定行数辅助实验通过--comparison both --fixed-query-rows 32启用，单独标记same_query_rows；
+MTP0/1/3对应32/16/8请求，不混入固定32请求的结论。
 
-统计严格核对精确kernel名、μs单位、分组、样本数、同流时序和实际下发顺序。
-不把TensorMove、状态恢复或tiling拷贝计入Plan duration。
-一次调用时间包含设备内的联合去重、容量判断、回退与owner/page映射发布。
-接口端到端时间与Event时间均不是本轮排名口径。
+只有退出码0、complete元数据、COMPLETE.json与report.md同时存在，才是整轮成功。
+数据索引本身不是成功标记。没有设备实测时不会生成虚构性能报告。
+本轮只测Plan，descriptor减少不直接代表Transfer或整网端到端加速。
 
-同一MTP的 `private P50 / joint P50` 衡量联合规划相对逐行路径的变化。
-同一实现的 `MTP开启 P50 / MTP关闭 P50` 衡量开启MTP后的整次调用代价。
-固定32请求时工作量增加到2/4倍query行，不把这个比值单独称为算法退化率。
-除以请求数或行数只做吞吐归一化，不能称作独立请求延迟。
+## 7. 可选深度profiling
 
-只有退出码0、complete元数据、COMPLETE.json与report.md同时存在才表示整轮完成。
-失败保留原始目录，不生成成功报告，不预填预计收益或性能阈值。
+`run_joint_msopprof.py`支持--implementation abcdf/private/joint与--mtp 0/1/3。
+它内部不嵌套torch profiler；外部工具应选对应精确kernel名，先通过上述独立门禁。
+不要把msprof op套在profile_joint_mtp.py外面。
 
-## 8. 单版本msopprof深度入口
-
-`run_joint_msopprof.py`内部不创建torch profiler，也不提前执行同名kernel门禁。
-先单独运行并确认passed，再套外部工具；不要套在profile_joint_mtp.py外面。
-
-```bash
-python3 -X faulthandler run_joint_msopprof.py --device 0 \
-  --implementation joint --mtp 3 --requests 32 --overlap shared \
-  --warmup 0 --repeat 1 --temp-dir /dev/shm/joint_tmp \
-  --report /dev/shm/joint_runner/check.json
-
-mkdir -p /dev/shm/joint_tmp
-export TMPDIR=/dev/shm/joint_tmp  # 外部工具的临时目录也须先设置
-
-msprof op --aic-metrics=BasicInfo --replay-mode=application --warm-up=0 \
-  --kernel-name=sparse_kv_plan_joint_kernel --launch-count=1 \
-  --output=/dev/shm/joint_basic_mtp3 \
-  python3 -X faulthandler run_joint_msopprof.py --device 0 \
-  --implementation joint --mtp 3 --warmup 0 --repeat 1 \
-  --temp-dir /dev/shm/joint_tmp --report /dev/shm/joint_runner/basic_mtp3.json
-
-msprof op --aic-metrics=Default --replay-mode=application --warm-up=0 \
-  --mstx=on --mstx-include=joint_plan_target \
-  --kernel-name=sparse_kv_plan_joint_kernel --launch-count=1 \
-  --output=/dev/shm/joint_metrics_mtp3 \
-  python3 -X faulthandler run_joint_msopprof.py --device 0 \
-  --implementation joint --mtp 3 --warmup 10 --repeat 1 --mstx \
-  --temp-dir /dev/shm/joint_tmp --report /dev/shm/joint_runner/metrics_mtp3.json
-```
-
-MTP0/1分别修改--mtp和输出目录。逐行路径需同时换implementation=private和精确kernel名。
-工具参数支持以服务器CANN版本的 `msprof op --help` 为准。
-PC Sampling/Source可在支持的工具版本中分别采集，不把深度计数采集耗时混入普通排名。
-源码映射先 `bash build_joint_plan.sh --debug-info`，保持-O3，
-所有运行命令显式加 `--library build_joint_plan_profile/libmtp_joint_plan_ops.so`，重过门禁后再采。
-工具若提前终止应用而未完成runner检查，不能把缺失passed当作通过。
-
-## 9. 阅读顺序
-
-1. joint_plan_cases.py：输入构造、U/容量判断与独立语义检查。
-2. csrc/joint_plan/sparse_kv_joint_plan.h：BuildJointUnion → PlanJointUnion → ProcessRequestRun。
-3. csrc/joint_plan/kernel.cpp：原ABCDF辅助函数、请求组调度、直调入口。
-4. csrc/joint_plan/plugin.cpp：prepared绑定、tiling、生命周期和下发。
-5. checks/check_joint_plan.py：边界与NPU状态连续续用。
-6. profile_joint_mtp.py：目标采集、CSV匹配、MTP对照报告。
-
-本轮交付状态：源码与静态一致性检查；编译、CPU回归、NPU正确性和性能均待服务器执行。
+线程1规避的底层根因、实际生成指令及新的三方时延均需设备侧继续确认。
+构建、CPU验证、NPU正确性与性能状态应分别记录，不能互相替代。

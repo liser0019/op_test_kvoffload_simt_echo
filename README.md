@@ -1,23 +1,25 @@
-# 新版联合Plan：MTP=0/1/3 profiling
+# Joint Plan线程1规避修复：ABCDF/private/joint三方MTP profiling
 
 当前分支：`feat/mtp-joint-plan-profile`。
 移植`feat/mtp-joint-plan@bba63d057`的联合去重、共享resident和容量溢出回退实现，
-默认比较32请求下MTP=0/1/3，以及同输入逐行ABCDF对照。
+默认比较32请求下MTP=0/1/3：原独立abcdf、联合框架private、线程1规避修复后的joint。
+只调整显式modeOutput传递及联合模式发布的写线程；根因未确认，不增加barrier或阶段循环。
 保留原计算辅助函数、1024线程和同步；独立构建，不要求安装vLLM。
 
 完整教程：[MTP联合Plan性能测试](docs/MTP联合Plan性能测试.md)。
 
 ```bash
 bash build_joint_plan.sh --soc=ascend950
-python3 -X faulthandler profile_joint_mtp.py --device 0 \
-  --mtp 0 1 3 --requests 32 --overlaps shared partial disjoint \
-  --warmup 10 --repeat 50 --temp-dir /dev/shm/joint_tmp \
-  --output /dev/shm/joint_formal
+python3 -X faulthandler profile_joint_mtp.py --device 2 \
+  --implementations abcdf private joint --mtp 0 1 3 --requests 32 --overlaps shared partial \
+  --warmup 10 --repeat 50 --temp-dir /workspace/joint_plan_results/tmp \
+  --output /workspace/joint_plan_results/formal
 ```
 
 先按教程小尺寸门禁和短跑，再正式采集。计时来自kernel_details.csv。
 本轮只测Plan，报告实际并集、逐行miss和回退情况；不执行Transfer/SFA。
-源码开发机未执行Python、CPU检查、编译或NPU测试，尚不宣称硬件正确性和收益。
+默认100次输入错写回归，逐样本校验不能关闭；可复用同库同设备的完整门禁报告。
+开发机仅执行CPU与静态检查，未做设备构建/NPU验证，不宣称根因已确认或新构建已上机通过。
 
 ---
 

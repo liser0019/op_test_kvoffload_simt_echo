@@ -227,3 +227,25 @@ def validate(case, before, actual, joint):
             "overflow_groups": sum(g["path"] == "overflow_private" for g in group_info),
             "miss_count_per_row": actual["miss_count"][:active].astype(int).tolist(),
             "total_transfer_descriptors": int(actual["miss_count"][:active].sum())}
+
+
+def validate_abcdf(case, before, actual):
+    """原15-tensor接口：不伪造row_modes/owner/page输出，不走联合协议归一化。"""
+    one = dict(case)
+    for key in ("last_req_ids", "slot_to_token", "lru_slots"):
+        one[key] = before[key]
+    gold = reference_simt(one)
+    active = min(case["rows"], max(0, case.get("active_rows", case["rows"])))
+    for key in ("last_req_ids", "slot_to_token", "lru_slots", "current_slots", "miss_count"):
+        np.testing.assert_array_equal(actual[key][:active], gold[key][:active], err_msg="abcdf/" + key)
+        np.testing.assert_array_equal(actual[key][active:], before[key][active:], err_msg="abcdf/inactive/" + key)
+    for key in ("miss_tokens", "miss_slots"):
+        for row in range(active):
+            count = int(gold["miss_count"][row])
+            np.testing.assert_array_equal(actual[key][row, :count], gold[key][row, :count], err_msg="abcdf/" + key)
+        np.testing.assert_array_equal(actual[key][active:], before[key][active:], err_msg="abcdf/inactive/" + key)
+    return {"status": "passed", "protocol": "original_abcdf_15_tensors; no joint metadata",
+            "groups": [{"first": r, "end": r + 1, "path": "abcdf"} for r in range(active)],
+            "joint_groups": 0, "overflow_groups": 0,
+            "miss_count_per_row": actual["miss_count"][:active].astype(int).tolist(),
+            "total_transfer_descriptors": int(actual["miss_count"][:active].sum())}

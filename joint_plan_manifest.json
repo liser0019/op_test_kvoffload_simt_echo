@@ -3,10 +3,11 @@
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
-  "upstream_policy": "ABCDF helpers, joint helper and VF dispatch unchanged; direct entry uses fieldwise GM tiling and dynamic UB launch",
+  "upstream_policy": "Frozen upstream; only explicit modeOutput forwarding and thread1 joint-mode store allowed by exact patch identity",
   "kernels": {
     "private": "sparse_kv_plan_private_kernel",
-    "joint": "sparse_kv_plan_joint_kernel"
+    "joint": "sparse_kv_plan_joint_kernel",
+    "abcdf": "sparse_kv_plan_kernel_plan_abcdf"
   },
   "mtp": [
     0,
@@ -19,29 +20,50 @@
   "correctness": "private independent scalar golden; joint union/miss/LRU/owner/currentSlots semantic invariants",
   "timing": "torch_npu.profiler kernel_details.csv Duration(us); no Event",
   "hardware_validation": "not_run_on_development_machine",
-  "local_execution": "source editing/review and static diff/hash checks only; no Python/build/CPU/NPU tests",
+  "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
-    "build_joint_plan.sh": "d201652296871a828ab1faa7a863e4e146e70dd970f3f960c0c6380d04c3ac73",
-    "joint_plan/CMakeLists.txt": "a8139bab626fcd5e67a1b3d969c452243cd47519ffd0851e83a3c54ba38d35c1",
-    "csrc/joint_plan/kernel.cpp": "5d7e1f17bc6f191c19bc17a904d44cda75b2a483d1021831f781ee77a6d5bf97",
-    "csrc/joint_plan/plugin.cpp": "ab0d7d2d850d50b797d5649da0353b34bacf96e94291f367a8d12aa559171972",
+    "build_joint_plan.sh": "3f260db9d4a066fd65e16e1da4c22862a295446ecc44a8c0868a9a81c9d3dccc",
+    "joint_plan/CMakeLists.txt": "fca1e1e12be3bb18042d2a7dba39a8d8db7533e3a662017629c5a0d5d2983a06",
+    "csrc/joint_plan/kernel.cpp": "18f265213932cf97cc441dd99b14d69f9517fdcb448a51ad6b327b73b2cad5d2",
+    "csrc/joint_plan/plugin.cpp": "6ee883de2d08f0d6eee3f03368f25e64ed5f54fa48e863ef5463d1173c6b718c",
     "csrc/joint_plan/launch.h": "bcb2fabca218780bc01ef27568d3d53f5e93765807582d46b2cae9cfed28907f",
-    "csrc/joint_plan/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
+    "csrc/joint_plan/sparse_kv_joint_plan.h": "42f47d76b6d1f4e4b0d10ce60c37f2c4091304f9ca5daedaa6a1ad22dbe3a2b9",
     "csrc/joint_plan/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
     "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
-    "joint_plan_cases.py": "faa44b925226a17edf58c763e7d33218f3ebe4f65c03495593441b7616b85334",
-    "joint_plan_common.py": "3b0956fbd7bcbff7f29113098d92ed8250929eb717625f0fc647e8b8f5458b0d",
-    "profile_joint_mtp.py": "acf6593c6dba6b1427346f54c17889eb20dd9607fce7f9564fb9a1f78be25513",
-    "run_joint_msopprof.py": "1760b431d2d008e6d33912ebbcf66993be21361c92c18e2339d0f39253db847a",
-    "checks/check_joint_plan.py": "1310b28fb6034e6fbd7416fa0c4f0c5f4d2cd87adccc57a4e1bac236dc46c843",
-    "checks/check_joint_models.py": "f87397e2bac0a0c69e93a06065c5d904b83de6097f3ee02d6dda699f0de34544",
-    "checks/joint_build_info.py": "c339f5072a05fbffa2aaa32372d0fdeffb1522f73ccd6760a17509e9b49a0ac8",
+    "joint_plan_cases.py": "0a66af3634f946d99acfa32535c63208e12aa68de68a0b2967b1940a37f10354",
+    "joint_plan_common.py": "e81fcfa35fd070c4c0fdf89631ef07eb7eefcb4e809aadd9d3b88263fb3851e5",
+    "profile_joint_mtp.py": "7b56134b421824fece1e7c4d9e3255e9ec5f521786036672661f0acaad89d6cb",
+    "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
+    "checks/check_joint_plan.py": "2a9b8471878f17c1016c598888651f8b5150134d001899bb83f522a46cd467af",
+    "checks/check_joint_models.py": "4f68a67bf7fa842bc382399db7323c0aaeaf5af285724177f8afb6b66966be82",
+    "checks/joint_build_info.py": "90a19aaa2f78a757b4785ccce2977dddeabfaa127b474671ac674f95427ad8e1",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "a0a1850a24203d005ad321ab1fd5b0af2c979da7f03399626628594b0e474bcf",
     "mtp_cases.py": "72bc420b5751f2d17cd21c32b04079c36e36d94ca49c9f4e6f7f7454a0325195",
     "plan_variants_manifest.json": "59a8cbb460c6188fd7bf45acbee9d81f31a187e460304a5408324e9357927fa1",
-    "harness_io.py": "802c3ea156ead3587c8cb47cbee746870113ad821be908444494a9d06979905f"
+    "harness_io.py": "802c3ea156ead3587c8cb47cbee746870113ad821be908444494a9d06979905f",
+    "csrc/plan_variants/13_abcdf/kernel.cpp": "03a243b936dca7596da29719ebf9c5a3613ffecc1419f16f183da4740bb0b4b7",
+    "csrc/plan_variants/13_abcdf/plugin.cpp": "2f53c4be78e464155a269b7d28690d8fd64fcc1d30ed4adcd3bdd0bb4d1265c0",
+    "csrc/plan_variants/13_abcdf/symbol_aliases.h": "ebd3154a22efcb5a77195e13f090fb0c89ea6541f874f7a8df9c357992796006",
+    "csrc/plan_variants/13_abcdf/variant_config.h": "e46868124d3b5b534852f3fb6ad2044af9671e43414d43b15d677896e7a9ec43",
+    "csrc/plan_variants/common/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222",
+    "csrc/plan_variants/common/plan_kernel_impl.h": "6564d52abe1b41ca60df8b4bb27dae6cc4fa0430473b6c3bfeb0056a4ef25e84",
+    "csrc/plan_variants/common/plan_plugin_impl.h": "0d344379aa4f7f406f5adfe55f52dc67ec8c8883b544d3e50253d5da58d4bd05",
+    "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620"
+  },
+  "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
+  "workaround": {
+    "method": "existing VF rowModes -> ProcessRequestRun -> PlanJointUnion modeOutput; publish joint mode on thread1 only",
+    "root_cause": "unconfirmed; empirical device workaround, not a synchronization repair",
+    "user_device_evidence": "100 raw semantic checks and 18-case profiling completed with thread1; not local hardware verification"
+  },
+  "abcdf_baseline": {
+    "path": "csrc/plan_variants/13_abcdf",
+    "mask": 47,
+    "threads": 1024,
+    "interface": "original 15 tensors + 5 attributes; no joint metadata",
+    "kernel": "sparse_kv_plan_kernel_plan_abcdf"
   }
 }

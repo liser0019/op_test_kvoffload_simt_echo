@@ -92,7 +92,8 @@ __simt_callee__ __aicore__ inline void RunPrivateRow(const JointPlanArgs& a, int
 template <typename ScratchPtr>
 __simt_callee__ __aicore__ inline void PlanJointUnion(const JointPlanArgs& a, int64_t first, int64_t end,
                                                       ScratchPtr keys, ScratchPtr slots, ScratchPtr partition,
-                                                      __ubuf__ int32_t* scan, uint32_t thread) {
+                                                      __ubuf__ int32_t* scan, __gm__ int32_t* modeOutput,
+                                                      uint32_t thread) {
   const int64_t base = first * a.capacity;
   const int64_t reqId = a.reqIds[a.tokenToReq[first]];
   const bool reset = a.rowModes[first] != ROW_JOINT || a.lastReqIds[first] != reqId;
@@ -157,7 +158,12 @@ __simt_callee__ __aicore__ inline void PlanJointUnion(const JointPlanArgs& a, in
     if (thread == 0) {
       int64_t remaining = misses - (row - first) * a.topk;
       a.missCount[row] = remaining <= 0 ? 0 : (remaining < a.topk ? remaining : a.topk);
-      a.rowModes[row] = row == first ? ROW_JOINT : ROW_FOLLOWER;
+    }
+    // Device experiments reproduced this mode value in a read-only input.
+    // Explicit output + thread 1 is an empirical workaround; root cause is
+    // unconfirmed. This is not a synchronization repair: no barrier is added.
+    if (thread == 1) {
+      modeOutput[row] = row == first ? ROW_JOINT : ROW_FOLLOWER;
     }
     for (uint32_t pos = thread; pos < a.topk; pos += PLAN_THREADS) {
       const int32_t token = a.topkIndices[row * a.topk + pos];
@@ -175,7 +181,8 @@ __simt_callee__ __aicore__ inline void PlanJointUnion(const JointPlanArgs& a, in
 
 template <typename ScratchPtr>
 __simt_callee__ __aicore__ inline void ProcessRequestRun(const JointPlanArgs& a, int64_t first, int64_t end,
-                                                         ScratchPtr scratch, __ubuf__ int32_t* scan) {
+                                                         ScratchPtr scratch, __ubuf__ int32_t* scan,
+                                                         __gm__ int32_t* modeOutput) {
   const uint32_t thread = static_cast<uint32_t>(threadIdx.x);
   ScratchPtr keys = scratch;
   ScratchPtr slots = keys + a.jointHashCapacity;
@@ -183,7 +190,7 @@ __simt_callee__ __aicore__ inline void ProcessRequestRun(const JointPlanArgs& a,
   const int32_t request = a.tokenToReq[first];
   if (end - first > 1 && request >= 0 && request < a.maxRequests &&
       BuildJointUnion(a, first, end, keys, slots, scan, thread)) {
-    PlanJointUnion(a, first, end, keys, slots, partition, scan, thread);
+    PlanJointUnion(a, first, end, keys, slots, partition, scan, modeOutput, thread);
   } else {
     // Overflow never mutates the cache. Preserve every row using ABCDF.
     for (int64_t row = first; row < end; ++row) RunPrivateRow(a, row, scratch, scan, thread);

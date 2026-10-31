@@ -2,28 +2,29 @@
 """仅服务器NPU执行：联合/逐行语义、溢出回退、连续状态、UB/GM和上下文门禁。"""
 from pathlib import Path
 import argparse
+import json
 import sys
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import joint_plan_common as common
-from joint_plan_cases import make_case
+from joint_plan_cases import make_case, describe
 from harness_io import preflight_args, write_json, record_failure
 
 
-def run_one(torch, case, label):
+def run_one(torch, case, label, failure_dir=None):
     inputs = common.upload_inputs(torch, case)
     records = []
     for name in common.IMPLEMENTATIONS:
         bundle = common.prepare(torch, case, name, inputs)
-        result = common.audit(torch, case, bundle, repeats=2)
+        result = common.audit(torch, case, bundle, repeats=2, failure_dir=failure_dir)
         records.append({"implementation": name, "layout": bundle["layout"], "audit": result})
-        bundle["context"].close()
+        common.close(bundle)
     print("联合Plan门禁通过:", label, flush=True)
     return {"label": label, "implementations": records}
 
 
-def continuous_gate(torch):
+def continuous_gate(torch, failure_dir=None):
     """下一步直接续用上一轮NPU状态；不从golden/初始化快照写回。"""
     case = make_case(2, 7, 16, 512, 3, block_size=8)
     records = []
@@ -42,11 +43,16 @@ def continuous_gate(torch):
             common.poison(bundle)
             torch.npu.synchronize()
             before = common.snapshot(bundle)
-            common.invoke(bundle)
-            torch.npu.synchronize()
-            result = common.check(current, bundle, before)
+            try:
+                common.invoke(bundle)
+                torch.npu.synchronize()
+                result = common.check(current, bundle, before)
+            except BaseException:
+                if failure_dir is not None:
+                    common.dump_failure(current, bundle, failure_dir)
+                raise
             records.append({"name": name, "step": step, "pattern": pattern, "active": active, "audit": result})
-        bundle["context"].close()
+        common.close(bundle)
     return records
 
 
@@ -74,51 +80,90 @@ def context_gate(torch):
     return ["list", "attributes", "rebound", "shape", "closed"]
 
 
-def run_gate(torch):
+def input_write_regression(torch, repeats=100, failure_dir=None):
+    """精确故障尺寸，原始语义全量检查；只恢复可变状态，绝不恢复只读输入。"""
+    if repeats <= 0:
+        raise ValueError("regression-repeat必须>0")
+    case = make_case(32, 2048, 4096, 262144, 1, "full_cache_75pct", "shared", 2026, 64)
+    bundle = common.prepare(torch, case, "joint")
+    try:
+        result = common.audit(torch, case, bundle, repeats, failure_dir, progress_every=10)
+    finally:
+        common.close(bundle)
+    return {"status": "passed", "checked_iterations": repeats, "workload": describe(case),
+            "correctness": result, "input_restore": False}
+
+
+def validate_gate_report(path, environment, minimum_repeats=100):
+    report = json.loads(Path(path).read_text())
+    gate, original = report.get("gate", {}), report.get("environment", {})
+    if (report.get("status") != "passed" or gate.get("status") != "passed"
+            or set(gate.get("implementations", [])) != set(common.IMPLEMENTATIONS)
+            or gate.get("input_write_regression", {}).get("status") != "passed"
+            or gate.get("input_write_regression", {}).get("input_restore") is not False
+            or gate.get("input_write_regression", {}).get("checked_iterations", 0) < minimum_repeats
+            or any(original.get(key) != environment.get(key)
+                   for key in ("device", "device_name", "hostname", "library_sha256", "identity"))):
+        raise RuntimeError("门禁报告不匹配本设备/库/源码，或缺少三方完整门禁及足量输入错写回归")
+    return {"status": "passed", "reused_report": str(Path(path).resolve()),
+            "input_write_regression": gate["input_write_regression"], "implementations": gate["implementations"]}
+
+
+def run_gate(torch, regression_repeat=100, failure_dir=None):
+    regression = input_write_regression(torch, regression_repeat, failure_dir)
     records = []
     for mtp in (0, 1, 3):
         for pattern in ("shared", "partial", "disjoint"):
             for scenario in ("cold_reset", "full_cache_75pct"):
                 case = make_case(2, 7, 16, 512, mtp, scenario, pattern, block_size=8)
-                records.append(run_one(torch, case, f"{mtp}/{pattern}/{scenario}"))
+                records.append(run_one(torch, case, f"{mtp}/{pattern}/{scenario}", failure_dir))
     for count in (16, 17):
         case = make_case(1, 7, 16, 512, 3, block_size=8)
         for row in range(4):
             case["topk_indices"][row] = [(row * 5 + p) % count + 1 for p in range(7)]
-        records.append(run_one(torch, case, f"union_size_{count}"))
+        records.append(run_one(torch, case, f"union_size_{count}", failure_dir))
     invalid = make_case(2, 7, 21, 512, 3, block_size=7)
     invalid["topk_indices"][0] = [-1, invalid["max_token"], invalid["context"] + 2, 5, 5, 7, 8]
     invalid["token_to_req"][4:] = -1
     invalid["block_table"][0, 0] = -1
     invalid["block_table"][0, 1] = invalid["host_num_blocks"]
     invalid["stable_prefix_lens"][:2] = [-1, 512]
-    records.append(run_one(torch, invalid, "invalid_sources_visibility_duplicates_block7"))
+    records.append(run_one(torch, invalid, "invalid_sources_visibility_duplicates_block7", failure_dir))
     duplicate = make_case(1, 7, 16, 256, 3, block_size=8)
     duplicate["topk_indices"][:] = [5, 5, 6, 6, 7, 7, 7]
-    records.append(run_one(torch, duplicate, "duplicate_query_without_invalid_pages"))
+    records.append(run_one(torch, duplicate, "duplicate_query_without_invalid_pages", failure_dir))
     for active in (-1, 0, 3, 5, 99):
         case = make_case(2, 7, 16, 512, 3, block_size=8)
         case["active_rows"] = active
-        records.append(run_one(torch, case, f"active_rows_{active}"))
+        records.append(run_one(torch, case, f"active_rows_{active}", failure_dir))
     # More than64 groups forces one AIV to reuse its scratch for multiple requests.
-    records.append(run_one(torch, make_case(65, 7, 16, 256, 3, block_size=8), "multi_group_per_aiv"))
+    records.append(run_one(torch, make_case(65, 7, 16, 256, 3, block_size=8), "multi_group_per_aiv", failure_dir))
     # Joint 160KiB scratch takes GM; private still takes UB for this shape.
-    records.append(run_one(torch, make_case(1, 2048, 8192, 65536, 3), "joint_gm_private_ub"))
-    return {"status": "passed", "cases": records, "continuous": continuous_gate(torch),
+    records.append(run_one(torch, make_case(1, 2048, 8192, 65536, 3), "joint_gm_private_ub", failure_dir))
+    return {"status": "passed", "implementations": list(common.IMPLEMENTATIONS),
+            "input_write_regression": regression, "cases": records,
+            "continuous": continuous_gate(torch, failure_dir),
             "context": context_gate(torch)}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     common.add_runtime_arguments(parser)
-    parser.add_argument("--report", type=Path, default=Path("/dev/shm/joint_plan_gate/report.json"))
+    parser.add_argument("--regression-repeat", type=int, default=100)
+    parser.add_argument("--regression-only", action="store_true")
+    parser.add_argument("--report", type=Path, default=Path("/workspace/joint_plan_results/correctness.json"))
     args = parser.parse_args()
+    if args.regression_repeat <= 0:
+        parser.error("regression-repeat必须>0")
     storage = preflight_args(args, args.report.parent)
     report = {"status": "running", "storage": storage}
     try:
         torch, _, environment = common.load_runtime(args)
         report["environment"] = environment
-        report["gate"] = run_gate(torch)
+        if args.regression_only:
+            report["input_write_regression"] = input_write_regression(torch, args.regression_repeat, args.report.parent / "failure_state")
+        else:
+            report["gate"] = run_gate(torch, args.regression_repeat, args.report.parent / "failure_state")
         report["status"] = "passed"
         write_json(args.report, report)
     except BaseException as exc:

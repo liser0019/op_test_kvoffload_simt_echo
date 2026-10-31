@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--mstx", action="store_true")
-    parser.add_argument("--report", type=Path, default=Path("/dev/shm/joint_msopprof_runner/report.json"))
+    parser.add_argument("--report", type=Path, default=Path("/workspace/joint_plan_results/msopprof_runner/report.json"))
     args = parser.parse_args()
     if args.warmup < 0 or args.repeat <= 0:
         parser.error("warmup>=0、repeat>0")
@@ -32,6 +32,7 @@ def main():
     report = {"status": "running", "storage": storage, "workload": describe(case),
               "implementation": args.implementation, "warmup": args.warmup, "repeat": args.repeat,
               "kernel_name": common.KERNELS[args.implementation]}
+    bundle = None
     try:
         torch, torch_npu, environment = common.load_runtime(args)
         bundle = common.prepare(torch, case, args.implementation)
@@ -58,10 +59,12 @@ def main():
                 if identifier is not None:
                     marker.range_end(identifier)
             report["correctness"] = common.check(case, bundle, before)
-        bundle["context"].close()
+        common.close(bundle)
         report["status"] = "passed"
         write_json(args.report, report)
     except BaseException as exc:
+        if bundle is not None:
+            common.dump_failure(case, bundle, args.report.parent / "failure_state")
         record_failure(args.report, report, exc)
         raise
     print("单目标调用已完成语义审计:", args.report, flush=True)

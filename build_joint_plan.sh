@@ -28,4 +28,4 @@ done
 cmake "${JOINT_ARGS[@]}"
 cmake --build "$JOINT_BUILD_DIR" --target mtp_joint_plan_ops --parallel "${JOBS:-3}"
 echo "产物: $JOINT_BUILD_DIR/libmtp_joint_plan_ops.so"
-echo "下一步: $JOINT_PYTHON checks/check_joint_plan.py --device 0 --library $JOINT_BUILD_DIR/libmtp_joint_plan_ops.so"
+echo "下一步: $JOINT_PYTHON checks/check_joint_plan.py --device 2 --library $JOINT_BUILD_DIR/libmtp_joint_plan_ops.so"

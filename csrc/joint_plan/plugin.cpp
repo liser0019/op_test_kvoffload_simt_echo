@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Prepared direct launch: no allocation/upload or device-value read inside Run.
+// This class serves private/joint only. abcdf uses the unchanged 13_abcdf
+// plugin and 15-tensor schema in its own translation unit.
 #include <acl/acl.h>
 #include <torch/all.h>
 #include <torch/custom_class.h>
