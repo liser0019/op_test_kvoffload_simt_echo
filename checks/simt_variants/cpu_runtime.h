@@ -116,3 +116,7 @@ class CpuWorkers {
   std::function<void()> task_;
   bool stop_ = false;
 };
+
+inline int32_t asc_atomic_or(int32_t* pointer, int32_t value) {
+  return std::atomic_ref<int32_t>(*pointer).fetch_or(value);
+}

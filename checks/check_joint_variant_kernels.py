@@ -26,7 +26,7 @@ def build(directory, mask):
     config, count = re.subn(r'PLAN_THREADS = 1024U', 'PLAN_THREADS = 64U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -43,14 +43,14 @@ def build(directory, mask):
     return library
 
 
-def execute(library, case, enabled, force_gm, before=None):
+def execute(library, case, enabled, force_gm, before=None, bitmap=False):
     expected = initial_arrays(case, enabled) if before is None else before
     arrays = {k: v.copy() for k, v in expected.items()}
     arrays.update({key: case[key].copy() for key in INPUTS})
     arrays['active_rows'] = np.array([case.get('active_rows', case['rows'])], np.int32)
-    info = layout(case['topk'], case['capacity'], case['rows'], enabled)
+    info = layout(case['topk'], case['capacity'], case['rows'], enabled, case['max_token'], bitmap)
     scratch = max(info['scratch_elements'], 112 * 1024 // 4 + 1) if force_gm else info['scratch_elements']
-    arrays['workspace'] = np.full(case['rows'] * scratch if force_gm else 1, -1234567, np.int32)
+    arrays['workspace'] = np.full(case['rows'] * (scratch + case['max_token']) if bitmap else (case['rows'] * scratch if force_gm else 1), -1234567, np.int32)
     # Guard every input/output/scratch. No input restoration after invocation.
     allocations = {}
     for key, array in arrays.items():
@@ -73,7 +73,7 @@ def execute(library, case, enabled, force_gm, before=None):
     assert np.all(scan_guard[:16] == 0x1234567) and np.all(scan_guard[-16:] == 0x1234567)
     for key in INPUTS:
         np.testing.assert_array_equal(arrays[key], case[key], err_msg='read-only/' + key)
-    if not force_gm:
+    if not force_gm and not bitmap:
         assert np.all(arrays['workspace'] == -1234567)
     validate(case, expected, arrays, enabled)
     return {key: arrays[key].copy() for key in expected}
@@ -98,18 +98,26 @@ def main():
                 for enabled in (False, True):
                     for overlap in ('shared', 'independent', 'disjoint'):
                         case = make_case(2, 65, 128, 2048, 3, overlap=overlap, block_size=8)
-                        before = execute(lib, case, enabled, force_gm)
+                        before = execute(lib, case, enabled, force_gm, bitmap=name == "bitmap")
                         # Continue device-produced state, including joint -> private fallback -> joint.
                         case = make_case(2, 65, 128, 2048, 3, overlap='disjoint', block_size=8)
-                        before = execute(lib, case, enabled, force_gm, before)
+                        before = execute(lib, case, enabled, force_gm, before, bitmap=name == "bitmap")
                         case = make_case(2, 65, 128, 2048, 3, overlap='independent', block_size=8)
                         case['req_ids'] += 99
                         case['topk_indices'][0, :5] = [-1, 2048, case['context'] + 3, 5, 5]
                         case['block_table'][0, 0] = -1
                         case['stable_prefix_lens'][0] = -1
                         case['active_rows'] = 5
-                        execute(lib, case, enabled, force_gm, before)
+                        execute(lib, case, enabled, force_gm, before, bitmap=name == "bitmap")
                         checked += 3
+            if name == "bitmap":
+                # 最后一个不完整bitmap字、最高token和实际256K值域。
+                edge = make_case(1, 129, 512, 262145, 3, overlap='independent', block_size=8)
+                edge['topk_indices'][:, 0] = 262144
+                edge['visible_seq_lens'][:] = 262145
+                for gm in (False, True):
+                    execute(lib, edge, True, gm, bitmap=True)
+                    checked += 1
             records.append({'variant': name, 'checks': checked})
             print(name, checked, 'VF semantic checks passed', flush=True)
     if args.report:

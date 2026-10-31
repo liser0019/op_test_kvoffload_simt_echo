@@ -1,5 +1,5 @@
 {
-  "experiment": "joint-plan-abcd-optimizations",
+  "experiment": "joint-bitmap-direct-plan",
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
@@ -23,7 +23,8 @@
     "joint_cd": "sparse_kv_plan_joint_kernel_cd",
     "joint_acd": "sparse_kv_plan_joint_kernel_acd",
     "joint_bcd": "sparse_kv_plan_joint_kernel_bcd",
-    "joint_abcd": "sparse_kv_plan_joint_kernel_abcd"
+    "joint_abcd": "sparse_kv_plan_joint_kernel_abcd",
+    "joint_bitmap": "sparse_kv_plan_joint_kernel_bitmap"
   },
   "mtp": [
     0,
@@ -39,7 +40,7 @@
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
     "build_joint_plan.sh": "3f260db9d4a066fd65e16e1da4c22862a295446ecc44a8c0868a9a81c9d3dccc",
-    "joint_plan/CMakeLists.txt": "3daec2a78d42e793b2af89f8e564d139b44e7859dad217dd09e20585f251d0a9",
+    "joint_plan/CMakeLists.txt": "eebd4237e6caa1c4070de67dc9837ff646c4553e5ab02f56926d5947aa391a4b",
     "csrc/joint_plan/kernel.cpp": "18f265213932cf97cc441dd99b14d69f9517fdcb448a51ad6b327b73b2cad5d2",
     "csrc/joint_plan/plugin.cpp": "6ee883de2d08f0d6eee3f03368f25e64ed5f54fa48e863ef5463d1173c6b718c",
     "csrc/joint_plan/launch.h": "bcb2fabca218780bc01ef27568d3d53f5e93765807582d46b2cae9cfed28907f",
@@ -48,12 +49,12 @@
     "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
-    "joint_plan_cases.py": "f6e8b85d6b310e4b3ef51c9725b69e81952ccbc1200ac339d100d2d16efdb80f",
-    "joint_plan_common.py": "acebd0bb0d2477e5aed980b9f1d6dc1d53e5ca31659b41469c83c4e23a6f2482",
-    "profile_joint_mtp.py": "8648053bad93b746c05d46dc24e86d7d937441fcd19ab727a3d6f6f311e2f13e",
+    "joint_plan_cases.py": "e3c30d47b958c7026a078e08b46c5ef83ca8d7c9f53a4cd7a5759d519681c664",
+    "joint_plan_common.py": "600221176c66d53aeaf9e0555e57b915e51e022c7ec3a2472bea0ba53dce2a78",
+    "profile_joint_mtp.py": "565654c35ce302131a4696ba47123ce513c588596f26dff2611d0bcc2b96a147",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "429b75fec470ae6b74e5aeeb08a970b7e3452fb59c2df62e144882a0662d2691",
-    "checks/check_joint_models.py": "1b769c1876ba3003322fba2c55063e9f1ec092b3b871d6df68dc3d3f667ba118",
+    "checks/check_joint_plan.py": "249d17f90a86b236ac9696282996e874b8b05202e0ae891bafa1de6d611d2ea9",
+    "checks/check_joint_models.py": "d08da47d2d6b6487c0fac8c3f404dbcaf670bad2bcc05b8e06f6d83379434a9c",
     "checks/joint_build_info.py": "3841e15c72f9cbbfc4bbb88c5a232073b60402bbb9f18e01e9b95c6a523106d5",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "a0a1850a24203d005ad321ab1fd5b0af2c979da7f03399626628594b0e474bcf",
@@ -68,15 +69,16 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "6564d52abe1b41ca60df8b4bb27dae6cc4fa0430473b6c3bfeb0056a4ef25e84",
     "csrc/plan_variants/common/plan_plugin_impl.h": "0d344379aa4f7f406f5adfe55f52dc67ec8c8883b544d3e50253d5da58d4bd05",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "joint_variants.py": "b7cdffb58722de83450ac843ffab4ddf70d8c04c42243c1cd7fc19e784d9a753",
-    "checks/generate_joint_variants.py": "b410d150fb8da12d13e7f8952091bd55933f7ec54f675c5e5ef4cb76b7ac1a0d",
-    "checks/check_joint_variant_kernels.py": "15c1692a2d75c494e6c0ff3a7b8e59639f717c53a284fa64056f247cfcc8a1e2",
-    "checks/joint_variant_cpu_driver.cpp": "c463aec16b62b1dd9b4a03c376295572e1549cc6a126fc07395bca606774b917",
-    "checks/simt_variants/cpu_runtime.h": "e2d4f9c81f1cde16be8354489b2f7b79d4310dbe724050573301ef6293e477f3",
+    "joint_variants.py": "7725fc7eb680a33f8f87576cf91e7d13e1506cc2d44ea7dda6e5a9af51b558ba",
+    "checks/generate_joint_variants.py": "ed135ce72709e0157730bcb77742fe757d359ee21ef0727cc9c0af363ba10def",
+    "checks/check_joint_variant_kernels.py": "58a5cab692063c6c0b47c14def964ccf15fd5f19142df0f59ce5314563298d1b",
+    "checks/joint_variant_cpu_driver.cpp": "b0ec2bbdb6d34f9a9230c0a65a16d6a551edc77c694c4d3c70c2dc00cdf88308",
+    "checks/simt_variants/cpu_runtime.h": "ff548eac8dbb18c69c6266adb4958f5e1c52b8e5cf096e30edddc452467b7471",
     "csrc/joint_variants/sparse_kv_joint_plan.h": "41b4ca42fea459bbfa6e2a77c8176cffe115c3d664faf8d9aedf905a258f6f82",
-    "csrc/joint_variants/plugin.cpp": "d67c498f891cf0ee7d0d7c555d3861984c47bf0c5160a8a70032e3a8d04b172c",
-    "csrc/joint_variants/options.h": "1c83c717791bf5167027914ffb1c236327a6ee8952a9fc0465d60f90a8ab69a2",
-    "csrc/joint_variants/kernel.cpp": "3809c70f4755557332c631596d6c29748609cdbb704f1c203249135e66dd15a3"
+    "csrc/joint_variants/plugin.cpp": "dece99c4e987bb1376a80fdb27677016626212ff6fb4ec1060773d91facbac89",
+    "csrc/joint_variants/options.h": "d733cb9d518ff20bd0d18a53025034acb988c08da9789a2f4cc58ad7273700f3",
+    "csrc/joint_variants/kernel.cpp": "8da3a2e0f8c2254baaf2b8959799cd9442b522359e0e3c256863c0e709716ffc",
+    "csrc/joint_variants/bitmap_plan.h": "1ef99a8599e32ec129cf118ec3aa60f81b18c5b9d9b9fc0ad5a2f58782988e0e"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -108,7 +110,8 @@
     "joint_cd": 12,
     "joint_acd": 13,
     "joint_bcd": 14,
-    "joint_abcd": 15
+    "joint_abcd": 15,
+    "joint_bitmap": 16
   },
   "joint_optimizations": {
     "a": "non-joint VF compile-time isolation (protocol retained)",

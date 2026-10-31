@@ -75,6 +75,7 @@ def duration_ratios(stats):
     pairs = [("private", "abcdf"), ("joint", "abcdf"), ("private", "joint")]
     pairs += [(name, base) for name in stats if name in common.VARIANTS
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
+    pairs += [("joint_bitmap", "joint_abc")]
     return {f"{left}_over_{right}_p50": stats[left]["p50_us"] / stats[right]["p50_us"]
             for left, right in pairs if left in stats and right in stats}
 
@@ -204,14 +205,14 @@ def report_text(report):
         lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | " + " | ".join(values) + " |")
     lines += ["", "## Joint A/B/C/D 候选与未优化基线", "",
               "大于1表示候选更慢；这里的字母是Joint实验，与原ABCDF命名无关。", "",
-              "| 工况/重合 | MTP | 候选 | 候选/原协议路径 P50 | 候选/ABCDF P50 |",
+              "| 工况/重合 | MTP | 候选 | 候选/参考路径（joint或joint_abc） P50 | 候选/ABCDF P50 |",
               "|---|---:|---|---:|---:|"]
     for run in report["runs"]:
         w = run["workload"]
         for name in run["stats"]:
             if name not in common.VARIANTS:
                 continue
-            base = "joint" if common.is_joint(name) else "private"
+            base = ("joint" if "joint" in run["stats"] else "joint_abc") if common.is_joint(name) else "private"
             values = [f"{run[name + '_over_' + ref + '_p50']:.3f}"
                       if name + '_over_' + ref + '_p50' in run else "—" for ref in (base, "abcdf")]
             lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | " + " | ".join(values) + " |")
@@ -255,8 +256,8 @@ def main():
     parser.add_argument("--requests", type=int, default=32)
     parser.add_argument("--comparison", choices=("same_requests", "same_query_rows", "both"), default="same_requests")
     parser.add_argument("--fixed-query-rows", type=int, default=32)
-    parser.add_argument("--scenarios", nargs="+", choices=SCENARIOS, default=list(SCENARIOS[1:]))
-    parser.add_argument("--overlaps", nargs="+", choices=OVERLAPS, default=["partial", "independent", "disjoint"])
+    parser.add_argument("--scenarios", nargs="+", choices=SCENARIOS, default=["full_cache_75pct"])
+    parser.add_argument("--overlaps", nargs="+", choices=OVERLAPS, default=["independent"])
     for name, default in (("topk", 2048), ("capacity", 4096), ("max-token", 262144), ("block-size", 64), ("seed", 2026)):
         parser.add_argument("--" + name, type=int, default=default)
     parser.add_argument("--warmup", type=int, default=10)

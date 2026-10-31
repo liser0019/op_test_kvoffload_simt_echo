@@ -11,16 +11,18 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
     row = 3 * h + capacity + topk
     scratch = max(row, 2 * j + capacity)
+    if bitmap and joint:
+        scratch = max(row, (max_token + 31) // 32 + 2 * capacity)
     aligned = (scratch * 4 + 31) & ~31
     ub = aligned <= 112 * 1024
     return {"hash_capacity": h, "joint_hash_capacity": j, "scratch_elements": scratch,
-            "workspace_elements": 1 if ub else rows * scratch,
+            "workspace_elements": rows * (scratch + max_token) if bitmap else (1 if ub else rows * scratch),
             "dynamic_ub_bytes": 288 + (aligned if ub else 0), "scratch_path": "UB" if ub else "GM"}
 
 

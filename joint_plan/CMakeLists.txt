@@ -151,13 +151,13 @@ if(NOT _variant_result EQUAL 0)
     message(FATAL_ERROR "Failed to generate Joint variant symbols")
 endif()
 set(JOINT_VARIANT_OBJECTS)
-foreach(_name a b ab c ac bc abc d ad bd abd cd acd bcd abcd)
+foreach(_name a b ab c ac bc abc d ad bd abd cd acd bcd abcd bitmap)
     set(_object "${JOINT_GENERATED}/variant_${_name}.o")
     add_custom_command(OUTPUT "${_object}"
         COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
             ${JOINT_FLAGS} ${JOINT_INCLUDES} -c "${JOINT_GENERATED}/variant_${_name}.cpp" -o "${_object}"
         DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp"
-            "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h"
+            "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h" "${JOINT_VARIANT_DIR}/bitmap_plan.h"
             "${JOINT_DIR}/launch.h" "${JOINT_DIR}/sparse_kv_plan_config.h"
             "${JOINT_ROOT}/joint_plan_manifest.json"
         COMMENT "Compile Joint experiment ${_name}" VERBATIM)

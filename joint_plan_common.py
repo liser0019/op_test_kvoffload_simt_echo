@@ -73,7 +73,7 @@ def prepare(torch, case, name, inputs=None):
     if name not in IMPLEMENTATIONS:
         raise ValueError("Unknown implementation: " + name)
     enabled = is_joint(name) and case["mtp"] > 0
-    info = layout(case["topk"], case["capacity"], case["rows"], enabled)
+    info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"], name == "joint_bitmap")
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name == "abcdf":
         host = {key: case[key].copy() for key in ABCDF_STATE}

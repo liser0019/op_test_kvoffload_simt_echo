@@ -289,7 +289,7 @@ class VariantChecks(unittest.TestCase):
     def test_all_fifteen_masks_unique_symbols_and_dispatch(self):
         from joint_variants import MASKS
         from checks.generate_joint_variants import generate
-        self.assertEqual(set(MASKS.values()), set(range(1, 16)))
+        self.assertEqual(set(MASKS.values()), set(range(1, 17)))
         self.assertEqual(len(set(common.KERNELS.values())), len(common.IMPLEMENTATIONS))
         with tempfile.TemporaryDirectory() as tmp:
             generate(tmp)
@@ -301,7 +301,7 @@ class VariantChecks(unittest.TestCase):
                 self.assertIn(f"&launch_joint_plan_{letters}", dispatcher)
 
     def test_many_way_rotation_and_prefix_kernel_filter(self):
-        names = common.DEFAULT_IMPLEMENTATIONS
+        names = ("abcdf", "private", "joint", "joint_abc", "joint_bitmap")
         count = len(names)
         orders = [execution_order(names, step) for step in range(1, 51)]
         for name in names:
@@ -315,6 +315,14 @@ class VariantChecks(unittest.TestCase):
             # joint_kernel 必须不匹配 joint_kernel_a 或 joint_kernel_abcd。
             result = read_kernels([path], ["joint"], 1, ["joint"])
             self.assertEqual(len(result), 1)
+
+    def test_bitmap_workspace_and_ub_layout(self):
+        info = layout(2048, 4096, 128, True, 262144, True)
+        self.assertEqual(info["scratch_elements"], 18432)
+        self.assertEqual(info["dynamic_ub_bytes"], 74016)
+        self.assertEqual(info["workspace_elements"], 128 * (18432 + 262144))
+        info = layout(2048, 4096, 128, True, 1048576, True)
+        self.assertEqual(info["scratch_path"], "GM")
 
     def test_variant_ratio_direction(self):
         stats = {name: {"p50_us": value} for name, value in
