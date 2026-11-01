@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from compare import reference_simt, array_hash
 
-INPUTS = ("req_ids", "topk_indices", "stable_prefix_lens", "visible_seq_lens", "token_to_req", "block_table")
+INPUTS = ("req_ids", "topk_indices", "stable_prefix_lens", "visible_seq_lens", "token_to_req")
 PERSISTENT = ("last_req_ids", "slot_to_token", "lru_slots", "row_modes")
 OUTPUTS = ("current_slots", "miss_count", "miss_tokens", "miss_slots", "resident_rows", "resident_block_table")
 SCENARIOS = ("cold_reset", "full_cache_75pct", "full_cache_90pct", "full_cache_stable_hit")
@@ -11,12 +11,12 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint, max_token=None, bitmap=False):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
     row = 3 * h + capacity + topk
-    scratch = max(row, 2 * j + capacity)
+    scratch = max(row, 2 * j + capacity + (4 * topk if turbo and joint else 0))
     if bitmap and joint:
         scratch = max(row, (max_token + 31) // 32 + 2 * capacity)
     aligned = (scratch * 4 + 31) & ~31
@@ -40,12 +40,8 @@ def groups(case, joint):
 
 def source_valid(case, row, token):
     req = int(case["token_to_req"][row])
-    if not (0 <= req < len(case["req_ids"]) and 0 <= token < case["max_token"]
-            and token < int(case["visible_seq_lens"][row])):
-        return False
-    block = token // case["block_size"]
-    return (block < case["block_table"].shape[1]
-            and 0 <= int(case["block_table"][req, block]) < case["host_num_blocks"])
+    return (0 <= req < len(case["req_ids"]) and 0 <= token < case["max_token"]
+            and token < int(case["visible_seq_lens"][row]))
 
 
 def valid_sets(case):
@@ -94,25 +90,20 @@ def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
             query[row, topk - new:] = np.arange(context + p + 1 - new, context + p + 1)
             if overlap == "independent":
                 np.random.default_rng(seed + 400001 + request * 17 + p).shuffle(query[row])
-    blocks = (max_token + block_size - 1) // block_size
-    if requests * blocks > np.iinfo(np.int32).max:
-        raise ValueError("Host物理页编号超出int32")
-    table = np.random.default_rng(seed + 90001).permutation(requests * blocks).astype(np.int32)
     ids = np.arange(1000, 1000 + requests, dtype=np.int64)
     visible = context + positions + 1
     return {"rows": rows, "requests": requests, "mtp": mtp, "q_len": width,
             "topk": topk, "capacity": capacity, "max_token": max_token, "context": context,
-            "block_size": block_size, "host_num_blocks": requests * blocks,
+            "block_size": block_size,
             "scenario": scenario, "overlap": overlap, "seed": seed,
             "req_ids": ids, "topk_indices": query, "token_to_req": req,
-            "block_table": table.reshape(requests, blocks),
             "visible_seq_lens": visible.astype(np.int32),
             "stable_prefix_lens": (np.full(rows, context, np.int32) if mtp else visible.copy()),
             "last_req_ids": (np.full(rows, -1, np.int64) if scenario == "cold_reset" else ids[req].copy()),
             "slot_to_token": np.repeat(base, width, axis=0), "lru_slots": np.repeat(lru, width, axis=0)}
 
 
-def initial_arrays(case, joint):
+def initial_arrays(case, joint, max_group_queries=None):
     rows, topk, capacity = (case[k] for k in ("rows", "topk", "capacity"))
     out = {key: case[key].copy() for key in PERSISTENT if key != "row_modes"}
     out["row_modes"] = np.zeros(rows, np.int32)
@@ -121,8 +112,9 @@ def initial_arrays(case, joint):
         sets = valid_sets(case)
         for first, end in groups(case, True):
             request = int(case["token_to_req"][first])
+            fits_queries = max_group_queries is None or (end - first) * topk <= max_group_queries
             if (end - first > 1 and 0 <= request < len(case["req_ids"])
-                    and len(set().union(*sets[first:end])) <= capacity):
+                    and len(set().union(*sets[first:end])) <= capacity and fits_queries):
                 out["row_modes"][first:end] = 2
                 out["row_modes"][first] = 1
                 owners[first:end] = first
@@ -151,7 +143,7 @@ def describe(case):
             "logical_input_sha256": array_hash({k: case[k] for k in (*INPUTS, "last_req_ids", "slot_to_token", "lru_slots")})}
 
 
-def validate(case, before, actual, joint):
+def validate(case, before, actual, joint, max_group_queries=None):
     """Private对独立golden逐字段比较；joint对集合、LRU、miss填充和逐行寻址完整校验。"""
     expected = {key: value.copy() for key, value in before.items()}
     sets, group_info = valid_sets(case), []
@@ -160,9 +152,11 @@ def validate(case, before, actual, joint):
     for first, end in groups(case, joint):
         request = int(case["token_to_req"][first])
         union = set().union(*sets[first:end])
-        shared = end - first > 1 and 0 <= request < len(case["req_ids"]) and len(union) <= capacity
+        fits_queries = max_group_queries is None or (end - first) * topk <= max_group_queries
+        shared = end - first > 1 and 0 <= request < len(case["req_ids"]) and len(union) <= capacity and fits_queries
         group_info.append({"first": first, "end": end, "union": len(union),
-                           "path": "joint" if shared else "overflow_private" if end-first > 1 and len(union)>capacity
+                           "path": "joint" if shared else "overflow_private"
+                           if end - first > 1 and (len(union) > capacity or not fits_queries)
                            else "private"})
         if not shared:
             for row in range(first, end):
@@ -242,7 +236,7 @@ def validate(case, before, actual, joint):
 
 
 def validate_abcdf(case, before, actual):
-    """原15-tensor接口：不伪造row_modes/owner/page输出，不走联合协议归一化。"""
+    """独立14-tensor无来源页表接口：不伪造row_modes/owner/page输出，不走联合协议归一化。"""
     one = dict(case)
     for key in ("last_req_ids", "slot_to_token", "lru_slots"):
         one[key] = before[key]
@@ -256,7 +250,7 @@ def validate_abcdf(case, before, actual):
             count = int(gold["miss_count"][row])
             np.testing.assert_array_equal(actual[key][row, :count], gold[key][row, :count], err_msg="abcdf/" + key)
         np.testing.assert_array_equal(actual[key][active:], before[key][active:], err_msg="abcdf/inactive/" + key)
-    return {"status": "passed", "protocol": "original_abcdf_15_tensors; no joint metadata",
+    return {"status": "passed", "protocol": "original_abcdf_14_tensors; no block_table or joint metadata",
             "groups": [{"first": r, "end": r + 1, "path": "abcdf"} for r in range(active)],
             "joint_groups": 0, "overflow_groups": 0,
             "miss_count_per_row": actual["miss_count"][:active].astype(int).tolist(),

@@ -69,11 +69,11 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry) {
-    // topk,capacity,maxToken,blockSize,hostNumBlocks,effectiveJoint.
-    TORCH_CHECK(p.size() == 18 && attrs.size() == 6, "joint expects 18 tensors / 6 attrs");
-    for (size_t i = 0; i < 5; ++i)
+    // topk,capacity,maxToken,blockSize,effectiveJoint.
+    TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
+    for (size_t i = 0; i < 4; ++i)
       TORCH_CHECK(attrs[i] > 0 && attrs[i] <= std::numeric_limits<int32_t>::max(), "joint attrs out of int32 range");
-    TORCH_CHECK((attrs[5] == 0 || attrs[5] == 1) && (jointEntry || attrs[5] == 0), "joint selector invalid");
+    TORCH_CHECK((attrs[4] == 0 || attrs[4] == 1) && (jointEntry || attrs[4] == 0), "joint selector invalid");
     const int64_t t = attrs[0], c = attrs[1], block = attrs[3];
     TORCH_CHECK(t <= c && c <= std::numeric_limits<int32_t>::max() / 2 && c % block == 0,
                 "joint requires topk<=capacity<=INT32_MAX/2 and capacity%block_size==0");
@@ -85,27 +85,25 @@ class Prepared : public torch::CustomClassHolder {
     const c10::OptionalDeviceGuard guard(device);
     for (size_t i = 0; i < p.size(); ++i)
       TORCH_CHECK(p[i].defined() && p[i].is_contiguous() && p[i].device() == device &&
-          p[i].scalar_type() == ((i == 0 || i == 7) ? at::kLong : at::kInt),
+          p[i].scalar_type() == ((i == 0 || i == 6) ? at::kLong : at::kInt),
           "joint tensor dtype/device/contiguity");
     const int64_t rows = p[1].size(0), requests = p[0].numel();
     TORCH_CHECK(rows <= std::numeric_limits<int32_t>::max() / (c / block), "resident page index exceeds int32");
     Shape(p[1], {rows, t});
-    for (int i : {2, 3, 4, 7, 11, 15, 16}) Shape(p[i], {rows});
-    TORCH_CHECK(p[5].dim() == 2 && p[5].size(0) == requests && p[5].size(1) > 0,
-                "joint block table shape");
-    TORCH_CHECK(p[6].numel() == 1, "joint active_rows shape");
-    Shape(p[8], {rows, c}); Shape(p[9], {rows, c});
-    for (int i : {10, 12, 13}) Shape(p[i], {rows, t});
-    Shape(p[17], {rows, c / block});
+    for (int i : {2, 3, 4, 6, 10, 14, 15}) Shape(p[i], {rows});
+    TORCH_CHECK(p[5].numel() == 1, "joint active_rows shape");
+    Shape(p[7], {rows, c}); Shape(p[8], {rows, c});
+    for (int i : {9, 11, 12}) Shape(p[i], {rows, t});
+    Shape(p[16], {rows, c / block});
     // Mutable buffers must not alias inputs or one another.
-    for (size_t i = 7; i < p.size(); ++i)
+    for (size_t i = 6; i < p.size(); ++i)
       for (size_t j = 0; j < i; ++j)
         TORCH_CHECK(!p[i].is_alias_of(p[j]), "joint mutable tensor alias");
 
     JointDirectTilingData d{};
     d.hashCapacity = HashSize(t);
     d.workspaceRowElements = 3U * d.hashCapacity + c + t;
-    d.jointHashCapacity = attrs[5] ? HashSize(c) : 0U;
+    d.jointHashCapacity = attrs[4] ? HashSize(c) : 0U;
     const uint64_t jointElements = 2U * d.jointHashCapacity + c;
     d.scratchElements = d.workspaceRowElements > jointElements ? d.workspaceRowElements : jointElements;
     const uint64_t alignedBytes = (d.scratchElements * 4U + 31U) & ~uint64_t{31U};
@@ -113,10 +111,10 @@ class Prepared : public torch::CustomClassHolder {
     d.localMemoryBytes = sparse_kv_plan_config::PLAN_SCAN_BYTES + (ub ? alignedBytes : 0U);
     TORCH_CHECK(d.scratchElements <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / rows),
                 "joint workspace size overflow");
-    TORCH_CHECK(p[14].dim() == 1 && p[14].numel() >= (ub ? 1 : static_cast<int64_t>(rows * d.scratchElements)),
+    TORCH_CHECK(p[13].dim() == 1 && p[13].numel() >= (ub ? 1 : static_cast<int64_t>(rows * d.scratchElements)),
                 "joint workspace too small");
     d.maxRows = rows; d.topk = t; d.capacity = c; d.maxToken = attrs[2];
-    d.maxRequests = requests; d.maxNumBlocks = p[5].size(1); d.hostNumBlocks = attrs[4];
+    d.maxRequests = requests;
     d.blockSize = static_cast<int32_t>(block);
 
     auto data = std::shared_ptr<Resources>(new Resources, Release);
@@ -135,7 +133,7 @@ class Prepared : public torch::CustomClassHolder {
   void Run(Tensors p, Attrs attrs) {
     const auto data = Get();
     TORCH_CHECK(data != nullptr, "joint context closed");
-    TORCH_CHECK(p.size() == 18 && attrs == data->attrs, "joint context attrs/list changed");
+    TORCH_CHECK(p.size() == 17 && attrs == data->attrs, "joint context attrs/list changed");
     for (size_t i = 0; i < p.size(); ++i) data->bindings[i].Check(p[i]);
     const c10::OptionalDeviceGuard guard(data->tensors[0].device());
     auto stream = c10_npu::getCurrentNPUStream().stream(false);
@@ -145,7 +143,7 @@ class Prepared : public torch::CustomClassHolder {
           p[0].data_ptr(), p[1].data_ptr(), p[2].data_ptr(), p[3].data_ptr(), p[4].data_ptr(),
           p[5].data_ptr(), p[6].data_ptr(), p[7].data_ptr(), p[8].data_ptr(), p[9].data_ptr(),
           p[10].data_ptr(), p[11].data_ptr(), p[12].data_ptr(), p[13].data_ptr(), p[14].data_ptr(),
-          p[15].data_ptr(), p[16].data_ptr(), p[17].data_ptr(), data->tiling.data_ptr(),
+          p[15].data_ptr(), p[16].data_ptr(), data->tiling.data_ptr(),
           data->blocks, data->dynamicUb, reinterpret_cast<void*>(stream));
       return 0;
     };
@@ -155,7 +153,7 @@ class Prepared : public torch::CustomClassHolder {
     const auto data = Get();
     TORCH_CHECK(data != nullptr, "joint context closed");
     return "{\"blocks\":" + std::to_string(data->blocks) + ",\"dynamic_ub_bytes\":" +
-        std::to_string(data->dynamicUb) + ",\"joint_enabled\":" + std::to_string(data->attrs[5]) + "}";
+        std::to_string(data->dynamicUb) + ",\"joint_enabled\":" + std::to_string(data->attrs[4]) + "}";
   }
   void Close() {
     std::shared_ptr<Resources> previous;

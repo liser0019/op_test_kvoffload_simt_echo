@@ -29,10 +29,10 @@ with tempfile.TemporaryDirectory(prefix='plan_host_layout_') as temporary:
         header = (ROOT / "csrc/plan_variants/common/sparse_kv_plan_launch.h"
                   if variant["name"] == "abcdf" else ROOT / "csrc/scan_experiments/common/experiment_launch.h")
         code += f'#include "{header}"\n'
-        code += 'static_assert(sizeof(SparseKvPlanTilingData) == 80);\n'
+        code += 'static_assert(sizeof(SparseKvPlanTilingData) == 64);\n'
         code += f'void probe_{index}() {{\n'
         for topk, capacity in shapes:
-            code += f'{{ auto t=MakeSparseKvPlanTiling(32,{topk},{capacity},262144,32,4096,4096,64); '
+            code += f'{{ auto t=MakeSparseKvPlanTiling(32,{topk},{capacity},262144,32); '
             code += 'std::cout<<t.hashCapacity<<" "<<t.workspaceRowElements<<" "<<t.localMemoryBytes<<"\\n"; }\n'
         code += '}\n'
         cpp = directory / f'probe_{index}.cpp'

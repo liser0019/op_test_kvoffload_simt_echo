@@ -23,6 +23,93 @@ def replace_once(text, old, new):
 def expected_fixed_region(original):
     text = compute_region(original)
     text = replace_once(text,
+        "  int64_t maxRequests;\n  int64_t maxNumBlocks;\n  int64_t hostNumBlocks;\n  int32_t blockSize;",
+        "  int64_t maxRequests;\n  int32_t blockSize;")
+    text = replace_once(text,
+        "__simt_callee__ __aicore__ inline bool IsSourceTokenValid(int64_t row, int32_t token, __gm__ int32_t* visibleSeqLens,\n"
+        "                                                          __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable,\n"
+        "                                                          int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks,\n"
+        "                                                          int64_t hostNumBlocks, int32_t blockSize) {\n"
+        "  if (token < 0 || token >= maxToken || token >= visibleSeqLens[row]) {\n"
+        "    return false;\n"
+        "  }\n"
+        "  const int32_t request = tokenToReq[row];\n"
+        "  if (request < 0 || request >= maxRequests || blockSize <= 0) {\n"
+        "    return false;\n"
+        "  }\n"
+        "  const int64_t blockId = token / blockSize;\n"
+        "  if (blockId < 0 || blockId >= maxNumBlocks) {\n"
+        "    return false;\n"
+        "  }\n"
+        "  const int64_t tableOffset = static_cast<int64_t>(request) * maxNumBlocks + blockId;\n"
+        "  const int32_t physicalBlock = blockTable[tableOffset];\n"
+        "  return physicalBlock >= 0 && physicalBlock < hostNumBlocks;\n"
+        "}",
+        "__simt_callee__ __aicore__ inline bool IsSourceTokenValid(int64_t row, int32_t token, __gm__ int32_t* visibleSeqLens,\n"
+        "                                                          __gm__ int32_t* tokenToReq, int64_t maxToken,\n"
+        "                                                          int64_t maxRequests) {\n"
+        "  if (token < 0 || token >= maxToken || token >= visibleSeqLens[row]) {\n"
+        "    return false;\n"
+        "  }\n"
+        "  const int32_t request = tokenToReq[row];\n"
+        "  return request >= 0 && request < maxRequests;\n"
+        "}")
+    text = replace_once(text,
+        "    __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable,\n"
+        "    __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,\n"
+        "    __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots,\n"
+        "    uint32_t topk, uint32_t capacity, int32_t maxToken, int64_t maxRequests,\n"
+        "    int64_t maxNumBlocks, int64_t hostNumBlocks, int32_t blockSize) {",
+        "    __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,\n"
+        "    __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,\n"
+        "    __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots,\n"
+        "    uint32_t topk, uint32_t capacity, int32_t maxToken, int64_t maxRequests) {")
+    text = replace_once(text,
+        "        IsSourceTokenValid(row, topkIndices[topkBase + position], visibleSeqLens, tokenToReq,\n"
+        "                           blockTable, maxToken, maxRequests, maxNumBlocks, hostNumBlocks, blockSize);",
+        "        IsSourceTokenValid(row, topkIndices[topkBase + position], visibleSeqLens, tokenToReq,\n"
+        "                           maxToken, maxRequests);")
+    text = replace_once(text,
+        "    __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots,\n"
+        "    __gm__ int32_t* currentSlots, __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots,\n"
+        "    ScratchPtr rowWorkspace, uint32_t hashCapacity, uint32_t topk, uint32_t capacity, int32_t maxToken,\n"
+        "    int64_t maxRequests, int64_t maxNumBlocks, int64_t hostNumBlocks, int32_t blockSize) {",
+        "    __gm__ int32_t* tokenToReq, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots,\n"
+        "    __gm__ int32_t* currentSlots, __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots,\n"
+        "    ScratchPtr rowWorkspace, uint32_t hashCapacity, uint32_t topk, uint32_t capacity, int32_t maxToken,\n"
+        "    int64_t maxRequests) {")
+    text = replace_once(text,
+        "    ProcessColdRow(scanWorkspace, missPositions, row, thread, reqIds, lastReqIds, topkIndices,\n"
+        "                   visibleSeqLens, tokenToReq, blockTable, slotToToken, lruSlots, currentSlots,\n"
+        "                   missCount, missTokens, missSlots, topk, capacity, maxToken, maxRequests,\n"
+        "                   maxNumBlocks, hostNumBlocks, blockSize);",
+        "    ProcessColdRow(scanWorkspace, missPositions, row, thread, reqIds, lastReqIds, topkIndices,\n"
+        "                   visibleSeqLens, tokenToReq, slotToToken, lruSlots, currentSlots,\n"
+        "                   missCount, missTokens, missSlots, topk, capacity, maxToken, maxRequests);")
+    text = replace_once(text,
+        "    if (IsSourceTokenValid(row, token, visibleSeqLens, tokenToReq, blockTable, maxToken, maxRequests, maxNumBlocks,\n"
+        "                           hostNumBlocks, blockSize)) {",
+        "    if (IsSourceTokenValid(row, token, visibleSeqLens, tokenToReq, maxToken, maxRequests)) {")
+    text = replace_once(text,
+        "    __gm__ int32_t* stablePrefixLens, __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,\n"
+        "    __gm__ int32_t* blockTable, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,\n"
+        "    __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots, __gm__ int32_t* compactWorkspace,\n"
+        "    uint64_t hashCapacity, uint64_t workspaceRowElements, int64_t rowStart, int64_t rowStride, int64_t numReqs,\n"
+        "    int64_t topk, int64_t capacity, int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks, int64_t hostNumBlocks,\n"
+        "    int32_t blockSize, __gm__ int32_t* rowModes, __gm__ int32_t* residentRows, __gm__ int32_t* residentBlockTable,",
+        "    __gm__ int32_t* stablePrefixLens, __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,\n"
+        "    __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,\n"
+        "    __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots, __gm__ int32_t* compactWorkspace,\n"
+        "    uint64_t hashCapacity, uint64_t workspaceRowElements, int64_t rowStart, int64_t rowStride, int64_t numReqs,\n"
+        "    int64_t topk, int64_t capacity, int64_t maxToken, int64_t maxRequests,\n"
+        "    int32_t blockSize, __gm__ int32_t* rowModes, __gm__ int32_t* residentRows, __gm__ int32_t* residentBlockTable,")
+    text = replace_once(text,
+        "                           tokenToReq,\n                           blockTable,\n                           slotToToken,",
+        "                           tokenToReq,\n                           slotToToken,")
+    text = replace_once(text,
+        "                           blockSize,\n                           maxRequests,\n                           maxNumBlocks,\n                           hostNumBlocks};",
+        "                           blockSize,\n                           maxRequests};")
+    text = replace_once(text,
         "ProcessRequestRun(args, row, end, scanWorkspace + PLAN_SCAN_STORAGE_ELEMENTS, scanWorkspace);",
         "ProcessRequestRun(args, row, end, scanWorkspace + PLAN_SCAN_STORAGE_ELEMENTS, scanWorkspace, rowModes);")
     return replace_once(text,
@@ -32,6 +119,31 @@ def expected_fixed_region(original):
 
 def expected_fixed_helper(original):
     text = replace_once(original,
+        "  __gm__ int32_t *topkIndices, *stablePrefixLens, *visibleSeqLens, *tokenToReq, *blockTable;\n"
+        "  __gm__ int32_t *slotToToken, *lruSlots, *currentSlots, *missCount, *missTokens, *missSlots;\n"
+        "  __gm__ int32_t *rowModes, *residentRows, *residentBlockTable;\n"
+        "  uint32_t topk, capacity, hashCapacity, jointHashCapacity;\n"
+        "  int32_t maxToken, blockSize;\n"
+        "  int64_t maxRequests, maxNumBlocks, hostNumBlocks;",
+        "  __gm__ int32_t *topkIndices, *stablePrefixLens, *visibleSeqLens, *tokenToReq;\n"
+        "  __gm__ int32_t *slotToToken, *lruSlots, *currentSlots, *missCount, *missTokens, *missSlots;\n"
+        "  __gm__ int32_t *rowModes, *residentRows, *residentBlockTable;\n"
+        "  uint32_t topk, capacity, hashCapacity, jointHashCapacity;\n"
+        "  int32_t maxToken, blockSize;\n"
+        "  int64_t maxRequests;")
+    text = replace_once(text,
+        "  return IsSourceTokenValid(row, token, a.visibleSeqLens, a.tokenToReq, a.blockTable, a.maxToken, a.maxRequests,\n"
+        "                            a.maxNumBlocks, a.hostNumBlocks, a.blockSize);",
+        "  return IsSourceTokenValid(row, token, a.visibleSeqLens, a.tokenToReq, a.maxToken, a.maxRequests);")
+    text = replace_once(text,
+        "  ProcessRuntimeRow(scan, row, a.reqIds, a.lastReqIds, a.topkIndices, a.stablePrefixLens, a.visibleSeqLens,\n"
+        "                    a.tokenToReq, a.blockTable, a.slotToToken, a.lruSlots, a.currentSlots, a.missCount, a.missTokens,\n"
+        "                    a.missSlots, scratch, a.hashCapacity, a.topk, a.capacity, a.maxToken, a.maxRequests, a.maxNumBlocks,\n"
+        "                    a.hostNumBlocks, a.blockSize);",
+        "  ProcessRuntimeRow(scan, row, a.reqIds, a.lastReqIds, a.topkIndices, a.stablePrefixLens, a.visibleSeqLens,\n"
+        "                    a.tokenToReq, a.slotToToken, a.lruSlots, a.currentSlots, a.missCount, a.missTokens,\n"
+        "                    a.missSlots, scratch, a.hashCapacity, a.topk, a.capacity, a.maxToken, a.maxRequests);")
+    text = replace_once(text,
         "                                                      __ubuf__ int32_t* scan, uint32_t thread) {",
         "                                                      __ubuf__ int32_t* scan, __gm__ int32_t* modeOutput,\n                                                      uint32_t thread) {")
     text = replace_once(text,
@@ -55,10 +167,10 @@ def identity():
     original = (ROOT / "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp").read_text()
     direct = (ROOT / "csrc/joint_plan/kernel.cpp").read_text()
     if expected_fixed_region(original) != compute_region(direct):
-        raise ValueError("Joint VF differs beyond explicit modeOutput forwarding")
+        raise ValueError("Joint VF differs beyond approved source-page removal and modeOutput forwarding")
     header = "csrc/joint_plan/sparse_kv_joint_plan.h"
     if expected_fixed_helper((ROOT / "csrc/joint_plan/upstream/sparse_kv_joint_plan.h").read_text()) != (ROOT / header).read_text():
-        raise ValueError("Joint helper differs beyond verified thread1 store workaround")
+        raise ValueError("Joint helper differs beyond source-page removal and thread1 store workaround")
     if (ROOT / "csrc/joint_plan/upstream/sparse_kv_plan_config.h").read_bytes() != (ROOT / "csrc/joint_plan/sparse_kv_plan_config.h").read_bytes():
         raise ValueError("Joint config changed")
     config = (ROOT / "csrc/plan_variants/13_abcdf/variant_config.h").read_text()

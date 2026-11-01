@@ -22,10 +22,10 @@ from compare import reference_simt
 
 def hand_case():
     return {"rows": 2, "requests": 1, "mtp": 1, "q_len": 2, "topk": 2, "capacity": 4,
-            "max_token": 128, "block_size": 1, "host_num_blocks": 128,
+            "max_token": 128, "block_size": 1,
             "scenario": "full_cache_75pct", "req_ids": np.array([42], np.int64),
             "topk_indices": np.array([[1, 2], [2, 3]], np.int32),
-            "token_to_req": np.zeros(2, np.int32), "block_table": np.arange(128, dtype=np.int32).reshape(1, -1),
+            "token_to_req": np.zeros(2, np.int32),
             "visible_seq_lens": np.full(2, 100, np.int32), "stable_prefix_lens": np.full(2, 100, np.int32),
             "last_req_ids": np.full(2, 42, np.int64),
             "slot_to_token": np.array([[1, 9, 7, 6], [1, 9, 7, 6]], np.int32),
@@ -66,7 +66,6 @@ class CaseChecks(unittest.TestCase):
             self.assertEqual(case["rows"], 2 * (case["mtp"] + 1))
             for key in ("topk_indices", "slot_to_token", "lru_slots"):
                 np.testing.assert_array_equal(case[key][::case["q_len"]], cases[0][key])
-            np.testing.assert_array_equal(case["block_table"], cases[0]["block_table"])
         self.assertTrue(all(describe(c)["union_fits"] == [True, True] for c in cases))
 
     def test_disjoint_case_really_overflows_at_mtp3(self):
@@ -74,9 +73,26 @@ class CaseChecks(unittest.TestCase):
         self.assertEqual(describe(case)["union_fits"], [False, False])
         self.assertTrue(np.all(initial_arrays(case, True)["row_modes"] == 0))
 
+    def test_plan_has_no_source_page_input(self):
+        self.assertNotIn("block_table", common.INPUTS)
+        self.assertEqual(len(common.TENSOR_ORDER), 17)
+        case = hand_case()
+        case["block_table"] = np.full((1, 128), -1, np.int32)
+        case["host_num_blocks"] = 0
+        a = reference_simt(case)
+        del case["block_table"]
+        del case["host_num_blocks"]
+        b = reference_simt(case)
+        for key in a:
+            np.testing.assert_array_equal(a[key], b[key])
+
     def test_layout_ub_gm_and_scan_bytes(self):
         self.assertEqual(layout(2048, 4096, 128, False)["dynamic_ub_bytes"], 74016)
         self.assertEqual(layout(2048, 4096, 128, True)["dynamic_ub_bytes"], 82208)
+        turbo = layout(2048, 4096, 128, True, turbo=True)
+        self.assertEqual(turbo["scratch_elements"], 28672)
+        self.assertEqual(turbo["dynamic_ub_bytes"], 114976)
+        self.assertEqual(turbo["scratch_path"], "UB")
         gm = layout(2048, 8192, 4, True)
         self.assertEqual(gm["dynamic_ub_bytes"], 288)
         self.assertEqual(gm["workspace_elements"], 4 * 40960)
@@ -99,9 +115,9 @@ class OracleChecks(unittest.TestCase):
         calls = []
         fake = SimpleNamespace(ops=SimpleNamespace(sparse_kv_plan_op=SimpleNamespace(
             plan_abcdf=lambda *args: calls.append(args))))
-        bundle = {"name": "abcdf", "torch": fake, "ordered": list(range(15)), "attrs": list(range(5))}
+        bundle = {"name": "abcdf", "torch": fake, "ordered": list(range(14)), "attrs": list(range(3))}
         common.invoke(bundle)
-        self.assertEqual(calls, [tuple(range(15)) + tuple(range(5))])
+        self.assertEqual(calls, [tuple(range(14)) + tuple(range(3))])
         cmake = (ROOT / "joint_plan/CMakeLists.txt").read_text()
         self.assertIn('"${ABCDF_DIR}/kernel.cpp"', cmake)
         self.assertIn('"${ABCDF_DIR}/plugin.cpp"', cmake)
@@ -289,7 +305,7 @@ class VariantChecks(unittest.TestCase):
     def test_all_fifteen_masks_unique_symbols_and_dispatch(self):
         from joint_variants import MASKS
         from checks.generate_joint_variants import generate
-        self.assertEqual(set(MASKS.values()), set(range(1, 17)))
+        self.assertEqual(set(MASKS.values()), set(range(1, 18)))
         self.assertEqual(len(set(common.KERNELS.values())), len(common.IMPLEMENTATIONS))
         with tempfile.TemporaryDirectory() as tmp:
             generate(tmp)
@@ -301,7 +317,7 @@ class VariantChecks(unittest.TestCase):
                 self.assertIn(f"&launch_joint_plan_{letters}", dispatcher)
 
     def test_many_way_rotation_and_prefix_kernel_filter(self):
-        names = ("abcdf", "private", "joint", "joint_abc", "joint_bitmap")
+        names = ("abcdf", "private", "joint", "joint_abc", "joint_bitmap", "joint_turbo", "private_turbo")
         count = len(names)
         orders = [execution_order(names, step) for step in range(1, 51)]
         for name in names:

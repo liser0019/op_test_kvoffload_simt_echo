@@ -82,7 +82,7 @@ def context_gate(torch, implementations=common.DEFAULT_IMPLEMENTATIONS):
         rebound[1] = p[1].view(-1)
         reject(lambda: ctx.run(rebound, attrs))
         if name in common.VARIANTS:
-            for mask in (0, 17, -1):
+            for mask in (0, 18, -1):
                 reject(lambda: torch.classes.mtp_joint_plan.PreparedVariant(p, attrs, common.is_joint(name), mask))
         ctx.close()
         reject(lambda: ctx.run(p, attrs))
@@ -145,8 +145,6 @@ def run_gate(torch, regression_repeat=100, failure_dir=None, implementations=com
     invalid = make_case(2, 7, 21, 512, 3, block_size=7)
     invalid["topk_indices"][0] = [-1, invalid["max_token"], invalid["context"] + 2, 5, 5, 7, 8]
     invalid["token_to_req"][4:] = -1
-    invalid["block_table"][0, 0] = -1
-    invalid["block_table"][0, 1] = invalid["host_num_blocks"]
     invalid["stable_prefix_lens"][:2] = [-1, 512]
     records.append(run_one(torch, invalid, "invalid_sources_visibility_duplicates_block7", failure_dir, implementations))
     duplicate = make_case(1, 7, 16, 256, 3, block_size=8)

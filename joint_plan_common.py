@@ -73,14 +73,18 @@ def prepare(torch, case, name, inputs=None):
     if name not in IMPLEMENTATIONS:
         raise ValueError("Unknown implementation: " + name)
     enabled = is_joint(name) and case["mtp"] > 0
-    info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"], name == "joint_bitmap")
+    is_turbo = name in ("joint_turbo", "private_turbo")
+    info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"],
+                  name == "joint_bitmap", is_turbo)
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name == "abcdf":
         host = {key: case[key].copy() for key in ABCDF_STATE}
         host.update({key: np.full((case["rows"],) if key == "miss_count" else
                                   (case["rows"], case["topk"]), POISON, np.int32) for key in ABCDF_OUTPUT})
     else:
-        host = initial_arrays(case, enabled)
+        max_queries = (info["scratch_elements"] - 2 * info["joint_hash_capacity"] - case["capacity"]
+                       if is_turbo and enabled else None)
+        host = initial_arrays(case, enabled, max_queries)
     host["workspace"] = np.full(info["workspace_elements"], np.iinfo(np.int32).max, np.int32)
     tensors, buffers, initial = {}, {}, {}
     device = inputs["req_ids"].device
@@ -91,8 +95,9 @@ def prepare(torch, case, name, inputs=None):
         view.copy_(torch.from_numpy(np.ascontiguousarray(array)).to(device))
         tensors[key], buffers[key], initial[key] = view, storage, view.clone()
     all_tensors = inputs | tensors
-    ordered = [all_tensors[key] for key in (TENSOR_ORDER[:15] if name == "abcdf" else TENSOR_ORDER)]
-    attrs = [case[key] for key in ("topk", "capacity", "max_token", "block_size", "host_num_blocks")]
+    ordered = [all_tensors[key] for key in (TENSOR_ORDER[:14] if name == "abcdf" else TENSOR_ORDER)]
+    attrs = [case[key] for key in (("topk", "capacity", "max_token") if name == "abcdf"
+                                   else ("topk", "capacity", "max_token", "block_size"))]
     context = None
     if name != "abcdf":
         attrs.append(int(enabled))
@@ -103,7 +108,7 @@ def prepare(torch, case, name, inputs=None):
     torch.npu.synchronize()
     native = json.loads(context.info()) if context is not None else {
         "joint_enabled": 0, "dynamic_ub_bytes": info["dynamic_ub_bytes"],
-        "interface": "original plan_abcdf, 15 tensors + 5 attributes",
+        "interface": "independent ABCDF without source-page validation, 14 tensors + 3 attributes (no block_table)",
         "tiling_upload": "per_call_original_interface; excluded by kernel-duration filter"}
     if native["dynamic_ub_bytes"] != info["dynamic_ub_bytes"] or native["joint_enabled"] != int(enabled):
         raise AssertionError("Python/C++ tiling模型不一致")
@@ -157,7 +162,10 @@ def check(case, bundle, before=None):
                                  [case.get("active_rows", case["rows"])], err_msg="active_rows write")
     if bundle["name"] == "abcdf":
         return validate_abcdf(case, before, snapshot(bundle))
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"])
+    layout_info = bundle.get("layout", {})
+    max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
+                   if bundle["name"] in ("joint_turbo", "private_turbo") and bundle["joint_enabled"] else None)
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries)
 
 
 def dump_failure(case, bundle, destination):

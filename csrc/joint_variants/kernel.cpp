@@ -99,8 +99,6 @@ struct SparseKvPlanTilingData {
   int64_t capacity;
   int64_t maxToken;
   int64_t maxRequests;
-  int64_t maxNumBlocks;
-  int64_t hostNumBlocks;
   int32_t blockSize;
   uint32_t localMemoryBytes;
   uint64_t jointHashCapacity;
@@ -248,23 +246,13 @@ __simt_callee__ __aicore__ inline uint32_t LookupTopkToken(ScratchPtr keys, int3
 }
 
 __simt_callee__ __aicore__ inline bool IsSourceTokenValid(int64_t row, int32_t token, __gm__ int32_t* visibleSeqLens,
-                                                          __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable,
-                                                          int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks,
-                                                          int64_t hostNumBlocks, int32_t blockSize) {
+                                                          __gm__ int32_t* tokenToReq, int64_t maxToken,
+                                                          int64_t maxRequests) {
   if (token < 0 || token >= maxToken || token >= visibleSeqLens[row]) {
     return false;
   }
   const int32_t request = tokenToReq[row];
-  if (request < 0 || request >= maxRequests || blockSize <= 0) {
-    return false;
-  }
-  const int64_t blockId = token / blockSize;
-  if (blockId < 0 || blockId >= maxNumBlocks) {
-    return false;
-  }
-  const int64_t tableOffset = static_cast<int64_t>(request) * maxNumBlocks + blockId;
-  const int32_t physicalBlock = blockTable[tableOffset];
-  return physicalBlock >= 0 && physicalBlock < hostNumBlocks;
+  return request >= 0 && request < maxRequests;
 }
 
 __simt_callee__ __aicore__ inline void ClearMissTail(
@@ -282,11 +270,10 @@ template <typename ScratchPtr>
 __simt_callee__ __aicore__ inline void ProcessColdRow(
     __ubuf__ int32_t* scanWorkspace, ScratchPtr missPositions, int64_t row, uint32_t thread,
     __gm__ int64_t* reqIds, __gm__ int64_t* lastReqIds, __gm__ int32_t* topkIndices,
-    __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable,
+    __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,
     __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,
     __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots,
-    uint32_t topk, uint32_t capacity, int32_t maxToken, int64_t maxRequests,
-    int64_t maxNumBlocks, int64_t hostNumBlocks, int32_t blockSize) {
+    uint32_t topk, uint32_t capacity, int32_t maxToken, int64_t maxRequests) {
   const int64_t topkBase = row * static_cast<int64_t>(topk);
   const int64_t capacityBase = row * static_cast<int64_t>(capacity);
   __ubuf__ int32_t* control = scanWorkspace + CONTROL_OFFSET;
@@ -298,7 +285,7 @@ __simt_callee__ __aicore__ inline void ProcessColdRow(
     const uint32_t position = tile + thread;
     const int32_t flag = position < topk &&
         IsSourceTokenValid(row, topkIndices[topkBase + position], visibleSeqLens, tokenToReq,
-                           blockTable, maxToken, maxRequests, maxNumBlocks, hostNumBlocks, blockSize);
+                           maxToken, maxRequests);
     const int32_t rank = BlockExclusiveScan(scanWorkspace, flag, thread);
     const int32_t total = control[CONTROL_TOTAL];
     if (flag != 0) {
@@ -341,10 +328,10 @@ template <typename ScratchPtr>
 __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
     __ubuf__ int32_t* scanWorkspace, int64_t row, __gm__ int64_t* reqIds, __gm__ int64_t* lastReqIds,
     __gm__ int32_t* topkIndices, __gm__ int32_t* stablePrefixLens, __gm__ int32_t* visibleSeqLens,
-    __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots,
+    __gm__ int32_t* tokenToReq, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots,
     __gm__ int32_t* currentSlots, __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots,
     ScratchPtr rowWorkspace, uint32_t hashCapacity, uint32_t topk, uint32_t capacity, int32_t maxToken,
-    int64_t maxRequests, int64_t maxNumBlocks, int64_t hostNumBlocks, int32_t blockSize) {
+    int64_t maxRequests) {
   const uint32_t thread = static_cast<uint32_t>(threadIdx.x);
   __ubuf__ int32_t* control = scanWorkspace + CONTROL_OFFSET;
   const int64_t topkBase = row * static_cast<int64_t>(topk);
@@ -373,9 +360,8 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
   // This branch is uniform across all threads; no MTP suffix-only shortcut.
   if (control[CONTROL_RESET] != 0) {
     ProcessColdRow(scanWorkspace, missPositions, row, thread, reqIds, lastReqIds, topkIndices,
-                   visibleSeqLens, tokenToReq, blockTable, slotToToken, lruSlots, currentSlots,
-                   missCount, missTokens, missSlots, topk, capacity, maxToken, maxRequests,
-                   maxNumBlocks, hostNumBlocks, blockSize);
+                   visibleSeqLens, tokenToReq, slotToToken, lruSlots, currentSlots,
+                   missCount, missTokens, missSlots, topk, capacity, maxToken, maxRequests);
     return;
   }
   for (uint32_t i = thread; i < hashCapacity; i += PLAN_THREADS) {
@@ -388,8 +374,7 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
   // 阶段 3：仅插入合法 TopK token。所有插入结束后，才允许普通 load 查询 hash。
   for (uint32_t pos = thread; pos < topk; pos += PLAN_THREADS) {
     const int32_t token = topkIndices[topkBase + pos];
-    if (IsSourceTokenValid(row, token, visibleSeqLens, tokenToReq, blockTable, maxToken, maxRequests, maxNumBlocks,
-                           hostNumBlocks, blockSize)) {
+    if (IsSourceTokenValid(row, token, visibleSeqLens, tokenToReq, maxToken, maxRequests)) {
       missPositions[pos] = static_cast<int32_t>(
           InsertTopkToken(hashKeys, hashFirstPos, token, static_cast<int32_t>(pos), hashCapacity));
     } else {
@@ -521,6 +506,8 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
 #include "options.h"
 #if JOINT_OPT_MASK == 16
 #include "bitmap_plan.h"
+#elif JOINT_OPT_MASK == 17
+#include "turbo_plan.h"
 #else
 #include "sparse_kv_joint_plan.h"
 #endif
@@ -529,16 +516,16 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
  * SIMT 调度层。是否使用 UB 对整个 block 一致，不会在 barrier 两侧发生线程分歧。
  * UB 路径复用当前 AIV 的单行 scratch；GM 路径按 row 切分用户的完整 workspace。
  */
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
 template <bool JointEnabled>
 #endif
 __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntimeVf(
     __ubuf__ int32_t* scanWorkspace, __gm__ int64_t* reqIds, __gm__ int64_t* lastReqIds, __gm__ int32_t* topkIndices,
     __gm__ int32_t* stablePrefixLens, __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,
-    __gm__ int32_t* blockTable, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,
+    __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,
     __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots, __gm__ int32_t* compactWorkspace,
     uint64_t hashCapacity, uint64_t workspaceRowElements, int64_t rowStart, int64_t rowStride, int64_t numReqs,
-    int64_t topk, int64_t capacity, int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks, int64_t hostNumBlocks,
+    int64_t topk, int64_t capacity, int64_t maxToken, int64_t maxRequests,
     int32_t blockSize, __gm__ int32_t* rowModes, __gm__ int32_t* residentRows, __gm__ int32_t* residentBlockTable,
     uint64_t jointHashCapacity, uint64_t scratchElements) {
   const JointPlanArgs args{reqIds,
@@ -547,7 +534,6 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
                            stablePrefixLens,
                            visibleSeqLens,
                            tokenToReq,
-                           blockTable,
                            slotToToken,
                            lruSlots,
                            currentSlots,
@@ -563,15 +549,15 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
                            static_cast<uint32_t>(jointHashCapacity),
 #if JOINT_OPT_MASK == 16
                            compactWorkspace, scratchElements,
+#elif JOINT_OPT_MASK == 17
+                           scratchElements,
 #endif
                            static_cast<int32_t>(maxToken),
                            blockSize,
-                           maxRequests,
-                           maxNumBlocks,
-                           hostNumBlocks};
+                           maxRequests};
   // A: 非联合 VF 不实例化 BuildJointUnion/PlanJointUnion。
   // 仍执行完整 RunPrivateRow 协议和原有同步；这是代码资源隔离实验。
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
   if constexpr (!JointEnabled) {
     for (int64_t row = rowStart; row < numReqs; row += rowStride) {
       if (scratchElements <= PLAN_ROW_UB_LIMIT_ELEMENTS) {
@@ -590,6 +576,10 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
     }
   } else {
 #endif
+#if JOINT_OPT_MASK == 17
+  RunJointScheduleTurbo(args, rowStart, rowStride, numReqs, tokenToReq, rowModes, scanWorkspace, compactWorkspace,
+                        jointHashCapacity, scratchElements);
+#else
   int64_t group = 0;
   for (int64_t row = jointHashCapacity != 0U ? 0 : rowStart; row < numReqs;) {
     int64_t end = row + 1;
@@ -614,7 +604,8 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
     ++group;
     row = jointHashCapacity != 0U ? end : row + rowStride;
   }
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16
+#endif
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
   }
 #endif
 }
@@ -624,11 +615,11 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
 
 // Direct launch adaptation only: fieldwise GM tiling load and unchanged VF call.
 static_assert(sizeof(SparseKvPlanTilingData) == sizeof(JointDirectTilingData), "device/host tiling ABI mismatch");
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
 template <bool AllowJoint>
 #endif
 __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
-    GM_ADDR tokenToReq, GM_ADDR blockTable, GM_ADDR activeRows, GM_ADDR lastReqIds,
+    GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
     GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
     GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
@@ -642,8 +633,6 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
   tilingData.capacity = gm->capacity;
   tilingData.maxToken = gm->maxToken;
   tilingData.maxRequests = gm->maxRequests;
-  tilingData.maxNumBlocks = gm->maxNumBlocks;
-  tilingData.hostNumBlocks = gm->hostNumBlocks;
   tilingData.blockSize = gm->blockSize;
   tilingData.localMemoryBytes = gm->localMemoryBytes;
   tilingData.jointHashCapacity = gm->jointHashCapacity;
@@ -661,38 +650,38 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
   AscendC::TBuf<AscendC::TPosition::VECCALC> localWorkspace;
   pipe.InitBuffer(localWorkspace, tilingData.localMemoryBytes);
   __ubuf__ int32_t* scanWorkspace = reinterpret_cast<__ubuf__ int32_t*>(localWorkspace.Get<int32_t>().GetPhyAddr());
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
   // private_a 的整个 kernel 不包含联合 VF；joint_a 保留运行时 MTP 开关。
   if constexpr (!AllowJoint) {
   asc_vf_call<SparseKvPlanRuntimeVf<false>>(
       dim3(PLAN_THREADS), scanWorkspace, reinterpret_cast<__gm__ int64_t*>(reqIds),
       reinterpret_cast<__gm__ int64_t*>(lastReqIds), reinterpret_cast<__gm__ int32_t*>(topkIndices),
       reinterpret_cast<__gm__ int32_t*>(stablePrefixLens), reinterpret_cast<__gm__ int32_t*>(visibleSeqLens),
-      reinterpret_cast<__gm__ int32_t*>(tokenToReq), reinterpret_cast<__gm__ int32_t*>(blockTable),
+      reinterpret_cast<__gm__ int32_t*>(tokenToReq),
       reinterpret_cast<__gm__ int32_t*>(slotToToken), reinterpret_cast<__gm__ int32_t*>(lruSlots),
       reinterpret_cast<__gm__ int32_t*>(currentSlots), reinterpret_cast<__gm__ int32_t*>(missCount),
       reinterpret_cast<__gm__ int32_t*>(missTokens), reinterpret_cast<__gm__ int32_t*>(missSlots),
       reinterpret_cast<__gm__ int32_t*>(compactWorkspace), tilingData.hashCapacity, tilingData.workspaceRowElements,
       rowStart, rowStride, numRows, tilingData.topk, tilingData.capacity, tilingData.maxToken, tilingData.maxRequests,
-      tilingData.maxNumBlocks, tilingData.hostNumBlocks, tilingData.blockSize,
+      tilingData.blockSize,
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
   } else {
-  // mask16 only: single-VF launch-structure candidate workaround; root cause unconfirmed.
+  // mask16/17: single-VF launch-structure candidate workaround; root cause unconfirmed.
   // VF<true> still dispatches private rows when jointHashCapacity == 0.
-#if JOINT_OPT_MASK != 16
+#if JOINT_OPT_MASK != 16 && JOINT_OPT_MASK != 17
   if (tilingData.jointHashCapacity == 0U) {
   asc_vf_call<SparseKvPlanRuntimeVf<false>>(
       dim3(PLAN_THREADS), scanWorkspace, reinterpret_cast<__gm__ int64_t*>(reqIds),
       reinterpret_cast<__gm__ int64_t*>(lastReqIds), reinterpret_cast<__gm__ int32_t*>(topkIndices),
       reinterpret_cast<__gm__ int32_t*>(stablePrefixLens), reinterpret_cast<__gm__ int32_t*>(visibleSeqLens),
-      reinterpret_cast<__gm__ int32_t*>(tokenToReq), reinterpret_cast<__gm__ int32_t*>(blockTable),
+      reinterpret_cast<__gm__ int32_t*>(tokenToReq),
       reinterpret_cast<__gm__ int32_t*>(slotToToken), reinterpret_cast<__gm__ int32_t*>(lruSlots),
       reinterpret_cast<__gm__ int32_t*>(currentSlots), reinterpret_cast<__gm__ int32_t*>(missCount),
       reinterpret_cast<__gm__ int32_t*>(missTokens), reinterpret_cast<__gm__ int32_t*>(missSlots),
       reinterpret_cast<__gm__ int32_t*>(compactWorkspace), tilingData.hashCapacity, tilingData.workspaceRowElements,
       rowStart, rowStride, numRows, tilingData.topk, tilingData.capacity, tilingData.maxToken, tilingData.maxRequests,
-      tilingData.maxNumBlocks, tilingData.hostNumBlocks, tilingData.blockSize,
+      tilingData.blockSize,
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
   } else {
@@ -701,16 +690,16 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
       dim3(PLAN_THREADS), scanWorkspace, reinterpret_cast<__gm__ int64_t*>(reqIds),
       reinterpret_cast<__gm__ int64_t*>(lastReqIds), reinterpret_cast<__gm__ int32_t*>(topkIndices),
       reinterpret_cast<__gm__ int32_t*>(stablePrefixLens), reinterpret_cast<__gm__ int32_t*>(visibleSeqLens),
-      reinterpret_cast<__gm__ int32_t*>(tokenToReq), reinterpret_cast<__gm__ int32_t*>(blockTable),
+      reinterpret_cast<__gm__ int32_t*>(tokenToReq),
       reinterpret_cast<__gm__ int32_t*>(slotToToken), reinterpret_cast<__gm__ int32_t*>(lruSlots),
       reinterpret_cast<__gm__ int32_t*>(currentSlots), reinterpret_cast<__gm__ int32_t*>(missCount),
       reinterpret_cast<__gm__ int32_t*>(missTokens), reinterpret_cast<__gm__ int32_t*>(missSlots),
       reinterpret_cast<__gm__ int32_t*>(compactWorkspace), tilingData.hashCapacity, tilingData.workspaceRowElements,
       rowStart, rowStride, numRows, tilingData.topk, tilingData.capacity, tilingData.maxToken, tilingData.maxRequests,
-      tilingData.maxNumBlocks, tilingData.hostNumBlocks, tilingData.blockSize,
+      tilingData.blockSize,
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
-#if JOINT_OPT_MASK != 16
+#if JOINT_OPT_MASK != 16 && JOINT_OPT_MASK != 17
   }
 #endif
   }
@@ -719,13 +708,13 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
       dim3(PLAN_THREADS), scanWorkspace, reinterpret_cast<__gm__ int64_t*>(reqIds),
       reinterpret_cast<__gm__ int64_t*>(lastReqIds), reinterpret_cast<__gm__ int32_t*>(topkIndices),
       reinterpret_cast<__gm__ int32_t*>(stablePrefixLens), reinterpret_cast<__gm__ int32_t*>(visibleSeqLens),
-      reinterpret_cast<__gm__ int32_t*>(tokenToReq), reinterpret_cast<__gm__ int32_t*>(blockTable),
+      reinterpret_cast<__gm__ int32_t*>(tokenToReq),
       reinterpret_cast<__gm__ int32_t*>(slotToToken), reinterpret_cast<__gm__ int32_t*>(lruSlots),
       reinterpret_cast<__gm__ int32_t*>(currentSlots), reinterpret_cast<__gm__ int32_t*>(missCount),
       reinterpret_cast<__gm__ int32_t*>(missTokens), reinterpret_cast<__gm__ int32_t*>(missSlots),
       reinterpret_cast<__gm__ int32_t*>(compactWorkspace), tilingData.hashCapacity, tilingData.workspaceRowElements,
       rowStart, rowStride, numRows, tilingData.topk, tilingData.capacity, tilingData.maxToken, tilingData.maxRequests,
-      tilingData.maxNumBlocks, tilingData.hostNumBlocks, tilingData.blockSize,
+      tilingData.blockSize,
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
 #endif
@@ -733,19 +722,19 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
 }
 extern "C" __global__ __aicore__ void sparse_kv_plan_joint_kernel(
     GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
-    GM_ADDR tokenToReq, GM_ADDR blockTable, GM_ADDR activeRows, GM_ADDR lastReqIds,
+    GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
     GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
     GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
   AscendC::InitSocState();
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
   JointDirectBody<true>(
 #else
   JointDirectBody(
 #endif
       reqIds, topkIndices, stablePrefixLens, visibleSeqLens,
-      tokenToReq, blockTable, activeRows, lastReqIds,
+      tokenToReq, activeRows, lastReqIds,
       slotToToken, lruSlots, currentSlots, missCount,
       missTokens, missSlots, compactWorkspace, rowModes,
       residentRows, residentBlockTable, tiling);
@@ -753,19 +742,19 @@ extern "C" __global__ __aicore__ void sparse_kv_plan_joint_kernel(
 
 extern "C" __global__ __aicore__ void sparse_kv_plan_private_kernel(
     GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
-    GM_ADDR tokenToReq, GM_ADDR blockTable, GM_ADDR activeRows, GM_ADDR lastReqIds,
+    GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
     GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
     GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
   AscendC::InitSocState();
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
   JointDirectBody<false>(
 #else
   JointDirectBody(
 #endif
       reqIds, topkIndices, stablePrefixLens, visibleSeqLens,
-      tokenToReq, blockTable, activeRows, lastReqIds,
+      tokenToReq, activeRows, lastReqIds,
       slotToToken, lruSlots, currentSlots, missCount,
       missTokens, missSlots, compactWorkspace, rowModes,
       residentRows, residentBlockTable, tiling);
@@ -778,13 +767,13 @@ extern "C" uint32_t joint_plan_block_dim() {
   return n < 64U ? n : 64U;
 }
 extern "C" void launch_joint_plan(bool jointEntry, GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
-    GM_ADDR tokenToReq, GM_ADDR blockTable, GM_ADDR activeRows, GM_ADDR lastReqIds,
+    GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
     GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
     GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling,
     uint32_t blockDim, uint32_t dynamicUb, void* stream) {
   if (jointEntry)
-    sparse_kv_plan_joint_kernel<<<blockDim, dynamicUb, stream>>>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, blockTable, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling);
+    sparse_kv_plan_joint_kernel<<<blockDim, dynamicUb, stream>>>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling);
   else
-    sparse_kv_plan_private_kernel<<<blockDim, dynamicUb, stream>>>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, blockTable, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling);
+    sparse_kv_plan_private_kernel<<<blockDim, dynamicUb, stream>>>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling);
 }

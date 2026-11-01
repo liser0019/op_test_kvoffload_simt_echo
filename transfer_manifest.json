@@ -31,7 +31,7 @@
   "compute_class_policy": "baseline and large-token fallback byte-identical to preserved upstream class; A/B/C/D template variants validated separately",
   "transfer_core_policy": "min(requested core_limit [1,64], platform AIV count capped at64); same requested/actual cores required for comparison",
   "transfer_buffer_bytes": 32768,
-  "plan_manifest_sha256": "59a8cbb460c6188fd7bf45acbee9d81f31a187e460304a5408324e9357927fa1",
+  "plan_manifest_sha256": "81a9f9fb0031e6067bc367f9770c2bb37896401d1923c261e9807836c05a6afe",
   "hardware_validation": "not_run_on_development_machine",
   "local_execution": "source review and static diff/hash checks only; no Python/build/tests",
   "hit_percentages": [
@@ -67,7 +67,7 @@
     "checks/check_plan_transfer.py": "ed5341d4a2a9396bf43c8eb95823207b1b650db0f669bcbae96aa57be48ef907",
     "checks/check_full_cache_inputs.py": "5463fc9735576415ee97ac3fc3a42905f1eabce82ffb13003a8777f2254e5a41",
     "run_plan_transfer.sh": "0c771510d14d2fc3b6472ce2d0a5c4c06a464034ce8bc9141a505ceb0f854149",
-    "csrc/transfer/prepared.cpp": "c08901bb99b2004c54445dc17935171d30eb9fbcc6807d4441b2971b7a7f0373",
+    "csrc/transfer/prepared.cpp": "7934d9926e1a2285fc981983618a2ac94775acb8b0b9415e07c37cd7666fba43",
     "harness_io.py": "802c3ea156ead3587c8cb47cbee746870113ad821be908444494a9d06979905f",
     "checks/check_transfer_harness.py": "c54ee6acc2b94e6b45aede8e7cfb1d847643c03b6d9021392804713b301f0d49",
     "csrc/transfer_variants/kernel.cpp": "4cbe9976132a9911a1c92c02346760a5067f4c853e24aa08d6e4ca87194f3166",

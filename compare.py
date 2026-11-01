@@ -111,7 +111,6 @@ def reference_simt(case):
     out.update({key: np.full((rows, topk), poison, np.int32)
                 for key in ("current_slots", "miss_tokens", "miss_slots")})
     out["miss_count"] = np.full(rows, poison, np.int32)
-    block_size = case.get("block_size", BLOCK_SIZE)
     active = min(rows, max(0, case.get("active_rows", rows)))
     for row in range(active):
         request = int(case["token_to_req"][row])
@@ -128,11 +127,8 @@ def reference_simt(case):
         for token in case["topk_indices"][row]:
             token = int(token)
             allowed = (0 <= token < case["max_token"] and token < case["visible_seq_lens"][row]
-                       and valid_request and block_size > 0)
-            block = token // block_size if allowed else -1
-            allowed = allowed and block < case["block_table"].shape[1]
-            physical = int(case["block_table"][request, block]) if allowed else -1
-            valid.append(allowed and 0 <= physical < case["host_num_blocks"])
+                       and valid_request)
+            valid.append(allowed)
         first = {}
         for pos, token in enumerate(case["topk_indices"][row]):
             if valid[pos]: first.setdefault(int(token), pos)
@@ -234,12 +230,11 @@ def prepare_npu(torch, case, unused, device, names=IMPLEMENTATIONS):
 def invoke(torch, name, case, inputs, state):
     getattr(torch.ops.sparse_kv_plan_op, VARIANTS[name]["op_name"])(
         inputs["req_ids"], inputs["topk_indices"], inputs["stable_prefix_lens"],
-        inputs["visible_seq_lens"], inputs["token_to_req"], inputs["block_table"],
+        inputs["visible_seq_lens"], inputs["token_to_req"],
         inputs["active_rows"], state["last_req_ids"], state["slot_to_token"],
         state["lru_slots"], state["current_slots"], state["miss_count"],
         state["miss_tokens"], state["miss_slots"], state["workspace"],
-        case["topk"], case["capacity"], case["max_token"],
-        case.get("block_size", BLOCK_SIZE), case["host_num_blocks"])
+        case["topk"], case["capacity"], case["max_token"])
 
 
 def audit_case(torch, case, names, device, repeats=3):

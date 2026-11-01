@@ -7,7 +7,7 @@
  * 计算源自 Sparse KV Plan；本版本的算法差异见 plan_variants_manifest.json。
  * 当前配置为 1024 个 SIMT 线程，launch bound、循环步长和 Scan 空间
  * 均使用公共配置头中的 PLAN_THREADS / PLAN_WARP_COUNT。
- * Host 显式上传 80 字节 tiling，通过 mixed kernel 外壳调用 SIMT VF。
+ * Host 显式上传 64 字节 tiling，通过 mixed kernel 外壳调用 SIMT VF。
  * block 按 query 行分配任务，并以 blockDim 为步长处理后续行；核数上限为 64。
  * 行临时区不超过 112 KiB 时使用 UB，否则使用 compactWorkspace 的 GM 行区。
  * LRU 更新、重复 TopK 处理和投机后缀失效语义保留；实机性能仍需测量。
@@ -208,23 +208,13 @@ __simt_callee__ __aicore__ inline uint32_t LookupTopkToken(ScratchPtr keys, int3
 }
 
 __simt_callee__ __aicore__ inline bool IsSourceTokenValid(int64_t row, int32_t token, __gm__ int32_t* visibleSeqLens,
-                                                          __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable,
-                                                          int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks,
-                                                          int64_t hostNumBlocks, int32_t blockSize) {
+                                                          __gm__ int32_t* tokenToReq,
+                                                          int64_t maxToken, int64_t maxRequests) {
   if (token < 0 || token >= maxToken || token >= visibleSeqLens[row]) {
     return false;
   }
   const int32_t request = tokenToReq[row];
-  if (request < 0 || request >= maxRequests || blockSize <= 0) {
-    return false;
-  }
-  const int64_t blockId = token / blockSize;
-  if (blockId < 0 || blockId >= maxNumBlocks) {
-    return false;
-  }
-  const int64_t tableOffset = static_cast<int64_t>(request) * maxNumBlocks + blockId;
-  const int32_t physicalBlock = blockTable[tableOffset];
-  return physicalBlock >= 0 && physicalBlock < hostNumBlocks;
+  return request >= 0 && request < maxRequests;
 }
 
 // The next scan writes only warpTotals before its first barrier. That
@@ -252,50 +242,33 @@ __simt_callee__ __aicore__ inline void ClearMissTail(
 // Row-local arithmetic remains int64 for table offsets. A negative visible
 // length means no visible tokens, rather than a large unsigned upper bound.
 struct RowSourceContext {
-  int64_t tableBase = 0;
   uint32_t upper = 0;
-  uint32_t blockSize = 0;
-  uint32_t blockShift = UINT32_MAX;
   bool valid = false;
 };
 
 __simt_callee__ __aicore__ inline RowSourceContext PrepareRowSource(
     int64_t row, __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,
-    int32_t maxToken, int64_t maxRequests, int64_t maxNumBlocks, int32_t blockSize) {
+    int32_t maxToken, int64_t maxRequests) {
   RowSourceContext context;
   if constexpr (OPT_E) {
     const int32_t request = tokenToReq[row];
-    context.valid = request >= 0 && request < maxRequests && blockSize > 0;
+    context.valid = request >= 0 && request < maxRequests;
     const int32_t visible = visibleSeqLens[row];
     context.upper = visible <= 0 ? 0U : static_cast<uint32_t>(visible < maxToken ? visible : maxToken);
-    if (context.valid) {
-      context.tableBase = static_cast<int64_t>(request) * maxNumBlocks;
-      context.blockSize = static_cast<uint32_t>(blockSize);
-      if ((context.blockSize & (context.blockSize - 1U)) == 0U) {
-        context.blockShift = 0U;
-        for (uint32_t size = context.blockSize; size > 1U; size >>= 1U) ++context.blockShift;
-      }
-    }
   }
   return context;
 }
 
 __simt_callee__ __aicore__ inline bool IsRowSourceValid(
     const RowSourceContext& context, int64_t row, int32_t token,
-    __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable,
-    int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks,
-    int64_t hostNumBlocks, int32_t blockSize) {
+    __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,
+    int64_t maxToken, int64_t maxRequests) {
   if constexpr (OPT_E) {
     const uint32_t unsignedToken = static_cast<uint32_t>(token);
-    if (!context.valid || unsignedToken >= context.upper) return false;
-    const uint32_t block = context.blockShift == UINT32_MAX
-        ? unsignedToken / context.blockSize : unsignedToken >> context.blockShift;
-    if (static_cast<int64_t>(block) >= maxNumBlocks) return false;
-    const int32_t physical = blockTable[context.tableBase + block];
-    return physical >= 0 && static_cast<int64_t>(physical) < hostNumBlocks;
+    return context.valid && unsignedToken < context.upper;
   } else {
-    return IsSourceTokenValid(row, token, visibleSeqLens, tokenToReq, blockTable,
-                              maxToken, maxRequests, maxNumBlocks, hostNumBlocks, blockSize);
+    return IsSourceTokenValid(row, token, visibleSeqLens, tokenToReq,
+                              maxToken, maxRequests);
   }
 }
 
@@ -305,11 +278,10 @@ template <typename ScratchPtr>
 __simt_callee__ __aicore__ inline void ProcessColdRow(
     __ubuf__ int32_t* scanWorkspace, ScratchPtr missPositions, int64_t row, uint32_t thread,
     __gm__ int64_t* reqIds, __gm__ int64_t* lastReqIds, __gm__ int32_t* topkIndices,
-    __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable,
+    __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,
     __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,
     __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots,
-    uint32_t topk, uint32_t capacity, int32_t maxToken, int64_t maxRequests,
-    int64_t maxNumBlocks, int64_t hostNumBlocks, int32_t blockSize) {
+    uint32_t topk, uint32_t capacity, int32_t maxToken, int64_t maxRequests) {
   const int64_t topkBase = row * static_cast<int64_t>(topk);
   const int64_t capacityBase = row * static_cast<int64_t>(capacity);
   __ubuf__ int32_t* control = scanWorkspace + CONTROL_OFFSET;
@@ -317,13 +289,13 @@ __simt_callee__ __aicore__ inline void ProcessColdRow(
     slotToToken[capacityBase + slot] = INVALID_TOKEN;
   }
   const RowSourceContext source = PrepareRowSource(row, visibleSeqLens, tokenToReq, maxToken,
-                                                    maxRequests, maxNumBlocks, blockSize);
+                                                    maxRequests);
   int32_t count = 0;
   for (uint32_t tile = 0U; tile < topk; tile += PLAN_THREADS) {
     const uint32_t position = tile + thread;
     const int32_t flag = position < topk &&
         IsRowSourceValid(source, row, topkIndices[topkBase + position], visibleSeqLens, tokenToReq,
-                           blockTable, maxToken, maxRequests, maxNumBlocks, hostNumBlocks, blockSize);
+                           maxToken, maxRequests);
     const int32_t rank = BlockExclusiveScan(scanWorkspace, flag, thread);
     const int32_t total = control[CONTROL_TOTAL];
     if (flag != 0) {
@@ -366,10 +338,10 @@ template <typename ScratchPtr>
 __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
     __ubuf__ int32_t* scanWorkspace, int64_t row, __gm__ int64_t* reqIds, __gm__ int64_t* lastReqIds,
     __gm__ int32_t* topkIndices, __gm__ int32_t* stablePrefixLens, __gm__ int32_t* visibleSeqLens,
-    __gm__ int32_t* tokenToReq, __gm__ int32_t* blockTable, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots,
+    __gm__ int32_t* tokenToReq, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots,
     __gm__ int32_t* currentSlots, __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots,
     ScratchPtr rowWorkspace, uint32_t hashCapacity, uint32_t topk, uint32_t capacity, int32_t maxToken,
-    int64_t maxRequests, int64_t maxNumBlocks, int64_t hostNumBlocks, int32_t blockSize) {
+    int64_t maxRequests) {
   const uint32_t thread = static_cast<uint32_t>(threadIdx.x);
   __ubuf__ int32_t* control = scanWorkspace + CONTROL_OFFSET;
   const int64_t topkBase = row * static_cast<int64_t>(topk);
@@ -410,9 +382,8 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
   }
   if (reset) {
     ProcessColdRow(scanWorkspace, missPositions, row, thread, reqIds, lastReqIds, topkIndices,
-                   visibleSeqLens, tokenToReq, blockTable, slotToToken, lruSlots, currentSlots,
-                   missCount, missTokens, missSlots, topk, capacity, maxToken, maxRequests,
-                   maxNumBlocks, hostNumBlocks, blockSize);
+                   visibleSeqLens, tokenToReq, slotToToken, lruSlots, currentSlots,
+                   missCount, missTokens, missSlots, topk, capacity, maxToken, maxRequests);
     return;
   }
   for (uint32_t i = thread; i < hashCapacity; i += PLAN_THREADS) {
@@ -423,13 +394,12 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
   asc_syncthreads();
 
   const RowSourceContext source = PrepareRowSource(row, visibleSeqLens, tokenToReq, maxToken,
-                                                    maxRequests, maxNumBlocks, blockSize);
+                                                    maxRequests);
   // 阶段 3：仅插入合法 TopK token。所有插入结束后，才允许普通 load 查询 hash。
   for (uint32_t pos = thread; pos < topk; pos += PLAN_THREADS) {
     const int32_t token = topkIndices[topkBase + pos];
-    if (IsRowSourceValid(source, row, token, visibleSeqLens, tokenToReq, blockTable,
-                           maxToken, maxRequests, maxNumBlocks,
-                           hostNumBlocks, blockSize)) {
+    if (IsRowSourceValid(source, row, token, visibleSeqLens, tokenToReq,
+                           maxToken, maxRequests)) {
       if constexpr (!OPT_A) currentSlots[topkBase + pos] = PENDING_SLOT;
       missPositions[pos] = static_cast<int32_t>(
           InsertTopkToken(hashKeys, hashFirstPos, token, static_cast<int32_t>(pos), hashCapacity));
@@ -581,26 +551,23 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
 __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntimeVf(
     __ubuf__ int32_t* scanWorkspace, __gm__ int64_t* reqIds, __gm__ int64_t* lastReqIds, __gm__ int32_t* topkIndices,
     __gm__ int32_t* stablePrefixLens, __gm__ int32_t* visibleSeqLens, __gm__ int32_t* tokenToReq,
-    __gm__ int32_t* blockTable, __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,
+    __gm__ int32_t* slotToToken, __gm__ int32_t* lruSlots, __gm__ int32_t* currentSlots,
     __gm__ int32_t* missCount, __gm__ int32_t* missTokens, __gm__ int32_t* missSlots, __gm__ int32_t* compactWorkspace,
     uint64_t hashCapacity, uint64_t workspaceRowElements, int64_t rowStart, int64_t rowStride, int64_t numReqs,
-    int64_t topk, int64_t capacity, int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks, int64_t hostNumBlocks,
-    int32_t blockSize) {
+    int64_t topk, int64_t capacity, int64_t maxToken, int64_t maxRequests) {
   for (int64_t row = rowStart; row < numReqs; row += rowStride) {
     if (workspaceRowElements <= PLAN_ROW_UB_LIMIT_ELEMENTS) {
       __ubuf__ int32_t* rowWorkspace = scanWorkspace + PLAN_SCAN_STORAGE_ELEMENTS;
       ProcessRuntimeRow(scanWorkspace, row, reqIds, lastReqIds, topkIndices, stablePrefixLens, visibleSeqLens,
-                        tokenToReq, blockTable, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots,
+                        tokenToReq, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots,
                         rowWorkspace, static_cast<uint32_t>(hashCapacity), static_cast<uint32_t>(topk),
-                        static_cast<uint32_t>(capacity), static_cast<int32_t>(maxToken), maxRequests, maxNumBlocks,
-                        hostNumBlocks, blockSize);
+                        static_cast<uint32_t>(capacity), static_cast<int32_t>(maxToken), maxRequests);
     } else {
       __gm__ int32_t* rowWorkspace = compactWorkspace + static_cast<uint64_t>(row) * workspaceRowElements;
       ProcessRuntimeRow(scanWorkspace, row, reqIds, lastReqIds, topkIndices, stablePrefixLens, visibleSeqLens,
-                        tokenToReq, blockTable, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots,
+                        tokenToReq, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots,
                         rowWorkspace, static_cast<uint32_t>(hashCapacity), static_cast<uint32_t>(topk),
-                        static_cast<uint32_t>(capacity), static_cast<int32_t>(maxToken), maxRequests, maxNumBlocks,
-                        hostNumBlocks, blockSize);
+                        static_cast<uint32_t>(capacity), static_cast<int32_t>(maxToken), maxRequests);
     }
   }
 }
@@ -608,7 +575,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
 }  // namespace
 
 extern "C" __global__ __aicore__ void sparse_kv_plan_kernel(GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens,
-                                                     GM_ADDR visibleSeqLens, GM_ADDR tokenToReq, GM_ADDR blockTable,
+                                                     GM_ADDR visibleSeqLens, GM_ADDR tokenToReq,
                                                      GM_ADDR activeRows, GM_ADDR lastReqIds,
                                                      GM_ADDR slotToToken,
                                                      GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
@@ -626,10 +593,8 @@ extern "C" __global__ __aicore__ void sparse_kv_plan_kernel(GM_ADDR reqIds, GM_A
   tilingData.capacity = tilingGm->capacity;
   tilingData.maxToken = tilingGm->maxToken;
   tilingData.maxRequests = tilingGm->maxRequests;
-  tilingData.maxNumBlocks = tilingGm->maxNumBlocks;
-  tilingData.hostNumBlocks = tilingGm->hostNumBlocks;
-  tilingData.blockSize = tilingGm->blockSize;
   tilingData.localMemoryBytes = tilingGm->localMemoryBytes;
+  tilingData.reserved = tilingGm->reserved;
   const int32_t requestedRows = *reinterpret_cast<__gm__ int32_t*>(activeRows);
   const int64_t numRows = requestedRows > 0 && requestedRows < tilingData.maxRows
                               ? requestedRows
@@ -647,13 +612,12 @@ extern "C" __global__ __aicore__ void sparse_kv_plan_kernel(GM_ADDR reqIds, GM_A
       dim3(PLAN_THREADS), scanWorkspace, reinterpret_cast<__gm__ int64_t*>(reqIds),
       reinterpret_cast<__gm__ int64_t*>(lastReqIds), reinterpret_cast<__gm__ int32_t*>(topkIndices),
       reinterpret_cast<__gm__ int32_t*>(stablePrefixLens), reinterpret_cast<__gm__ int32_t*>(visibleSeqLens),
-      reinterpret_cast<__gm__ int32_t*>(tokenToReq), reinterpret_cast<__gm__ int32_t*>(blockTable),
+      reinterpret_cast<__gm__ int32_t*>(tokenToReq),
       reinterpret_cast<__gm__ int32_t*>(slotToToken), reinterpret_cast<__gm__ int32_t*>(lruSlots),
       reinterpret_cast<__gm__ int32_t*>(currentSlots), reinterpret_cast<__gm__ int32_t*>(missCount),
       reinterpret_cast<__gm__ int32_t*>(missTokens), reinterpret_cast<__gm__ int32_t*>(missSlots),
       reinterpret_cast<__gm__ int32_t*>(compactWorkspace), tilingData.hashCapacity, tilingData.workspaceRowElements,
-      rowStart, rowStride, numRows, tilingData.topk, tilingData.capacity, tilingData.maxToken, tilingData.maxRequests,
-      tilingData.maxNumBlocks, tilingData.hostNumBlocks, tilingData.blockSize);
+      rowStart, rowStride, numRows, tilingData.topk, tilingData.capacity, tilingData.maxToken, tilingData.maxRequests);
 }
 
 // ---------------------------------------------------------------------------
@@ -676,12 +640,12 @@ extern "C" uint32_t calc_sparse_kv_plan_block_dim(void) {
 }
 
 extern "C" void launch_sparse_kv_plan(GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens,
-                                      GM_ADDR visibleSeqLens, GM_ADDR tokenToReq, GM_ADDR blockTable,
+                                      GM_ADDR visibleSeqLens, GM_ADDR tokenToReq,
                                       GM_ADDR activeRows, GM_ADDR lastReqIds, GM_ADDR slotToToken, GM_ADDR lruSlots,
                                       GM_ADDR currentSlots, GM_ADDR missCount, GM_ADDR missTokens, GM_ADDR missSlots,
                                       GM_ADDR compactWorkspace, GM_ADDR tiling, uint32_t blockDim,
                                       uint32_t dynUBufSize, void* stream) {
   sparse_kv_plan_kernel<<<blockDim, dynUBufSize, stream>>>(
-      reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, blockTable, activeRows, lastReqIds,
+      reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows, lastReqIds,
       slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, tiling);
 }

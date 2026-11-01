@@ -26,8 +26,7 @@
 #define GM_ADDR void*
 #endif
 
-// direct launch 版 tiling 结构:字段、顺序与
-// vllm-ascend op_host/sparse_kv_plan_tiling.h 的注册结构完全一致。
+// direct launch 版 tiling 结构(已移除仅用于源页表校验的 maxNumBlocks/hostNumBlocks/blockSize)。
 struct SparseKvPlanTilingData {
   uint64_t hashCapacity;
   uint64_t workspaceRowElements;
@@ -36,10 +35,8 @@ struct SparseKvPlanTilingData {
   int64_t capacity;
   int64_t maxToken;
   int64_t maxRequests;
-  int64_t maxNumBlocks;
-  int64_t hostNumBlocks;
-  int32_t blockSize;
   uint32_t localMemoryBytes;
+  uint32_t reserved;
 };
 
 // 与原 tiling 的 PLAN_BLOCKS 常量一致:块数上限 64。
@@ -79,8 +76,7 @@ inline uint32_t SparseKvPlanLocalMemoryBytes(uint64_t workspaceRowElements) {
 
 // host 侧组装完整 tiling 结构(纯函数,不查平台)。
 inline SparseKvPlanTilingData MakeSparseKvPlanTiling(int64_t maxRows, int64_t topk, int64_t capacity,
-                                                    int64_t maxToken, int64_t maxRequests, int64_t maxNumBlocks,
-                                                    int64_t hostNumBlocks, int64_t blockSize) {
+                                                    int64_t maxToken, int64_t maxRequests) {
   SparseKvPlanTilingData tiling{};
   const uint64_t hashCapacity = SparseKvPlanHashCapacity(topk);
   const uint64_t rowElements = SparseKvPlanRowElements(topk, capacity);
@@ -91,10 +87,8 @@ inline SparseKvPlanTilingData MakeSparseKvPlanTiling(int64_t maxRows, int64_t to
   tiling.capacity = capacity;
   tiling.maxToken = maxToken;
   tiling.maxRequests = maxRequests;
-  tiling.maxNumBlocks = maxNumBlocks;
-  tiling.hostNumBlocks = hostNumBlocks;
-  tiling.blockSize = static_cast<int32_t>(blockSize);
   tiling.localMemoryBytes = SparseKvPlanLocalMemoryBytes(rowElements);
+  tiling.reserved = 0U;
   return tiling;
 }
 
@@ -110,7 +104,7 @@ uint32_t calc_sparse_kv_plan_block_dim(void);
 // dynUBufSize 由 host 的 tiling.localMemoryBytes 提供,保留动态 UB。
 // 参数顺序与 kernel 入口一致(去掉 GE 框架专用的 workspace 形参)。
 void launch_sparse_kv_plan(GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens,
-                           GM_ADDR visibleSeqLens, GM_ADDR tokenToReq, GM_ADDR blockTable,
+                           GM_ADDR visibleSeqLens, GM_ADDR tokenToReq,
                            GM_ADDR activeRows, GM_ADDR lastReqIds, GM_ADDR slotToToken, GM_ADDR lruSlots,
                            GM_ADDR currentSlots, GM_ADDR missCount, GM_ADDR missTokens, GM_ADDR missSlots,
                            GM_ADDR compactWorkspace, GM_ADDR tiling, uint32_t blockDim,

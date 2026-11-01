@@ -120,7 +120,7 @@ class PreparedPlanTransfer : public torch::CustomClassHolder {
     TORCH_CHECK(p[6].numel() == 1, "prepared active_rows shape");
     Shape(p[8], {rows, c}); Shape(p[9], {rows, c});
     for (int i : {10, 12, 13}) Shape(p[i], {rows, t});
-    const auto tiling = MakeSparseKvPlanTiling(rows, t, c, length, requests, blocks, hostBlocks, block);
+    const auto tiling = MakeSparseKvPlanTiling(rows, t, c, length, requests);
     const auto rowElements = tiling.workspaceRowElements;
     TORCH_CHECK(rowElements <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / rows),
                 "prepared workspace overflow");
@@ -192,7 +192,7 @@ class PreparedPlanTransfer : public torch::CustomClassHolder {
       if (plan) {
         launch_sparse_kv_plan(
             p[0].data_ptr(), p[1].data_ptr(), p[2].data_ptr(), p[3].data_ptr(),
-            p[4].data_ptr(), p[5].data_ptr(), p[6].data_ptr(), p[7].data_ptr(),
+            p[4].data_ptr(), p[6].data_ptr(), p[7].data_ptr(),
             p[8].data_ptr(), p[9].data_ptr(), p[10].data_ptr(), p[11].data_ptr(),
             p[12].data_ptr(), p[13].data_ptr(), p[14].data_ptr(), data->planTiling.data_ptr(),
             data->planBlocks, data->dynUB, reinterpret_cast<void*>(stream));

@@ -127,7 +127,7 @@ add_custom_command(OUTPUT "${JOINT_OBJECT}"
         "${JOINT_ROOT}/joint_plan_manifest.json"
     COMMENT "Compile preserved ABCDF + MTP joint Plan" VERBATIM)
 set_source_files_properties("${JOINT_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
-# Compile the actual frozen 13_abcdf translation unit and its original plugin.
+# Compile independent 13_abcdf; source-page validation has been removed from its shared ABI.
 # This path never calls RunPrivateRow and never publishes joint metadata.
 set(ABCDF_DIR "${JOINT_ROOT}/csrc/plan_variants/13_abcdf")
 set(ABCDF_COMMON "${JOINT_ROOT}/csrc/plan_variants/common")
@@ -140,7 +140,7 @@ add_custom_command(OUTPUT "${ABCDF_OBJECT}"
     DEPENDS "${ABCDF_DIR}/kernel.cpp" ${ABCDF_HEADERS} "${JOINT_ROOT}/joint_plan_manifest.json"
     COMMENT "Compile original independent 13_abcdf (mask47, 1024 threads)" VERBATIM)
 set_source_files_properties("${ABCDF_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
-# Independent experiment translation units; baseline kernels remain unchanged.
+# Independent experiment translation units; all active Plan variants share the no-source-page contract.
 set(JOINT_VARIANT_DIR "${JOINT_ROOT}/csrc/joint_variants")
 set(JOINT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/joint_variants")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -151,13 +151,14 @@ if(NOT _variant_result EQUAL 0)
     message(FATAL_ERROR "Failed to generate Joint variant symbols")
 endif()
 set(JOINT_VARIANT_OBJECTS)
-foreach(_name a b ab c ac bc abc d ad bd abd cd acd bcd abcd bitmap)
+foreach(_name a b ab c ac bc abc d ad bd abd cd acd bcd abcd bitmap turbo)
     set(_object "${JOINT_GENERATED}/variant_${_name}.o")
     add_custom_command(OUTPUT "${_object}"
         COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
             ${JOINT_FLAGS} ${JOINT_INCLUDES} -c "${JOINT_GENERATED}/variant_${_name}.cpp" -o "${_object}"
         DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp"
             "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h" "${JOINT_VARIANT_DIR}/bitmap_plan.h"
+            "${JOINT_VARIANT_DIR}/turbo_plan.h"
             "${JOINT_DIR}/launch.h" "${JOINT_DIR}/sparse_kv_plan_config.h"
             "${JOINT_ROOT}/joint_plan_manifest.json"
         COMMENT "Compile Joint experiment ${_name}" VERBATIM)

@@ -44,7 +44,13 @@ class GoldenChecks(unittest.TestCase):
         np.testing.assert_array_equal(out["current_slots"][:2], -1)
         np.testing.assert_array_equal(out["miss_count"][:2], 0)
         self.assertGreaterEqual(out["current_slots"][2, 5], 0)
-        np.testing.assert_array_equal(out["current_slots"][2, [0, 1, 2, 3, 4, 6, 7, 8]], -1)
+        np.testing.assert_array_equal(out["current_slots"][2, [4, 6]], -1)
+        self.assertTrue(np.all(out["current_slots"][2, [0, 1, 2, 3, 5, 7, 8]] >= 0))
+        # The Plan ABI has no page table: even a poisoned legacy fixture table must not affect it.
+        case["block_table"].fill(-999)
+        again = c.reference_simt(case)
+        for key in (*c.SIMT_STATE, *c.SIMT_OUTPUT):
+            np.testing.assert_array_equal(again[key], out[key])
 
     def test_padded_rows_are_untouched(self):
         case = dict(c.make_audit_cases())["padded_active_2"]
@@ -75,7 +81,8 @@ class GoldenChecks(unittest.TestCase):
             start = text.index("m.def(")
             chunk = text[start:text.index(");", start)]
             return "".join(ast.literal_eval(value) for value in re.findall(r'"(?:[^"\\]|\\.)*"', chunk))
-        expected = schema(base)
+        expected = schema(base).replace("Tensor block_table, ", "")
+        expected = expected.replace(", int block_size, int host_num_blocks", "")
         self.assertEqual(schema(candidate), expected[expected.index("("):])
         for backend in ("Meta", "PrivateUse1"):
             self.assertIn("TORCH_LIBRARY_IMPL(sparse_kv_plan_op, " + backend, candidate)

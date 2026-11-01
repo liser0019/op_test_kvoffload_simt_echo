@@ -5,18 +5,16 @@
  *
  * SparseKvPlan 直调算子 torch 注册层(g++ 编译)。
  *
- * torch.ops.sparse_kv_plan_op.sparse_kv_plan 的 schema 与 vllm-ascend 的
- * aclnnSparseKvPlan 原型逐参数对应(15 个张量 + 5 个整型属性),差异:
- * - 本算子为带持久状态的 in-place 算子,8 个被 kernel 写写的张量带 (a!)..(h!)
+ * torch.ops.sparse_kv_plan_op.sparse_kv_plan 的 schema 包含 14 个张量 + 3 个整型属性
+ * (源页表 block_table 的物理块合法性由上游保证,Plan 不再接收 block_table/block_size/host_num_blocks):
+ * - 本算子为带持久状态的 in-place 算子,8 个被 kernel 改写的张量带 (a!)..(h!)
  *   变更标注;
  * - 以 direct launch 方式启动 kernel,不经过 GE/aclnn。
  *
- * 属性含义(与 vllm-ascend 原工程一致):
+ * 属性含义:
  *   topk          每行 TopK 宽度 T(topk_indices.size(1))
  *   capacity      每行驻留 slot 数 C
  *   max_token     token 值域上界
- *   block_size    KV block 大小(token/block)
- *   host_num_blocks host 侧 KV 缓存物理 block 数(physical block 合法上界)
  */
 #include <cstddef>
 #include <cstring>
@@ -38,19 +36,18 @@ namespace {
 // 单算子测试场景要求失败足够响亮,故不做 NDEBUG 裁剪。
 void CheckSparseKvPlanInputs(const at::Tensor& reqIds, const at::Tensor& topkIndices,
                              const at::Tensor& stablePrefixLens, const at::Tensor& visibleSeqLens,
-                             const at::Tensor& tokenToReq, const at::Tensor& blockTable,
+                             const at::Tensor& tokenToReq,
                              const at::Tensor& activeRows, const at::Tensor& lastReqIds,
                              const at::Tensor& slotToToken, const at::Tensor& lruSlots,
                              const at::Tensor& currentSlots, const at::Tensor& missCount,
                              const at::Tensor& missTokens, const at::Tensor& missSlots,
                              const at::Tensor& compactWorkspace, int64_t topk, int64_t capacity,
-                             int64_t maxToken, int64_t blockSize, int64_t hostNumBlocks, bool requireNpu) {
-  TORCH_CHECK(topk > 0 && capacity > 0 && maxToken > 0 && blockSize > 0 && hostNumBlocks > 0,
-              "topk/capacity/max_token/block_size/host_num_blocks must be positive");
+                             int64_t maxToken, bool requireNpu) {
+  TORCH_CHECK(topk > 0 && capacity > 0 && maxToken > 0,
+              "topk/capacity/max_token must be positive");
   TORCH_CHECK(topk <= std::numeric_limits<int32_t>::max() / 2 &&
                   capacity <= std::numeric_limits<int32_t>::max() &&
-                  maxToken <= std::numeric_limits<int32_t>::max() &&
-                  blockSize <= std::numeric_limits<int32_t>::max(),
+                  maxToken <= std::numeric_limits<int32_t>::max(),
               "SparseKvPlan shape or attribute exceeds int32 kernel limits");
   TORCH_CHECK(reqIds.dim() == 1 && reqIds.scalar_type() == at::kLong, "req_ids must be 1-D int64");
   TORCH_CHECK(topkIndices.dim() == 2 && topkIndices.scalar_type() == at::kInt, "topk_indices must be 2-D int32");
@@ -64,9 +61,6 @@ void CheckSparseKvPlanInputs(const at::Tensor& reqIds, const at::Tensor& topkInd
   TORCH_CHECK(stablePrefixLens.scalar_type() == at::kInt && visibleSeqLens.scalar_type() == at::kInt &&
                   tokenToReq.scalar_type() == at::kInt,
               "row metadata must be int32");
-  TORCH_CHECK(blockTable.dim() == 2 && blockTable.scalar_type() == at::kInt, "block_table must be 2-D int32");
-  TORCH_CHECK(blockTable.size(0) == reqIds.size(0), "req_ids and block_table row counts must match");
-  TORCH_CHECK(blockTable.size(1) > 0, "max_num_blocks must be positive");
   TORCH_CHECK(activeRows.numel() == 1 && activeRows.scalar_type() == at::kInt,
               "active_rows must be a scalar int32 tensor");
   TORCH_CHECK(lastReqIds.dim() == 1 && lastReqIds.scalar_type() == at::kLong && lastReqIds.numel() == maxRows,
@@ -89,11 +83,11 @@ void CheckSparseKvPlanInputs(const at::Tensor& reqIds, const at::Tensor& topkInd
   TORCH_CHECK(compactWorkspace.scalar_type() == at::kInt && compactWorkspace.dim() == 1,
               "compact_workspace must be 1-D int32");
   const at::Tensor* tensors[] = {&reqIds,          &topkIndices,  &stablePrefixLens, &visibleSeqLens,
-                                 &tokenToReq,      &blockTable,   &activeRows,       &lastReqIds,
+                                 &tokenToReq,      &activeRows,   &lastReqIds,
                                  &slotToToken,     &lruSlots,     &currentSlots,     &missCount,
                                  &missTokens,      &missSlots,    &compactWorkspace};
   const char* names[] = {"req_ids",          "topk_indices", "stable_prefix_lens", "visible_seq_lens",
-                         "token_to_req",     "block_table",  "active_rows",       "last_req_ids",
+                         "token_to_req",     "active_rows",  "last_req_ids",
                          "slot_to_token",    "lru_slots",    "current_slots",     "miss_count",
                          "miss_tokens",      "miss_slots",   "compact_workspace"};
   if (requireNpu) {
@@ -117,35 +111,34 @@ void CheckSparseKvPlanInputs(const at::Tensor& reqIds, const at::Tensor& topkInd
 
 void sparse_kv_plan_meta(const at::Tensor& reqIds, const at::Tensor& topkIndices,
                          const at::Tensor& stablePrefixLens, const at::Tensor& visibleSeqLens,
-                         const at::Tensor& tokenToReq, const at::Tensor& blockTable, const at::Tensor& activeRows,
+                         const at::Tensor& tokenToReq, const at::Tensor& activeRows,
                          const at::Tensor& lastReqIds, const at::Tensor& slotToToken, const at::Tensor& lruSlots,
                          const at::Tensor& currentSlots, const at::Tensor& missCount, const at::Tensor& missTokens,
                          const at::Tensor& missSlots, const at::Tensor& compactWorkspace, int64_t topk,
-                         int64_t capacity, int64_t maxToken, int64_t blockSize, int64_t hostNumBlocks) {
-  CheckSparseKvPlanInputs(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, blockTable, activeRows,
+                         int64_t capacity, int64_t maxToken) {
+  CheckSparseKvPlanInputs(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows,
                           lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots,
-                          compactWorkspace, topk, capacity, maxToken, blockSize, hostNumBlocks, false);
+                          compactWorkspace, topk, capacity, maxToken, false);
 }
 
 void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
                         const at::Tensor& stablePrefixLens, const at::Tensor& visibleSeqLens,
-                        const at::Tensor& tokenToReq, const at::Tensor& blockTable, const at::Tensor& activeRows,
+                        const at::Tensor& tokenToReq, const at::Tensor& activeRows,
                         const at::Tensor& lastReqIds, const at::Tensor& slotToToken, const at::Tensor& lruSlots,
                         const at::Tensor& currentSlots, const at::Tensor& missCount, const at::Tensor& missTokens,
                         const at::Tensor& missSlots, const at::Tensor& compactWorkspace, int64_t topk,
-                        int64_t capacity, int64_t maxToken, int64_t blockSize, int64_t hostNumBlocks) {
-  CheckSparseKvPlanInputs(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, blockTable, activeRows,
+                        int64_t capacity, int64_t maxToken) {
+  CheckSparseKvPlanInputs(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows,
                          lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots,
-                         compactWorkspace, topk, capacity, maxToken, blockSize, hostNumBlocks, true);
+                         compactWorkspace, topk, capacity, maxToken, true);
   const c10::OptionalDeviceGuard guard(reqIds.device());
 
   const int64_t maxRows = topkIndices.size(0);
   const int64_t maxRequests = reqIds.size(0);
-  const int64_t maxNumBlocks = blockTable.size(1);
 
   // host 侧组装 tiling(与原 op_host/sparse_kv_plan_tiling.cpp 同源的纯函数实现)。
   const SparseKvPlanTilingData tiling =
-      MakeSparseKvPlanTiling(maxRows, topk, capacity, maxToken, maxRequests, maxNumBlocks, hostNumBlocks, blockSize);
+      MakeSparseKvPlanTiling(maxRows, topk, capacity, maxToken, maxRequests);
 
   // tiling 结构体经小缓冲 H2D:pageable 拷贝阻塞完成后再入队 kernel,同流保序。
   at::Tensor tilingCpu = at::empty({static_cast<int64_t>(sizeof(SparseKvPlanTilingData))},
@@ -160,7 +153,7 @@ void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
     launch_sparse_kv_plan(
         const_cast<GM_ADDR>(reqIds.data_ptr()), const_cast<GM_ADDR>(topkIndices.data_ptr()),
         const_cast<GM_ADDR>(stablePrefixLens.data_ptr()), const_cast<GM_ADDR>(visibleSeqLens.data_ptr()),
-        const_cast<GM_ADDR>(tokenToReq.data_ptr()), const_cast<GM_ADDR>(blockTable.data_ptr()),
+        const_cast<GM_ADDR>(tokenToReq.data_ptr()),
         const_cast<GM_ADDR>(activeRows.data_ptr()), const_cast<GM_ADDR>(lastReqIds.data_ptr()),
         const_cast<GM_ADDR>(slotToToken.data_ptr()), const_cast<GM_ADDR>(lruSlots.data_ptr()),
         const_cast<GM_ADDR>(currentSlots.data_ptr()), const_cast<GM_ADDR>(missCount.data_ptr()),
@@ -175,14 +168,13 @@ void sparse_kv_plan_npu(const at::Tensor& reqIds, const at::Tensor& topkIndices,
 
 }  // namespace
 
-// schema 与 vllm-ascend aclnnSparseKvPlan 原型逐参数对应;
 // (a!)..(h!) 标注 kernel 会原地写入的状态/临时张量。
 TORCH_LIBRARY_FRAGMENT(sparse_kv_plan_op, m) {
   m.def(PLAN_OP_NAME "(Tensor req_ids, Tensor topk_indices, Tensor stable_prefix_lens, "
-        "Tensor visible_seq_lens, Tensor token_to_req, Tensor block_table, Tensor active_rows, "
+        "Tensor visible_seq_lens, Tensor token_to_req, Tensor active_rows, "
         "Tensor(a!) last_req_ids, Tensor(b!) slot_to_token, Tensor(c!) lru_slots, Tensor(d!) current_slots, "
         "Tensor(e!) miss_count, Tensor(f!) miss_tokens, Tensor(g!) miss_slots, Tensor(h!) compact_workspace, "
-        "int topk, int capacity, int max_token, int block_size, int host_num_blocks) -> ()");
+        "int topk, int capacity, int max_token) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(sparse_kv_plan_op, Meta, m) {

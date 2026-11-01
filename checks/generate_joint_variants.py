@@ -26,9 +26,9 @@ def generate(destination):
         entries.append("&" + replacements["launch_joint_plan"])
     signature = declaration.replace('extern "C" void launch_joint_plan(bool',
                                     'inline void LaunchJointVariant(int64_t mask, bool').rstrip(';')
-    args = "jointEntry, reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, blockTable, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling, blockDim, dynamicUb, stream"
+    args = "jointEntry, reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling, blockDim, dynamicUb, stream"
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
-    text += signature + " {\n  if (mask < 1 || mask > 16) throw std::invalid_argument(\"joint mask\");\n"
+    text += signature + " {\n  if (mask < 1 || mask > 17) throw std::invalid_argument(\"joint mask\");\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {nullptr, " + ", ".join(entries) + "};\n"
     text += "  launches[mask](" + args + ");\n}\n"
     (destination / "variant_dispatch.h").write_text(text)

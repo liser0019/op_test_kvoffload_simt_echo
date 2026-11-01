@@ -466,21 +466,21 @@
     }
   ],
   "shared_file_sha256": {
-    "csrc/plan_variants/common/plan_kernel_impl.h": "6564d52abe1b41ca60df8b4bb27dae6cc4fa0430473b6c3bfeb0056a4ef25e84",
-    "csrc/plan_variants/common/plan_plugin_impl.h": "0d344379aa4f7f406f5adfe55f52dc67ec8c8883b544d3e50253d5da58d4bd05",
+    "csrc/plan_variants/common/plan_kernel_impl.h": "5b58829a0137451c1f7c9c2a77c090eb59281dcf04c9854aedd6e62cf8719242",
+    "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "csrc/plan_variants/common/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222",
-    "csrc/scan_experiments/common/experiment_kernel_impl.h": "4314fa4e850c271c5fc02a6939b03ea3b6a7d09e72f09b9b011b74608abf5e5a",
-    "csrc/scan_experiments/common/experiment_launch.h": "2c0961ce62f089ffbe48df26bd2968105ab183f2fe0872bed7707db53fe12075",
+    "csrc/plan_variants/common/sparse_kv_plan_launch.h": "c74a125448f415e5840ba04602f8c46a161f09e80e43b27cf37998546f59dfc7",
+    "csrc/scan_experiments/common/experiment_kernel_impl.h": "f29d9d733fcaaa1c9aed6677f52b3b0bc6aa7e08955dcbd192ba70162becaf3e",
+    "csrc/scan_experiments/common/experiment_launch.h": "92a240356030d5047d4f6e7164834306a0df1f028faa3b45bc36abccfa15f5f7",
     "mtp_cases.py": "72bc420b5751f2d17cd21c32b04079c36e36d94ca49c9f4e6f7f7454a0325195",
-    "compare.py": "a0a1850a24203d005ad321ab1fd5b0af2c979da7f03399626628594b0e474bcf",
+    "compare.py": "b368b278d50c6982fd408ef2a80eb8f79e1faa7f8589922ee6f69caf66900c54",
     "profile_plan_variants.py": "e08ba8f87ef7c87773502a558c2a4388f1f919fe9001f741e77fab593719900c",
     "profile_mtp_matrix.py": "fed9dcd44fd04d64b522e1d0fc37b1982611de5cc194852c04b51d9d8fca1be9",
     "run_msopprof.py": "36aed7e5ddee45e54b528546dc4843fb9f9377d53c08bf439155045eebdb135b",
     "checks/check_mtp_scan.py": "ac4254ef0de7854720f46bb189c5d8a2a567758e1ddb9555ad3a2b915f4c57cb",
     "checks/plan_build_info.py": "199107cdfb4cc67d8edc4db5025edb13384641af177290338ef6240c0102e9fc",
-    "checks/check_plan_goldens.py": "552672b6d4a82aa3308752cbe30734fbd6e5d4d8d7f1e3824e99a13f4f01dc55",
-    "checks/check_plan_layouts.py": "d818e847e3df907e0870546630936a237939cc7886bcab5529dee998db534faa",
+    "checks/check_plan_goldens.py": "2125f5e9159c84ad9a43e12c880f668358ff3e6a7ec6efa2616155c7eaf33ebf",
+    "checks/check_plan_layouts.py": "c042037e1dc00165420496952361e4c50bf85693aed63093db7681f1e4a60be0",
     "checks/check_plan_profiling.py": "6692bbd6dfbbb5d03fcada3822eaa5c516ab79096546ceba9f7509d4b7210cf2",
     "CMakeLists.txt": "9bd167e10c882d418d9e7ee0f7a35a4d68d771606e359ef949b2b2c3897e9f63",
     "build.sh": "a3c83b1395116260afcfaa92262b78cbb790b86fd7b527c088dfa543fd50e6f0",
@@ -500,5 +500,6 @@
   "hardware_validation": "not_run_on_development_machine",
   "mtp_semantics": "mtp=draft_tokens; q_len=1+mtp; independent query-row state",
   "reference_source_commit": "9cc99d5",
-  "historical_mask": 47
+  "historical_mask": 47,
+  "source_contract": "Plan trusts upstream source-page validity; logical token/causal visibility checks remain; Transfer retains block_table."
 }

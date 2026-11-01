@@ -5,20 +5,19 @@
 // A contiguous request run belongs to one AIV. No inter-AIV barriers or atomics.
 struct JointPlanArgs {
   __gm__ int64_t *reqIds, *lastReqIds;
-  __gm__ int32_t *topkIndices, *stablePrefixLens, *visibleSeqLens, *tokenToReq, *blockTable;
+  __gm__ int32_t *topkIndices, *stablePrefixLens, *visibleSeqLens, *tokenToReq;
   __gm__ int32_t *slotToToken, *lruSlots, *currentSlots, *missCount, *missTokens, *missSlots;
   __gm__ int32_t *rowModes, *residentRows, *residentBlockTable;
   uint32_t topk, capacity, hashCapacity, jointHashCapacity;
   int32_t maxToken, blockSize;
-  int64_t maxRequests, maxNumBlocks, hostNumBlocks;
+  int64_t maxRequests;
 };
 constexpr int32_t ROW_PRIVATE = 0;
 constexpr int32_t ROW_JOINT = 1;
 constexpr int32_t ROW_FOLLOWER = 2;
 
 __simt_callee__ __aicore__ inline bool JointTokenValid(const JointPlanArgs& a, int64_t row, int32_t token) {
-  return IsSourceTokenValid(row, token, a.visibleSeqLens, a.tokenToReq, a.blockTable, a.maxToken, a.maxRequests,
-                            a.maxNumBlocks, a.hostNumBlocks, a.blockSize);
+  return IsSourceTokenValid(row, token, a.visibleSeqLens, a.tokenToReq, a.maxToken, a.maxRequests);
 }
 
 // Each valid token has one bucket. Stop after a tile whose union exceeds C;
@@ -84,9 +83,8 @@ __simt_callee__ __aicore__ inline void RunPrivateRow(const JointPlanArgs& a, int
   PublishResidentRow(a, row, row, thread);
   asc_syncthreads();
   ProcessRuntimeRow(scan, row, a.reqIds, a.lastReqIds, a.topkIndices, a.stablePrefixLens, a.visibleSeqLens,
-                    a.tokenToReq, a.blockTable, a.slotToToken, a.lruSlots, a.currentSlots, a.missCount, a.missTokens,
-                    a.missSlots, scratch, a.hashCapacity, a.topk, a.capacity, a.maxToken, a.maxRequests, a.maxNumBlocks,
-                    a.hostNumBlocks, a.blockSize);
+                    a.tokenToReq, a.slotToToken, a.lruSlots, a.currentSlots, a.missCount, a.missTokens,
+                    a.missSlots, scratch, a.hashCapacity, a.topk, a.capacity, a.maxToken, a.maxRequests);
 }
 
 template <typename ScratchPtr>

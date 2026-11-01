@@ -76,7 +76,8 @@ def duration_ratios(stats):
     pairs = [("private", "abcdf"), ("joint", "abcdf"), ("private", "joint")]
     pairs += [(name, base) for name in stats if name in common.VARIANTS
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
-    pairs += [("joint_bitmap", "joint_abc")]
+    pairs += [("joint_bitmap", "joint_abc"), ("joint_turbo", "joint_abc"),
+              ("joint_turbo", "joint_bitmap"), ("private_turbo", "private_a")]
     return {f"{left}_over_{right}_p50": stats[left]["p50_us"] / stats[right]["p50_us"]
             for left, right in pairs if left in stats and right in stats}
 
@@ -195,7 +196,7 @@ def mtp_comparison(runs):
 def report_text(report):
     lines = ["# 联合Plan MTP=0/1/3 profiling", "",
         "单次调用处理所有query行；数据来自kernel_details.csv，单位μs。", "",
-        "abcdf为原13_abcdf独立kernel及原15-tensor接口；不经过RunPrivateRow，不生成联合协议元数据。",
+        "abcdf为13_abcdf独立设备路径，已移除来源页检查（14 tensors + 3 attrs）；不经过RunPrivateRow，不生成联合协议元数据。历史含页表版本数据不能直接作为本轮同场结果。",
         "private为本新版joint关闭后的逐行ABCDF路径，含新增映射发布。",
         "MTP=0时joint列也关闭合并；保持同一实现的非MTP行为。", "",
         "| 对照 | 工况/TopK重合 | MTP | 请求/行 | 实现 | P50 μs | P95 μs | 样本数 | miss记录总数 | 共享/溢出组数 |",
