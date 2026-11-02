@@ -618,7 +618,10 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
 #endif
 }
 
-#if JOINT_OPT_MASK >= 37
+#if JOINT_OPT_MASK >= 39
+#include "sorted_sweep_stage.h"
+#include "sorted_sweep_controller.h"
+#elif JOINT_OPT_MASK >= 37
 #include "sorted_stage.h"
 #include "sorted_controller.h"
 #endif

@@ -17,17 +17,17 @@ from joint_plan_cases import make_case, initial_arrays, validate, layout, INPUTS
 from joint_plan_common import TENSOR_ORDER
 
 
-def build(directory, mask):
+def build(directory, mask, model_threads=64):
     source = (ROOT / "csrc/joint_variants/kernel.cpp").read_text()
     source = source[:source.index("// Direct launch adaptation only:")]
     source = source.replace('../joint_plan/', '')
     if mask >= 37: source = '#include "sorted_cann_cpu.h"\n' + source
     (directory / 'kernel_under_test.h').write_text(source)
     config = (ROOT / 'csrc/joint_plan/sparse_kv_plan_config.h').read_text()
-    config, count = re.subn(r'PLAN_THREADS = 1024U', 'PLAN_THREADS = 64U', config)
+    config, count = re.subn(r'PLAN_THREADS = 1024U', f'PLAN_THREADS = {model_threads}U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -103,6 +103,10 @@ def main():
     records = []
     with tempfile.TemporaryDirectory(prefix='joint_variants_cpu_') as tmp:
         for name in args.variants:
+            if name.startswith("hw_"):
+                from checks.check_hardware_sweep import main as check_sweep
+                records.append({"variant":name,"checks":check_sweep([name])})
+                continue
             if name.startswith("sorted_"):
                 from checks.check_sorted_plan import main as check_sorted
                 records.append({"variant":name,"checks":check_sorted([name])})

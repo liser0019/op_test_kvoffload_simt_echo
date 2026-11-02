@@ -12,7 +12,7 @@ ulimit -c 0
 read -r -a names <<< "${CANDIDATES:-abcdf_pages joint_merge joint_merge_bd joint_sorted_stream joint_sorted_mrgsort}"
 read -r -a scenes <<< "${SCENARIOS:-full_cache_75pct}"
 bash build_joint_plan.sh --soc=ascend950 --sorted-only 2>&1 | tee "$OUTPUT/build.log"
-"$PYTHON" -B -X faulthandler checks/check_sorted_hardware_npu.py --device 0 \
+"$PYTHON" -B -X faulthandler checks/check_merge_abcd_npu.py --device 0 \
  --implementations "${names[@]}" --regression-repeat 5 --temp-dir "$TMPDIR" \
  --report "$OUTPUT/gate.json" 2>&1 | tee "$OUTPUT/gate.log"
 "$PYTHON" -B -X faulthandler profile_joint_mtp.py --device 0 \

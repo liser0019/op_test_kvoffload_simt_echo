@@ -12,8 +12,9 @@ inline uint32_t SortedCpuBlock=0,SortedCpuBlocks=1;
 using event_t=uint32_t;
 struct dim3 { uint32_t x; explicit dim3(uint32_t n):x(n){} };
 inline std::unique_ptr<CpuWorkers> SortedWorkers;
+inline uint32_t SortedWorkerCount=0;
 template <auto F,typename... A> inline void asc_vf_call(dim3 d,A...a){
-  if(!SortedWorkers)SortedWorkers=std::make_unique<CpuWorkers>(d.x);
+  if(!SortedWorkers||SortedWorkerCount!=d.x){SortedWorkers.reset();SortedWorkers=std::make_unique<CpuWorkers>(d.x);SortedWorkerCount=d.x;}
   SortedWorkers->Run([&]{F(a...);});
 }
 namespace AscendC {
@@ -42,15 +43,16 @@ template <TPosition P>class TBuf {
 template<typename T>struct MrgSortSrcList {LocalTensor<T> src1,src2,src3,src4;};
 template<typename T,bool Exhaust>void MrgSort(LocalTensor<T> dst,const MrgSortSrcList<T>&l,
     const uint16_t lengths[4],uint32_t used[4],uint16_t valid,int repeats){
-  assert(Exhaust&&repeats==1);LocalTensor<T>s[4]={l.src1,l.src2,l.src3,l.src4};
+  assert(repeats==1);LocalTensor<T>s[4]={l.src1,l.src2,l.src3,l.src4};
   uint32_t n=valid==3?2:valid==7?3:valid==15?4:0;assert(n>=2);
   for(uint32_t k=0;k<n;++k){used[k]=0;assert(lengths[k]>0&&s[k].n>=2U*lengths[k]);}
   uint32_t out=0;
-  while(true){uint32_t best=0;
-    for(uint32_t k=1;k<n;++k)if(s[k].p[2U*used[k]]>s[best].p[2U*used[best]])best=k;
+  while(true){uint32_t best=n;
+    for(uint32_t k=0;k<n;++k)if(used[k]<lengths[k]&&(best==n||s[k].p[2U*used[k]]>s[best].p[2U*used[best]]))best=k;
+    if(best==n)break;
     assert(2U*out+1U<dst.n);
     std::memcpy(dst.p+2U*out,s[best].p+2U*used[best],2*sizeof(T));++out;++used[best];
-    if(used[best]==lengths[best])break;
+    if(Exhaust&&used[best]==lengths[best])break;
   }
 }
 }

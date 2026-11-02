@@ -5,6 +5,6 @@
 // 22..36: Merge ABCD; experiment bits = JOINT_OPT_MASK - 21.
 // 16=bitmap；17=turbo；18=turbo_a（分阶段查表）；19=turbo_b（每行Scan）；20=turbo_ab；21=resident-first sorted merge。
 #ifndef JOINT_OPT_MASK
-#error "Compile through generated variant wrapper (mask 1..38)"
+#error "Compile through generated variant wrapper (mask 1..73)"
 #endif
-static_assert(JOINT_OPT_MASK > 0 && JOINT_OPT_MASK <= 38, "invalid joint experiment mask");
+static_assert(JOINT_OPT_MASK > 0 && JOINT_OPT_MASK <= 73, "invalid joint experiment mask");
