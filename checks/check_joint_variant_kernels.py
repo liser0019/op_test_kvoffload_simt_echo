@@ -26,7 +26,7 @@ def build(directory, mask):
     config, count = re.subn(r'PLAN_THREADS = 1024U', 'PLAN_THREADS = 64U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -123,16 +123,16 @@ def main():
                 for enabled in (False, True):
                     for overlap in ('shared', 'independent', 'disjoint'):
                         case = make_case(2, 65, 128, 2048, 3, overlap=overlap, block_size=8)
-                        before = execute(lib, case, enabled, force_gm, bitmap=name == "bitmap", turbo=name == "turbo")
+                        before = execute(lib, case, enabled, force_gm, bitmap=name == "bitmap", turbo=name.startswith("turbo"))
                         # Continue device-produced state, including joint -> private fallback -> joint.
                         case = make_case(2, 65, 128, 2048, 3, overlap='disjoint', block_size=8)
-                        before = execute(lib, case, enabled, force_gm, before, bitmap=name == "bitmap", turbo=name == "turbo")
+                        before = execute(lib, case, enabled, force_gm, before, bitmap=name == "bitmap", turbo=name.startswith("turbo"))
                         case = make_case(2, 65, 128, 2048, 3, overlap='independent', block_size=8)
                         case['req_ids'] += 99
                         case['topk_indices'][0, :5] = [-1, 2048, case['context'] + 3, 5, 5]
                         case['stable_prefix_lens'][0] = -1
                         case['active_rows'] = 5
-                        execute(lib, case, enabled, force_gm, before, bitmap=name == "bitmap", turbo=name == "turbo")
+                        execute(lib, case, enabled, force_gm, before, bitmap=name == "bitmap", turbo=name.startswith("turbo"))
                         checked += 3
             if name == "bitmap":
                 # 最后一个不完整bitmap字、最高token和实际256K值域。
@@ -142,7 +142,7 @@ def main():
                 for gm in (False, True):
                     execute(lib, edge, True, gm, bitmap=True)
                     checked += 1
-            if name == "turbo":
+            if name.startswith("turbo"):
                 for scenario in ('cold_reset', 'full_cache_90pct', 'full_cache_stable_hit'):
                     for mtp in (0, 1, 3):
                         edge = make_case(5, 65, 160, 2048, mtp, scenario=scenario, overlap='independent', block_size=8)
@@ -163,7 +163,7 @@ def main():
                 wide['token_to_req'][:] = 0
                 execute(lib, wide, True, False, turbo=True, joint_entry=True)
                 checked += 1
-            if name == "turbo":
+            if name.startswith("turbo"):
                 # Actual 112 KiB boundary, not just a small shape with forced GM addressing.
                 for scenario in ('cold_reset', 'full_cache_75pct'):
                     edge = make_case(1, 2048, 4096, 262144, 3, scenario=scenario, overlap='independent')
@@ -173,6 +173,34 @@ def main():
                 edge = make_case(1, 33, 32768, 262144, 1, overlap='shared', block_size=64)
                 execute(lib, edge, True, False, turbo=True)
                 checked += 1
+            if name.startswith("turbo"):
+                def token_hash(token):
+                    v = token ^ (token >> 16)
+                    v = (v * 0x7feb352d) & 0xffffffff
+                    v ^= v >> 15
+                    v = (v * 0x846ca68b) & 0xffffffff
+                    return (v ^ (v >> 16)) & 255
+                collisions = [t for t in range(1, 65520) if token_hash(t) == 0][:129]
+                assert len(collisions) == 129
+                for gm in (False, True):
+                    for scenario in ('cold_reset', 'full_cache_75pct'):
+                        for unique in (1, 128, 129):
+                            edge = make_case(1, 65, 128, 65536, 3, scenario=scenario, block_size=8)
+                            # 同桶冲突链，跨warp/跨tile重复；union恰好capacity及capacity+1。
+                            for row in range(4):
+                                edge['topk_indices'][row] = [collisions[(row * 65 + p) % unique] for p in range(65)]
+                            before = execute(lib, edge, True, gm, turbo=True)
+                            execute(lib, edge, True, gm, before, turbo=True)
+                            checked += 2
+                        # 首行无效/未来token，follower可见但仍须插入；全无效时union=0。
+                        for empty in (False, True):
+                            edge = make_case(1, 65, 128, 65536, 3, scenario=scenario, block_size=8)
+                            edge['topk_indices'][:] = -1
+                            if not empty:
+                                edge['topk_indices'][:, ::2] = edge['context'] + 1
+                                edge['topk_indices'][:, 1] = edge['max_token']
+                            execute(lib, edge, True, gm, turbo=True)
+                            checked += 1
             records.append({'variant': name, 'checks': checked})
             print(name, checked, 'VF semantic checks passed', flush=True)
     if args.report:

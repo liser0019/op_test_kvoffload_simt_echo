@@ -72,7 +72,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 17, "joint variant mask must be 1..17");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 20, "joint variant mask must be 1..20");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
     for (size_t i = 0; i < 4; ++i)
@@ -113,7 +113,7 @@ class Prepared : public torch::CustomClassHolder {
     if (variantMask == 16 && attrs[4]) {
       const uint64_t bitmapElements = (static_cast<uint64_t>(attrs[2]) + 31U) / 32U + 2U * c;
       d.scratchElements = std::max(d.workspaceRowElements, bitmapElements);
-    } else if (variantMask == 17 && attrs[4]) {
+    } else if (variantMask >= 17 && attrs[4]) {
       const uint64_t turboElements = 2U * d.jointHashCapacity + static_cast<uint64_t>(c) +
                                      4U * static_cast<uint64_t>(t);
       d.scratchElements = std::max(d.workspaceRowElements, turboElements);

@@ -506,7 +506,7 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
 #include "options.h"
 #if JOINT_OPT_MASK == 16
 #include "bitmap_plan.h"
-#elif JOINT_OPT_MASK == 17
+#elif JOINT_OPT_MASK >= 17
 #include "turbo_plan.h"
 #else
 #include "sparse_kv_joint_plan.h"
@@ -516,7 +516,7 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
  * SIMT 调度层。是否使用 UB 对整个 block 一致，不会在 barrier 两侧发生线程分歧。
  * UB 路径复用当前 AIV 的单行 scratch；GM 路径按 row 切分用户的完整 workspace。
  */
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK >= 16
 template <bool JointEnabled>
 #endif
 __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntimeVf(
@@ -549,7 +549,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
                            static_cast<uint32_t>(jointHashCapacity),
 #if JOINT_OPT_MASK == 16
                            compactWorkspace, scratchElements,
-#elif JOINT_OPT_MASK == 17
+#elif JOINT_OPT_MASK >= 17
                            scratchElements,
 #endif
                            static_cast<int32_t>(maxToken),
@@ -557,7 +557,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
                            maxRequests};
   // A: 非联合 VF 不实例化 BuildJointUnion/PlanJointUnion。
   // 仍执行完整 RunPrivateRow 协议和原有同步；这是代码资源隔离实验。
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK >= 16
   if constexpr (!JointEnabled) {
     for (int64_t row = rowStart; row < numReqs; row += rowStride) {
       if (scratchElements <= PLAN_ROW_UB_LIMIT_ELEMENTS) {
@@ -576,7 +576,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
     }
   } else {
 #endif
-#if JOINT_OPT_MASK == 17
+#if JOINT_OPT_MASK >= 17
   RunJointScheduleTurbo(args, rowStart, rowStride, numReqs, tokenToReq, rowModes, scanWorkspace, compactWorkspace,
                         jointHashCapacity, scratchElements);
 #else
@@ -605,7 +605,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
     row = jointHashCapacity != 0U ? end : row + rowStride;
   }
 #endif
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK >= 16
   }
 #endif
 }
@@ -615,7 +615,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
 
 // Direct launch adaptation only: fieldwise GM tiling load and unchanged VF call.
 static_assert(sizeof(SparseKvPlanTilingData) == sizeof(JointDirectTilingData), "device/host tiling ABI mismatch");
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK >= 16
 template <bool AllowJoint>
 #endif
 __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
@@ -650,7 +650,7 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
   AscendC::TBuf<AscendC::TPosition::VECCALC> localWorkspace;
   pipe.InitBuffer(localWorkspace, tilingData.localMemoryBytes);
   __ubuf__ int32_t* scanWorkspace = reinterpret_cast<__ubuf__ int32_t*>(localWorkspace.Get<int32_t>().GetPhyAddr());
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK >= 16
   // private_a 的整个 kernel 不包含联合 VF；joint_a 保留运行时 MTP 开关。
   if constexpr (!AllowJoint) {
   asc_vf_call<SparseKvPlanRuntimeVf<false>>(
@@ -667,9 +667,9 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
   } else {
-  // mask16/17: single-VF launch-structure candidate workaround; root cause unconfirmed.
+  // mask16..20: single-VF launch-structure candidate workaround; root cause unconfirmed.
   // VF<true> still dispatches private rows when jointHashCapacity == 0.
-#if JOINT_OPT_MASK != 16 && JOINT_OPT_MASK != 17
+#if JOINT_OPT_MASK < 16
   if (tilingData.jointHashCapacity == 0U) {
   asc_vf_call<SparseKvPlanRuntimeVf<false>>(
       dim3(PLAN_THREADS), scanWorkspace, reinterpret_cast<__gm__ int64_t*>(reqIds),
@@ -699,7 +699,7 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
       tilingData.blockSize,
       reinterpret_cast<__gm__ int32_t*>(rowModes), reinterpret_cast<__gm__ int32_t*>(residentRows),
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
-#if JOINT_OPT_MASK != 16 && JOINT_OPT_MASK != 17
+#if JOINT_OPT_MASK < 16
   }
 #endif
   }
@@ -728,7 +728,7 @@ extern "C" __global__ __aicore__ void sparse_kv_plan_joint_kernel(
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
   AscendC::InitSocState();
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK >= 16
   JointDirectBody<true>(
 #else
   JointDirectBody(
@@ -748,7 +748,7 @@ extern "C" __global__ __aicore__ void sparse_kv_plan_private_kernel(
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
   AscendC::InitSocState();
-#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK == 16 || JOINT_OPT_MASK == 17
+#if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK >= 16
   JointDirectBody<false>(
 #else
   JointDirectBody(

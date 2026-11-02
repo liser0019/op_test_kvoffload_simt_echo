@@ -11,7 +11,7 @@ from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf
 
 ROOT = Path(__file__).resolve().parent
-from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description
+from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS
 IMPLEMENTATIONS = ("abcdf", "private", "joint", *VARIANTS)
 KERNELS = {"abcdf": "sparse_kv_plan_kernel_plan_abcdf",
            "private": "sparse_kv_plan_private_kernel", "joint": "sparse_kv_plan_joint_kernel"}
@@ -73,7 +73,7 @@ def prepare(torch, case, name, inputs=None):
     if name not in IMPLEMENTATIONS:
         raise ValueError("Unknown implementation: " + name)
     enabled = is_joint(name) and case["mtp"] > 0
-    is_turbo = name in ("joint_turbo", "private_turbo")
+    is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"],
                   name == "joint_bitmap", is_turbo)
     inputs = upload_inputs(torch, case) if inputs is None else inputs
@@ -164,7 +164,7 @@ def check(case, bundle, before=None):
         return validate_abcdf(case, before, snapshot(bundle))
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
-                   if bundle["name"] in ("joint_turbo", "private_turbo") and bundle["joint_enabled"] else None)
+                   if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
     return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries)
 
 

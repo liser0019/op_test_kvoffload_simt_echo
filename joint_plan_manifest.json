@@ -1,5 +1,5 @@
 {
-  "experiment": "turbo-ub-query-buckets-no-source-pages",
+  "experiment": "turbo-frozen-lookup-and-row-scan",
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
@@ -26,7 +26,10 @@
     "joint_bcd": "sparse_kv_plan_joint_kernel_bcd",
     "joint_abcd": "sparse_kv_plan_joint_kernel_abcd",
     "joint_bitmap": "sparse_kv_plan_joint_kernel_bitmap",
-    "joint_turbo": "sparse_kv_plan_joint_kernel_turbo"
+    "joint_turbo": "sparse_kv_plan_joint_kernel_turbo",
+    "joint_turbo_a": "sparse_kv_plan_joint_kernel_turbo_a",
+    "joint_turbo_b": "sparse_kv_plan_joint_kernel_turbo_b",
+    "joint_turbo_ab": "sparse_kv_plan_joint_kernel_turbo_ab"
   },
   "mtp": [
     0,
@@ -42,7 +45,7 @@
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
     "build_joint_plan.sh": "3f260db9d4a066fd65e16e1da4c22862a295446ecc44a8c0868a9a81c9d3dccc",
-    "joint_plan/CMakeLists.txt": "e1372628fee8faab65b9c4e2445872245428dd9fa91921fde6b87ef2c74cbd90",
+    "joint_plan/CMakeLists.txt": "4245b2b502bb6735e178f2fddc880459cf381db99d2a46e5b82e295dd4e13c2d",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -51,12 +54,12 @@
     "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
-    "joint_plan_cases.py": "81b92b7b64546d138d076ee0df93a3f3a640daa18b37d2af755b399699a21793",
-    "joint_plan_common.py": "979b4f07370ed0c18edbea9143d88a0a615c881c0ad79ef84711c79acdc22d18",
-    "profile_joint_mtp.py": "c38680f519670824a316aff901227ffd31f7818d83fe39f25cb3927c4f67ef46",
+    "joint_plan_cases.py": "6b129c56806312b946b0c33ea3e95a84272a1564cb32c117ff0c42bb33b87174",
+    "joint_plan_common.py": "fff8c1ad659d0dff8866feadd080bb09fd532cf4061697b4929fa94c8bab1f83",
+    "profile_joint_mtp.py": "374c084df1b4993cee5a989f4b120c70e256fcf7ee952dd53f467090ca549a6a",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "7107e36ad60ffa2e245278f8aae46801e3553bde53feecdd12d416a1c10cf70d",
-    "checks/check_joint_models.py": "214a9218073015913f300049927e3536804b9dad6a73c656dc3d521fa9f19a97",
+    "checks/check_joint_plan.py": "9080788c8097883c0d772c867cab174369d45da9fe86ebf280834c9458ffb58d",
+    "checks/check_joint_models.py": "5ffd96070f9695ff15c2fe1d03b3184ebe461f4111c9b6e86858464dd4afdd2e",
     "checks/joint_build_info.py": "fa381043fe011678d1547cd63c35de1d9b34c6bcc904afc439eefdc9d3fab67d",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "b368b278d50c6982fd408ef2a80eb8f79e1faa7f8589922ee6f69caf66900c54",
@@ -71,20 +74,23 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "5b58829a0137451c1f7c9c2a77c090eb59281dcf04c9854aedd6e62cf8719242",
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "joint_variants.py": "07f2d3d6cf6901a1990f33930bb9766129f09aabe5e857237c8fc78df9a3dadb",
-    "checks/generate_joint_variants.py": "0ab2f3552995435e4b82422cad21d35fda53ffbdc9422f5327c71fcfbf357f61",
-    "checks/check_joint_variant_kernels.py": "8f4cc678bd1182e53d431f3c9fe289e0d8d9a72cb4615209d096e96721facb05",
-    "checks/joint_variant_cpu_driver.cpp": "34ca90815b3d2ed262638b7b71ecf5f3849ac2bf6215466d1e4ffd9b0735129b",
+    "joint_variants.py": "250a2a48ad3667cb5107ac11fd1d8c76afbd624a428687ed0fbd7813275d0672",
+    "checks/generate_joint_variants.py": "3c71db446f706fa3030f0801d066bd330bac4f622742a15fd517f82900e95e3e",
+    "checks/check_joint_variant_kernels.py": "0506d07505223d4e6b631f99e5c661d89d0f7a6ac3f4c7e12326653961d4b14d",
+    "checks/joint_variant_cpu_driver.cpp": "5d36bf477dae98f7624b92c919212e8f072744bdc945041c45ed56a91559f48f",
     "checks/simt_variants/cpu_runtime.h": "ff548eac8dbb18c69c6266adb4958f5e1c52b8e5cf096e30edddc452467b7471",
     "csrc/joint_variants/sparse_kv_joint_plan.h": "c49bb5a237e4d97d90744a2faa73b8e942037ac7bb36756fd9e80ad91748d1c9",
-    "csrc/joint_variants/plugin.cpp": "981ecc95b7b03f2db9892785b1d8e311037715f62876d9c4a7944ff9218cbc6e",
-    "csrc/joint_variants/options.h": "dd7aab0f9a1338443159bc81b94c3f94b6de4d46517f40b51ecabf8d084a4fab",
-    "csrc/joint_variants/kernel.cpp": "1be4e8aacbb6725415c401bdefdefff8288f510fd7af95ded2144afb0dd14a21",
+    "csrc/joint_variants/plugin.cpp": "93184ca18e823ac0e809f3063ff9e2f0429140f0a22cbc07c7c31cc884c2fee2",
+    "csrc/joint_variants/options.h": "496ac7830839a9d67283dfb481ca141361a5a05e524e13c01f7f086870a443b8",
+    "csrc/joint_variants/kernel.cpp": "4f3a0186cfdabec6ae9ec97fb5cdfdea611f8fadc7830dcc5dda1f9f2e90cdb9",
     "csrc/joint_variants/bitmap_plan.h": "f667fe4216b90bc24eb4ce7113025e1d9ebc5a739860cdeaf170f0e12e1d3eb2",
     "checks/run_bitmap_single_vf_probe.py": "ac44c6b9cfcbe022c568908759dd733326a2693aaa5110ce570a25629bce08d7",
-    "checks/check_bitmap_launch_structure.py": "55feaa6a2df207a97f71ab0f7349db1d71011c150e3623865bdc458ba1b9eb2e",
+    "checks/check_bitmap_launch_structure.py": "9bd0e0aa1ff1c3bb52871945b56e503d4165864f76b9ad88de710dd7fe2b8182",
     "scripts/test_bitmap_single_vf.sh": "bc6b036e571f560e05e3943d3bc0094055d40116819339cec42bccc5be19d8b5",
-    "csrc/joint_variants/turbo_plan.h": "91d4e01a4de6ef69748f43aab76d412165f447b487b885ef168a7d800b89a831"
+    "csrc/joint_variants/turbo_plan.h": "dba224ed25dc36c87e0a74803eb3dd151da62ebfa82ac25d97aac6f28ef1b603",
+    "csrc/joint_variants/turbo_union_experiments.h": "022de9d6e92c0749c25b0e34c744f1f1f1e62cfbccf3a0273d5d69a90a9bc2f2",
+    "scripts/test_turbo_phase_scan.sh": "b8c24abc37b44260e4470c1a444df42370e00616a102c82b0e541c2b1c870cb1",
+    "docs/Turbo_分阶段查询与行Scan实验.md": "b4752e0efee97bd2360d4f80490f9beccf4ae926a40e4b4b942b53e04a3b4cce"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -96,10 +102,10 @@
     "path": "csrc/plan_variants/13_abcdf",
     "mask": 47,
     "threads": 1024,
-    "interface": "original 15 tensors + 5 attributes; no joint metadata",
+    "interface": "14 tensors + 3 attributes; source-page validation removed; no joint metadata",
     "kernel": "sparse_kv_plan_kernel_plan_abcdf"
   },
-  "optimization_base": "2556a1f004bbc063456d1e2462bd403014533a94",
+  "optimization_base": "f5b44bf215de903b8f0666420f2c85b180265905",
   "joint_variant_masks": {
     "private_a": 1,
     "private_turbo": 17,
@@ -119,7 +125,10 @@
     "joint_bcd": 14,
     "joint_abcd": 15,
     "joint_bitmap": 16,
-    "joint_turbo": 17
+    "joint_turbo": 17,
+    "joint_turbo_a": 18,
+    "joint_turbo_b": 19,
+    "joint_turbo_ab": 20
   },
   "joint_optimizations": {
     "a": "non-joint VF compile-time isolation (protocol retained)",
@@ -129,8 +138,18 @@
   },
   "launch_workaround": {
     "base": "84769ae5d30b9f1ee1cc04ee34e34b27c86c5ee2",
-    "scope": "mask16 AllowJoint=true invokes VF<true> only",
+    "scope": "mask16..20 AllowJoint=true invokes VF<true> only",
     "status": "candidate workaround; root cause unconfirmed; not locally CANN/NPU validated"
   },
-  "source_contract": "Upstream guarantees source-page validity/lifetime. Plan retains request/token/causal/stable-prefix checks. Transfer still uses source page table."
+  "source_contract": "Upstream guarantees source-page validity/lifetime. Plan retains request/token/causal/stable-prefix checks. Transfer still uses source page table.",
+  "turbo_union_experiments": {
+    "A": "row-wide frozen lookup followed by CAS-only absent insertion",
+    "B": "one union compaction Scan per row",
+    "candidates": [
+      "joint_turbo_a",
+      "joint_turbo_b",
+      "joint_turbo_ab"
+    ],
+    "status": "CPU/static validation only; CANN/NPU/performance unverified"
+  }
 }

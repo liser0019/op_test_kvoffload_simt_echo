@@ -78,6 +78,8 @@ def duration_ratios(stats):
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
     pairs += [("joint_bitmap", "joint_abc"), ("joint_turbo", "joint_abc"),
               ("joint_turbo", "joint_bitmap"), ("private_turbo", "private_a")]
+    pairs += [(name, base) for name in stats if name in ("joint_turbo_a", "joint_turbo_b", "joint_turbo_ab")
+              for base in ("joint_turbo", "private_turbo")]
     return {f"{left}_over_{right}_p50": stats[left]["p50_us"] / stats[right]["p50_us"]
             for left, right in pairs if left in stats and right in stats}
 
@@ -231,6 +233,20 @@ def report_text(report):
             values = [f"{run[name + '_over_' + ref + '_p50']:.3f}"
                       if name + '_over_' + ref + '_p50' in run else "—" for ref in (base, "abcdf")]
             lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | " + " | ".join(values) + " |")
+    lines += ["", "## Turbo 分阶段查询 / 每行 Scan 实验", "",
+              "A/B为本次Turbo实验，不是旧Joint A/B；比值>1表示候选更慢。", "",
+              "| 工况/重合 | MTP | 候选 | 候选/ABCDF | 候选/private_turbo | 候选/joint_turbo |",
+              "|---|---:|---|---:|---:|---:|"]
+    for run in report["runs"]:
+        w = run["workload"]
+        for name in ("joint_turbo_a", "joint_turbo_b", "joint_turbo_ab"):
+            if name in run["stats"]:
+                ratios = [f"{run[name + '_over_' + base + '_p50']:.3f}"
+                          if name + '_over_' + base + '_p50' in run else "—"
+                          for base in ("abcdf", "private_turbo", "joint_turbo")]
+                lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | " + " | ".join(ratios) + " |")
+    lines += ["", "各行实际初始命中数/比例见 JSON workload.initial_hit_positions_per_row / initial_hit_fraction_per_row。",
+              "75pct 是首行构造标签，independent 后续 query 不保证同一命中率；输入未因候选修改。"]
     lines += ["", "## 相对MTP关闭：一次调用耗时比", "",
         "| 对照 | 工况/重合模式 | 实现 | MTP | MTP开启 P50 / MTP关闭 P50 |",
         "|---|---|---|---:|---:|"]

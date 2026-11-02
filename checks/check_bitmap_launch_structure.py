@@ -15,14 +15,14 @@ def preprocess(text, mask):
 
 def main():
     source = (ROOT / 'csrc/joint_variants/kernel.cpp').read_text()
-    for mask in (16, 17):
+    for mask in (16, 17, 18, 19, 20):
         launch = preprocess(source, mask)
         begin = launch.index('if constexpr (!AllowJoint)')
         split = launch.index('} else {', begin)
         assert launch[begin:split].count('asc_vf_call<SparseKvPlanRuntimeVf<false>>') == 1
         assert launch[split:].count('asc_vf_call<SparseKvPlanRuntimeVf<false>>') == 0
         assert launch[split:].count('asc_vf_call<SparseKvPlanRuntimeVf<true>>') == 1
-    print('PASS: bitmap/turbo private VF<false>; joint single VF<true>, including MTP0')
+    print('PASS: bitmap/turbo/A/B/AB private VF<false>; joint single VF<true>, including MTP0')
 
 if __name__ == '__main__':
     main()

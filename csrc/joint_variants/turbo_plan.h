@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * SPDX-License-Identifier: Apache-2.0
  */
-// Included after options.h inside the kernel's anonymous namespace when JOINT_OPT_MASK == 17.
+// Included after options.h inside the kernel's anonymous namespace when JOINT_OPT_MASK is 17..20; mask17 stays the reference.
 // High-performance MTP Joint Plan ("turbo"):
 // 1. Fast group discovery: register-cached tokenToReq[row] + early-break bound once remaining rows
 //    cannot reach this AIV core's next assigned group.
@@ -147,11 +147,19 @@ __simt_callee__ __aicore__ inline int32_t InsertJointToken(ScratchPtr keys, int3
   return 1;
 }
 
+#if JOINT_OPT_MASK >= 18
+#include "turbo_union_experiments.h"
+#endif
+
 template <typename ScratchPtr>
 __simt_callee__ __aicore__ inline bool BuildJointUnionTurbo(
     const JointPlanArgs& a, const FastGroupSource& groupSrc, int64_t first, int64_t end,
     bool reset, bool compactPartition, ScratchPtr keys, ScratchPtr bucketSlots, ScratchPtr partition,
     ScratchPtr queryBuckets, __ubuf__ int32_t* scan, uint32_t thread, int32_t& outUnionCount) {
+#if JOINT_OPT_MASK >= 18
+  return BuildJointUnionExperiment(a, groupSrc, first, end, reset, compactPartition, keys,
+                                   bucketSlots, partition, queryBuckets, scan, thread, outUnionCount);
+#else
   for (uint32_t i = thread; i < a.jointHashCapacity; i += PLAN_THREADS) {
     keys[i] = HASH_EMPTY;
     bucketSlots[i] = INVALID_TOKEN;
@@ -201,6 +209,7 @@ __simt_callee__ __aicore__ inline bool BuildJointUnionTurbo(
   asc_syncthreads();
   outUnionCount = count;
   return true;
+#endif
 }
 
 template <typename ScratchPtr>

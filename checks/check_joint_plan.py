@@ -82,7 +82,7 @@ def context_gate(torch, implementations=common.DEFAULT_IMPLEMENTATIONS):
         rebound[1] = p[1].view(-1)
         reject(lambda: ctx.run(rebound, attrs))
         if name in common.VARIANTS:
-            for mask in (0, 18, -1):
+            for mask in (0, max(common.VARIANTS.values()) + 1, -1):
                 reject(lambda: torch.classes.mtp_joint_plan.PreparedVariant(p, attrs, common.is_joint(name), mask))
         ctx.close()
         reject(lambda: ctx.run(p, attrs))
@@ -157,6 +157,13 @@ def run_gate(torch, regression_repeat=100, failure_dir=None, implementations=com
     for pattern in ("independent", "disjoint"):
         case = make_case(1, 2048, 4096, 65536, 3, overlap=pattern)
         records.append(run_one(torch, case, "multi_tile_" + pattern, failure_dir, implementations))
+    # 真实1024线程配置的双tile重复、未命中、未来/非法token；检查新标记解包与因果性。
+    case = make_case(1, 2048, 4096, 262144, 3, overlap="shared", scenario="cold_reset")
+    for row in range(4):
+        case["topk_indices"][row, 1024:] = case["topk_indices"][row, :1024]
+        case["topk_indices"][row, 0] = case["context"] + 1
+        case["topk_indices"][row, 1024] = -1
+    records.append(run_one(torch, case, "cross_tile_duplicates_and_future_token", failure_dir, implementations))
     # More than64 groups forces one AIV to reuse its scratch for multiple requests.
     records.append(run_one(torch, make_case(65, 7, 16, 256, 3, block_size=8), "multi_group_per_aiv", failure_dir, implementations))
     # Joint 160KiB scratch takes GM; private still takes UB for this shape.

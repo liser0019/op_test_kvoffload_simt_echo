@@ -130,7 +130,18 @@ def initial_arrays(case, joint, max_group_queries=None):
 def describe(case):
     sets = valid_sets(case)
     unions = [len(set().union(*sets[first:end])) for first, end in groups(case, True)]
-    return {"scenario": case["scenario"], "overlap": case["overlap"], "mtp": case["mtp"],
+    hits = []
+    for row, query in enumerate(case["topk_indices"]):
+        request = int(case["token_to_req"][row])
+        active_identity = (0 <= request < len(case["req_ids"]) and
+                           case["last_req_ids"][row] == case["req_ids"][request])
+        stable = max(0, int(case["stable_prefix_lens"][row]))
+        resident = {int(t) for t in case["slot_to_token"][row] if 0 <= t < stable} if active_identity else set()
+        hits.append(sum(source_valid(case, row, int(t)) and int(t) in resident for t in query))
+    return {"initial_hit_positions_per_row": hits,
+            "initial_hit_fraction_per_row": [h / case["topk"] for h in hits],
+            "hit_metric": "valid query positions in own initial cache after request reset and stable invalidation; not cross-row overlap",
+            "scenario": case["scenario"], "overlap": case["overlap"], "mtp": case["mtp"],
             "requests": case["requests"], "query_rows": case["rows"], "q_len": case["q_len"],
             "topk": case["topk"], "capacity": case["capacity"], "max_token": case["max_token"],
             "row0_intersections": [[len(sets[first] & sets[row]) for row in range(first, end)]

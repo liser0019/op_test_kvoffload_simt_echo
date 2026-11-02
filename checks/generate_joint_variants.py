@@ -28,7 +28,7 @@ def generate(destination):
                                     'inline void LaunchJointVariant(int64_t mask, bool').rstrip(';')
     args = "jointEntry, reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling, blockDim, dynamicUb, stream"
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
-    text += signature + " {\n  if (mask < 1 || mask > 17) throw std::invalid_argument(\"joint mask\");\n"
+    text += signature + " {\n  if (mask < 1 || mask > 20) throw std::invalid_argument(\"joint mask\");\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {nullptr, " + ", ".join(entries) + "};\n"
     text += "  launches[mask](" + args + ");\n}\n"
     (destination / "variant_dispatch.h").write_text(text)

@@ -302,10 +302,10 @@ class VariantChecks(unittest.TestCase):
         for row, values in enumerate(query):
             self.assertTrue(np.all(values < cases[2]["visible_seq_lens"][row]))
 
-    def test_all_fifteen_masks_unique_symbols_and_dispatch(self):
+    def test_all_masks_unique_symbols_and_dispatch(self):
         from joint_variants import MASKS
         from checks.generate_joint_variants import generate
-        self.assertEqual(set(MASKS.values()), set(range(1, 18)))
+        self.assertEqual(set(MASKS.values()), set(range(1, 21)))
         self.assertEqual(len(set(common.KERNELS.values())), len(common.IMPLEMENTATIONS))
         with tempfile.TemporaryDirectory() as tmp:
             generate(tmp)
@@ -317,7 +317,7 @@ class VariantChecks(unittest.TestCase):
                 self.assertIn(f"&launch_joint_plan_{letters}", dispatcher)
 
     def test_many_way_rotation_and_prefix_kernel_filter(self):
-        names = ("abcdf", "private", "joint", "joint_abc", "joint_bitmap", "joint_turbo", "private_turbo")
+        names = ("abcdf", "private", "joint", "joint_abc", "joint_bitmap", "joint_turbo", "private_turbo", "joint_turbo_a", "joint_turbo_b", "joint_turbo_ab")
         count = len(names)
         orders = [execution_order(names, step) for step in range(1, 51)]
         for name in names:
@@ -339,6 +339,27 @@ class VariantChecks(unittest.TestCase):
         self.assertEqual(info["workspace_elements"], 128 * (18432 + 262144))
         info = layout(2048, 4096, 128, True, 1048576, True)
         self.assertEqual(info["scratch_path"], "GM")
+
+    def test_turbo_phase_ratio_direction(self):
+        stats = {name: {"p50_us": value} for name, value in
+                 (("abcdf", 50), ("private_turbo", 48), ("joint_turbo", 100), ("joint_turbo_ab", 60))}
+        ratios = duration_ratios(stats)
+        self.assertEqual(ratios["joint_turbo_ab_over_joint_turbo_p50"], .6)
+        self.assertEqual(ratios["joint_turbo_ab_over_abcdf_p50"], 1.2)
+        self.assertEqual(ratios["joint_turbo_ab_over_private_turbo_p50"], 1.25)
+
+    def test_report_actual_hits_without_changing_input(self):
+        from compare import reference_simt
+        for scenario in ("cold_reset", "full_cache_75pct"):
+            case = make_case(2, 65, 128, 2048, 3, scenario=scenario, overlap="independent", block_size=8)
+            gold = reference_simt(case)
+            desc = describe(case)
+            np.testing.assert_array_equal(desc["initial_hit_positions_per_row"], 65 - gold["miss_count"])
+            if scenario == "cold_reset":
+                self.assertEqual(sum(desc["initial_hit_positions_per_row"]), 0)
+            else:
+                self.assertEqual(desc["initial_hit_positions_per_row"][0], 48)
+                self.assertLess(desc["initial_hit_positions_per_row"][1], 48)
 
     def test_variant_ratio_direction(self):
         stats = {name: {"p50_us": value} for name, value in
