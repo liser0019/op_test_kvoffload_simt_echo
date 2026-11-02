@@ -508,6 +508,9 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
 #include "bitmap_plan.h"
 #elif JOINT_OPT_MASK >= 17
 #include "turbo_plan.h"
+#if JOINT_OPT_MASK == 21
+#include "merge_plan.h"
+#endif
 #else
 #include "sparse_kv_joint_plan.h"
 #endif
@@ -576,7 +579,10 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
     }
   } else {
 #endif
-#if JOINT_OPT_MASK >= 17
+#if JOINT_OPT_MASK == 21
+  RunJointScheduleMerge(args, rowStart, rowStride, numReqs, tokenToReq, rowModes, scanWorkspace, compactWorkspace,
+                        jointHashCapacity, scratchElements);
+#elif JOINT_OPT_MASK >= 17
   RunJointScheduleTurbo(args, rowStart, rowStride, numReqs, tokenToReq, rowModes, scanWorkspace, compactWorkspace,
                         jointHashCapacity, scratchElements);
 #else

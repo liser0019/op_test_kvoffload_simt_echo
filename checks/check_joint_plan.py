@@ -8,11 +8,13 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import joint_plan_common as common
-from joint_plan_cases import make_case, describe
+from joint_plan_cases import make_case, describe, sort_topk
 from harness_io import preflight_args, write_json, record_failure
 
 
 def run_one(torch, case, label, failure_dir=None, implementations=common.DEFAULT_IMPLEMENTATIONS):
+    if "joint_merge" in implementations:
+        case = sort_topk(case)
     inputs = common.upload_inputs(torch, case)
     records = []
     for name in implementations:
@@ -29,6 +31,8 @@ def continuous_gate(torch, failure_dir=None, implementations=common.DEFAULT_IMPL
     case = make_case(2, 7, 16, 512, 3, block_size=8)
     records = []
     for name in implementations:
+        if "joint_merge" in implementations:
+            case = sort_topk(case)
         bundle = common.prepare(torch, case, name)
         for step, (pattern, active) in enumerate((("independent", 8), ("disjoint", 8), ("shared", 8),
                                                 ("partial", 5), ("shared", 0), ("shared", 8))):
@@ -39,6 +43,8 @@ def continuous_gate(torch, failure_dir=None, implementations=common.DEFAULT_IMPL
             if step == 5:
                 # 同一请求的行不连续：按连续片段分别规划，不越片段共享。
                 current["token_to_req"][:] = [0, 1, 0, 1, 0, 1, 0, 1]
+            if "joint_merge" in implementations:
+                current = sort_topk(current)
             bundle["phase"] = f"continuous-step-{step + 1}/{pattern}"
             bundle["workload"] = {key: current.get(key) for key in bundle["workload"]}
             common.update_inputs(torch, bundle, current)
@@ -70,6 +76,8 @@ def context_gate(torch, implementations=common.DEFAULT_IMPLEMENTATIONS):
     for name in implementations:
         if name in common.INDEPENDENT:
             continue
+        if "joint_merge" in implementations:
+            case = sort_topk(case)
         bundle = common.prepare(torch, case, name)
         ctx, p, attrs = bundle["context"], bundle["ordered"], bundle["attrs"]
         reject(lambda: ctx.run(p[:-1], attrs))
@@ -101,6 +109,8 @@ def input_write_regression(torch, repeats=100, failure_dir=None, implementations
         if name in common.INDEPENDENT:
             continue
         print(f"输入错写回归 implementation={name}, repeat={repeats}", flush=True)
+        if "joint_merge" in implementations:
+            case = sort_topk(case)
         bundle = common.prepare(torch, case, name)
         try:
             records[name] = common.audit(torch, case, bundle, repeats, failure_dir, progress_every=10)
@@ -150,6 +160,13 @@ def run_gate(torch, regression_repeat=100, failure_dir=None, implementations=com
     duplicate = make_case(1, 7, 16, 256, 3, block_size=8)
     duplicate["topk_indices"][:] = [5, 5, 6, 6, 7, 7, 7]
     records.append(run_one(torch, duplicate, "duplicate_query_without_invalid_pages", failure_dir, implementations))
+    if "joint_merge" in implementations:
+        for blocked in (False, True):
+            c = make_case(1, 7, 16, 262144, 3, block_size=8)
+            c["slot_to_token"][:] = [200000 if blocked or i < 2 else 200000 + i for i in range(16)]
+            c["topk_indices"][:] = [200000, 200000, 200001, 200002, 200002, 200020, 200021]
+            records.append(run_one(torch, c, f"merge_duplicate_residents/blocked={blocked}", failure_dir,
+                                   [n for n in implementations if n == "joint_merge" or n in common.INDEPENDENT]))
     for active in (-1, 0, 3, 5, 99):
         case = make_case(2, 7, 16, 512, 3, block_size=8)
         case["active_rows"] = active

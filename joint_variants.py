@@ -10,7 +10,8 @@ MASKS = {"".join(letter for bit, letter in enumerate(OPTIONS) if mask & (1 << bi
 MASKS["bitmap"] = 16
 MASKS["turbo"] = 17
 MASKS.update(turbo_a=18, turbo_b=19, turbo_ab=20)
-TURBO_MASKS = (17, 18, 19, 20)
+MASKS["merge"] = 21
+TURBO_MASKS = (17, 18, 19, 20, 21)
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
@@ -21,6 +22,11 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask == 21:
+        return {"mask": 21, "structure": "resident-first + sorted miss rank-scatter merge",
+                "optimizations": ["sorted TopK contract", "resident LRU-last owner", "miss-only union",
+                                  "dynamic 32-bit token/query packing", "capacity check before commit"],
+                "baseline": "abcdf_pages"}
     structure = "bitmap+unique+direct_map" if mask == 16 else ("hash+compact_unique+fast_source+finish_tile" if mask in TURBO_MASKS else "hash")
     opts = ([
         "single-VF launch structure + compile-time isolated private VF",

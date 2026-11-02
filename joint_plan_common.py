@@ -8,7 +8,7 @@ import platform
 from pathlib import Path
 import numpy as np
 from harness_io import add_storage_arguments
-from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf
+from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
 ROOT = Path(__file__).resolve().parent
 from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS
@@ -67,6 +67,8 @@ def upload_inputs(torch, case):
 
 
 def update_inputs(torch, bundle, case):
+    if bundle["name"] == "joint_merge":
+        require_sorted_topk(case)
     for key in INPUTS:
         bundle["inputs"][key].copy_(torch.from_numpy(np.ascontiguousarray(case[key])).to(bundle["inputs"][key].device))
     bundle["inputs"]["active_rows"].fill_(case.get("active_rows", case["rows"]))
@@ -75,6 +77,8 @@ def update_inputs(torch, bundle, case):
 def prepare(torch, case, name, inputs=None):
     if name not in IMPLEMENTATIONS:
         raise ValueError("Unknown implementation: " + name)
+    if name == "joint_merge":
+        require_sorted_topk(case)
     enabled = is_joint(name) and case["mtp"] > 0
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"],
@@ -189,7 +193,7 @@ def check(case, bundle, before=None):
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries)
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] == "joint_merge")
 
 
 def dump_failure(case, bundle, destination):

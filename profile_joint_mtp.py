@@ -12,7 +12,7 @@ import time
 import numpy as np
 sys.dont_write_bytecode = True
 import joint_plan_common as common
-from joint_plan_cases import SCENARIOS, OVERLAPS, make_case, describe
+from joint_plan_cases import SCENARIOS, OVERLAPS, make_case, describe, sort_topk
 from compare import summary
 from checks.check_joint_plan import run_gate
 from harness_io import preflight_args, write_json, record_failure, diagnostic_log, capture_error
@@ -77,6 +77,7 @@ def duration_ratios(stats):
     pairs += [(n, "abcdf_pages") for n in stats if n in common.PAGED_NAMES and n != "abcdf_pages"]
     pairs += [(name, base) for name in stats if name in common.VARIANTS
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
+    pairs += [("joint_merge", "abcdf_pages"), ("joint_merge", "private_turbo")]
     pairs += [("joint_bitmap", "joint_abc"), ("joint_turbo", "joint_abc"),
               ("joint_turbo", "joint_bitmap"), ("private_turbo", "private_a")]
     pairs += [(name, base) for name in stats if name in ("joint_turbo_a", "joint_turbo_b", "joint_turbo_ab")
@@ -258,6 +259,16 @@ def report_text(report):
             key = name + "_over_abcdf_pages_p50"
             if key in run:
                 lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | {run[key]:.3f} |")
+    if any("joint_merge_over_abcdf_pages_p50" in run for run in report["runs"]):
+        lines += ["", "## 升序 TopK：Merge 与同场带页表 ABCDF", "",
+                  "两路共用相同升序输入；比值为 Merge P50 / 带页表 ABCDF P50，小于 1 表示 Merge 更快。",
+                  "MTP0 关闭联合算法，MTP1/3 请同时看共享/回退组数。只测 Plan。", "",
+                  "| 工况/重合 | MTP | Merge / 带页表 ABCDF |", "|---|---:|---:|"]
+        for run in report["runs"]:
+            key = "joint_merge_over_abcdf_pages_p50"
+            if key in run:
+                w = run["workload"]
+                lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {run[key]:.3f} |")
     lines += ["", "## 相对MTP关闭：一次调用耗时比", "",
         "| 对照 | 工况/重合模式 | 实现 | MTP | MTP开启 P50 / MTP关闭 P50 |",
         "|---|---|---|---:|---:|"]
@@ -308,9 +319,12 @@ def main():
                         help="兼容旧命令；三方现在始终逐样本校验，不能关闭")
     parser.add_argument("--regression-repeat", type=int, default=100)
     parser.add_argument("--correctness-report", type=Path, help="复用同库/同设备完整门禁，避免重复运行100次回归")
+    parser.add_argument("--sorted-topk", action="store_true", help="两路共同按token升序准备输入；排序在计时外")
     parser.add_argument("--describe-only", action="store_true")
     parser.add_argument("--output", type=Path, default=Path("/workspace/joint_plan_results/profile"))
     args = parser.parse_args()
+    if "joint_merge" in args.implementations and not args.sorted_topk:
+        parser.error("joint_merge必须显式指定--sorted-topk，以相同升序输入比较")
     if args.warmup < 0 or args.repeat <= 0 or args.regression_repeat <= 0 or 0 not in args.mtp:
         parser.error("warmup>=0、repeat>0且mtp列表必须含0")
     for key in ("mtp", "implementations", "scenarios", "overlaps"):
@@ -330,6 +344,8 @@ def main():
                         requests = args.fixed_query_rows // (mtp + 1)
                     case = make_case(requests, args.topk, args.capacity, args.max_token, mtp,
                                      scenario, overlap, args.seed, args.block_size)
+                    if args.sorted_topk:
+                        case = sort_topk(case)
                     tasks.append((mode, case))
                     print(json.dumps({"comparison": mode, "workload": describe(case)}, ensure_ascii=False), flush=True)
     except ValueError as exc:

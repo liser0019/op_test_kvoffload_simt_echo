@@ -305,7 +305,7 @@ class VariantChecks(unittest.TestCase):
     def test_all_masks_unique_symbols_and_dispatch(self):
         from joint_variants import MASKS
         from checks.generate_joint_variants import generate
-        self.assertEqual(set(MASKS.values()), set(range(1, 21)))
+        self.assertEqual(set(MASKS.values()), set(range(1, 22)))
         self.assertEqual(len(set(common.KERNELS.values())), len(common.IMPLEMENTATIONS))
         with tempfile.TemporaryDirectory() as tmp:
             generate(tmp)
@@ -317,7 +317,7 @@ class VariantChecks(unittest.TestCase):
                 self.assertIn(f"&launch_joint_plan_{letters}", dispatcher)
 
     def test_many_way_rotation_and_prefix_kernel_filter(self):
-        names = ("abcdf", "private", "joint", "joint_abc", "joint_bitmap", "joint_turbo", "private_turbo", "joint_turbo_a", "joint_turbo_b", "joint_turbo_ab")
+        names = ("abcdf", "private", "joint", "joint_abc", "joint_bitmap", "joint_turbo", "private_turbo", "joint_turbo_a", "joint_turbo_b", "joint_turbo_ab", "joint_merge", "abcdf_pages")
         count = len(names)
         orders = [execution_order(names, step) for step in range(1, 51)]
         for name in names:

@@ -146,7 +146,7 @@ def describe(case):
             "topk": case["topk"], "capacity": case["capacity"], "max_token": case["max_token"],
             "row0_intersections": [[len(sets[first] & sets[row]) for row in range(first, end)]
                                     for first, end in groups(case, True)],
-            "selection_semantics": "per-query tokens; no sorted/shared-prefix assumption",
+            "selection_semantics": "token ascending (sorted outside timing); no shared-prefix assumption" if case.get("sorted_topk") else "per-query tokens; no sorted/shared-prefix assumption",
             "union_sizes": unions, "union_fits": [u <= case["capacity"] for u in unions],
             "valid_positions_per_row": [sum(source_valid(case, r, int(t)) for t in query)
                                         for r, query in enumerate(case["topk_indices"])],
@@ -154,7 +154,7 @@ def describe(case):
             "logical_input_sha256": array_hash({k: case[k] for k in (*INPUTS, "last_req_ids", "slot_to_token", "lru_slots")})}
 
 
-def validate(case, before, actual, joint, max_group_queries=None):
+def validate(case, before, actual, joint, max_group_queries=None, merge=False):
     """Private对独立golden逐字段比较；joint对集合、LRU、miss填充和逐行寻址完整校验。"""
     expected = {key: value.copy() for key, value in before.items()}
     sets, group_info = valid_sets(case), []
@@ -165,9 +165,23 @@ def validate(case, before, actual, joint, max_group_queries=None):
         union = set().union(*sets[first:end])
         fits_queries = max_group_queries is None or (end - first) * topk <= max_group_queries
         shared = end - first > 1 and 0 <= request < len(case["req_ids"]) and len(union) <= capacity and fits_queries
+        if merge:
+            q = (end - first) * topk
+            bits = max(1, (q - 1).bit_length())
+            supported = (1 < end - first <= 4 and capacity <= 32768 and q <= 65535
+                         and (case["max_token"] - 1) * (1 << bits) <= 0xffffffff and fits_queries)
+            merge_reset = (before["row_modes"][first] != 1 or not 0 <= request < len(case["req_ids"])
+                           or before["last_req_ids"][first] != case["req_ids"][request])
+            stable = max(0, min(case["max_token"], min(map(int, case["stable_prefix_lens"][first:end]))))
+            selected_slots = [] if merge_reset else [int(s) for s in before["lru_slots"][first]
+                if 0 <= int(before["slot_to_token"][first, s]) < stable
+                and int(before["slot_to_token"][first, s]) in union]
+            selected_tokens = {int(before["slot_to_token"][first, s]) for s in selected_slots}
+            shared = (supported and 0 <= request < len(case["req_ids"])
+                      and len(union - selected_tokens) <= capacity - len(selected_slots))
         group_info.append({"first": first, "end": end, "union": len(union),
                            "path": "joint" if shared else "overflow_private"
-                           if end - first > 1 and (len(union) > capacity or not fits_queries)
+                           if end - first > 1 and (merge or len(union) > capacity or not fits_queries)
                            else "private"})
         if not shared:
             for row in range(first, end):
@@ -203,6 +217,8 @@ def validate(case, before, actual, joint, max_group_queries=None):
         expected_counts = [min(topk, max(0, count - (row - first) * topk)) for row in range(first, end)]
         np.testing.assert_array_equal(actual["miss_count"][first:end], expected_counts, err_msg="joint miss counts")
         tokens = np.concatenate([actual["miss_tokens"][row, :n] for row, n in zip(range(first, end), expected_counts)])
+        if merge:
+            np.testing.assert_array_equal(tokens, sorted(missing), err_msg="merge token ascending miss order")
         slots = np.concatenate([actual["miss_slots"][row, :n] for row, n in zip(range(first, end), expected_counts)])
         if len(tokens) != len(set(map(int, tokens))) or set(map(int, tokens)) != missing:
             raise AssertionError("联合miss必须与独立计算的missing集合相等，且每token仅一条记录")
@@ -213,6 +229,10 @@ def validate(case, before, actual, joint, max_group_queries=None):
         expected["lru_slots"][first] = evict[count:] + evict[:count] + hit
         expected["last_req_ids"][first] = req_id
         token_slots = {int(resident[s]): int(s) for s in hit + evict[:count]}
+        if merge:
+            for row, n in zip(range(first, end), expected_counts):
+                for key in ("miss_tokens", "miss_slots"):
+                    np.testing.assert_array_equal(actual[key][row, n:], -1, err_msg="merge unused descriptor tail")
         for row, n in zip(range(first, end), expected_counts):
             expected["miss_count"][row] = n
             expected["row_modes"][row] = 1 if row == first else 2
@@ -266,3 +286,17 @@ def validate_abcdf(case, before, actual):
             "joint_groups": 0, "overflow_groups": 0,
             "miss_count_per_row": actual["miss_count"][:active].astype(int).tolist(),
             "total_transfer_descriptors": int(actual["miss_count"][:active].sum())}
+
+
+def sort_topk(case):
+    """两路共用的输入准备；只排序位置，不去重、不改变因果边界。"""
+    case = dict(case)
+    case["topk_indices"] = np.sort(case["topk_indices"], axis=1)
+    case["sorted_topk"] = True
+    return case
+
+
+def require_sorted_topk(case):
+    q = case["topk_indices"]
+    if np.any(q[:, 1:] < q[:, :-1]):
+        raise ValueError("joint_merge requires token-ascending TopK; sort common inputs outside timing")

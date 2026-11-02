@@ -147,7 +147,7 @@ __simt_callee__ __aicore__ inline int32_t InsertJointToken(ScratchPtr keys, int3
   return 1;
 }
 
-#if JOINT_OPT_MASK >= 18
+#if JOINT_OPT_MASK >= 18 && JOINT_OPT_MASK <= 20
 #include "turbo_union_experiments.h"
 #endif
 
@@ -156,7 +156,7 @@ __simt_callee__ __aicore__ inline bool BuildJointUnionTurbo(
     const JointPlanArgs& a, const FastGroupSource& groupSrc, int64_t first, int64_t end,
     bool reset, bool compactPartition, ScratchPtr keys, ScratchPtr bucketSlots, ScratchPtr partition,
     ScratchPtr queryBuckets, __ubuf__ int32_t* scan, uint32_t thread, int32_t& outUnionCount) {
-#if JOINT_OPT_MASK >= 18
+#if JOINT_OPT_MASK >= 18 && JOINT_OPT_MASK <= 20
   return BuildJointUnionExperiment(a, groupSrc, first, end, reset, compactPartition, keys,
                                    bucketSlots, partition, queryBuckets, scan, thread, outUnionCount);
 #else

@@ -1,5 +1,5 @@
 {
-  "experiment": "paged-abcdf-ub-forwarding-pingpong-scan",
+  "experiment": "resident-first-sorted-miss-merge-v1",
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
@@ -33,7 +33,8 @@
     "joint_turbo_ab": "sparse_kv_plan_joint_kernel_turbo_ab",
     "abcdf_pages_a": "sparse_kv_plan_kernel_plan_abcdf_pages_a",
     "abcdf_pages_b": "sparse_kv_plan_kernel_plan_abcdf_pages_b",
-    "abcdf_pages_ab": "sparse_kv_plan_kernel_plan_abcdf_pages_ab"
+    "abcdf_pages_ab": "sparse_kv_plan_kernel_plan_abcdf_pages_ab",
+    "joint_merge": "sparse_kv_plan_joint_kernel_merge"
   },
   "mtp": [
     0,
@@ -49,7 +50,7 @@
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
     "build_joint_plan.sh": "3f260db9d4a066fd65e16e1da4c22862a295446ecc44a8c0868a9a81c9d3dccc",
-    "joint_plan/CMakeLists.txt": "c4c56d9cf8cbdd5ea8310d64ff55aa7000ec187ee101e97f81c604bc65818bfd",
+    "joint_plan/CMakeLists.txt": "de67e87f5df2a8d27634105e2572d454e10396a41139c1d38c39ec366edc2485",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -58,12 +59,12 @@
     "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
-    "joint_plan_cases.py": "6b129c56806312b946b0c33ea3e95a84272a1564cb32c117ff0c42bb33b87174",
-    "joint_plan_common.py": "1433e9978d5c6cc94ceaf92e8fe6c86a62ed2b8d68d5377de56bcfae3e18e1ac",
-    "profile_joint_mtp.py": "229b601d94039d9a1d9bcadb81751d89b9a059c8baf3174614ac2f726ebd82e5",
+    "joint_plan_cases.py": "a28d417dbb4242f753e01bdee430c21cd59b5706fd34eebd3a727f986189176e",
+    "joint_plan_common.py": "4d6d22e805d947e0662d257c4e831fb7461b492f3426c4039451e0f7909d46cc",
+    "profile_joint_mtp.py": "2332615cc01c00b4e901cb8d106f27a01c3a6e84de7a5a75cd7097189053fcda",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "b29ca2263d59f1cb793a9df4d0e68f97c601696225c1adffeb9df9c72bf4c3ab",
-    "checks/check_joint_models.py": "5ffd96070f9695ff15c2fe1d03b3184ebe461f4111c9b6e86858464dd4afdd2e",
+    "checks/check_joint_plan.py": "b6e3598b3f0b803ae5d2e85baffa4dea0a5d39dc718cce4e059f8ae2bcdd4a03",
+    "checks/check_joint_models.py": "335936f92a82d9d6b8337c7ee23236af2d3df71dcf4f7a8ce4a83718fb70740d",
     "checks/joint_build_info.py": "fa381043fe011678d1547cd63c35de1d9b34c6bcc904afc439eefdc9d3fab67d",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "b368b278d50c6982fd408ef2a80eb8f79e1faa7f8589922ee6f69caf66900c54",
@@ -78,20 +79,20 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "5b58829a0137451c1f7c9c2a77c090eb59281dcf04c9854aedd6e62cf8719242",
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "joint_variants.py": "250a2a48ad3667cb5107ac11fd1d8c76afbd624a428687ed0fbd7813275d0672",
-    "checks/generate_joint_variants.py": "3c71db446f706fa3030f0801d066bd330bac4f622742a15fd517f82900e95e3e",
-    "checks/check_joint_variant_kernels.py": "0506d07505223d4e6b631f99e5c661d89d0f7a6ac3f4c7e12326653961d4b14d",
+    "joint_variants.py": "084b04b212b73acf854799a7ac735f73d36c74f26d751c533d7c43ee4e9e848c",
+    "checks/generate_joint_variants.py": "86b614b5106fad0df574a6f4b6df60565e78689f343cc8e31a12da86d74ccaeb",
+    "checks/check_joint_variant_kernels.py": "49e1d480f295d33d62c2d97af8c52e53daf89323b92973a64140fd967a2a0227",
     "checks/joint_variant_cpu_driver.cpp": "5d36bf477dae98f7624b92c919212e8f072744bdc945041c45ed56a91559f48f",
     "checks/simt_variants/cpu_runtime.h": "ff548eac8dbb18c69c6266adb4958f5e1c52b8e5cf096e30edddc452467b7471",
     "csrc/joint_variants/sparse_kv_joint_plan.h": "c49bb5a237e4d97d90744a2faa73b8e942037ac7bb36756fd9e80ad91748d1c9",
-    "csrc/joint_variants/plugin.cpp": "93184ca18e823ac0e809f3063ff9e2f0429140f0a22cbc07c7c31cc884c2fee2",
-    "csrc/joint_variants/options.h": "496ac7830839a9d67283dfb481ca141361a5a05e524e13c01f7f086870a443b8",
-    "csrc/joint_variants/kernel.cpp": "4f3a0186cfdabec6ae9ec97fb5cdfdea611f8fadc7830dcc5dda1f9f2e90cdb9",
+    "csrc/joint_variants/plugin.cpp": "ee0e287b8073ab8041a51686e6ff5d12884c11d99f5f509647b4608e9ec75d37",
+    "csrc/joint_variants/options.h": "5b517f38ecb87953e87a6d03bbcab38f1a356c53b39d7e32a1afd1c16b1fe981",
+    "csrc/joint_variants/kernel.cpp": "664cf981b88b08297da7c4423848ac937444e5d1ac757afedbdf253d2bc4b51b",
     "csrc/joint_variants/bitmap_plan.h": "f667fe4216b90bc24eb4ce7113025e1d9ebc5a739860cdeaf170f0e12e1d3eb2",
     "checks/run_bitmap_single_vf_probe.py": "ac44c6b9cfcbe022c568908759dd733326a2693aaa5110ce570a25629bce08d7",
     "checks/check_bitmap_launch_structure.py": "9bd0e0aa1ff1c3bb52871945b56e503d4165864f76b9ad88de710dd7fe2b8182",
     "scripts/test_bitmap_single_vf.sh": "bc6b036e571f560e05e3943d3bc0094055d40116819339cec42bccc5be19d8b5",
-    "csrc/joint_variants/turbo_plan.h": "dba224ed25dc36c87e0a74803eb3dd151da62ebfa82ac25d97aac6f28ef1b603",
+    "csrc/joint_variants/turbo_plan.h": "bed0b4a4e8f7a7cffdb717eab6ea59945b50494254143a72bc0ffd692c916e51",
     "csrc/joint_variants/turbo_union_experiments.h": "022de9d6e92c0749c25b0e34c744f1f1f1e62cfbccf3a0273d5d69a90a9bc2f2",
     "scripts/test_turbo_phase_scan.sh": "b8c24abc37b44260e4470c1a444df42370e00616a102c82b0e541c2b1c870cb1",
     "docs/Turbo_分阶段查询与行Scan实验.md": "b4752e0efee97bd2360d4f80490f9beccf4ae926a40e4b4b942b53e04a3b4cce",
@@ -121,7 +122,11 @@
     "csrc/abcdf_paged_opt/a/kernel.cpp": "29733e450474918816ef4290aa0aa52777e83935a30bcb2745bc6a9b3e880f4a",
     "checks/check_paged_abcdf_kernels.py": "6d81a47e3ddd855eba2803057994ca8a3cdda2e8ae497a3c5e3c276a1546db3e",
     "scripts/test_paged_abcdf_ab.sh": "4c9fdbb05c1b8d06831cfb3be61cabc19cf423a7a3d75605971050a6fc943fba",
-    "docs/带页表ABCDF_AB优化实验.md": "e30b2f7c0c090271190a61432285123ccde68304876b4d1a0bd33fbf92f01351"
+    "docs/带页表ABCDF_AB优化实验.md": "e30b2f7c0c090271190a61432285123ccde68304876b4d1a0bd33fbf92f01351",
+    "checks/check_merge_plan.py": "13bb0e401b850a743320d4b4aec2fb858ef0bf89d55f6760267e8ad360db6871",
+    "csrc/joint_variants/merge_plan.h": "0dfc8cd9f6343de69d09e4d6cd7d82835a854bbbe7c0849d019569080e8109d2",
+    "docs/Merge_Joint_MTP.md": "72a817647884e0219fcf0ac98aa3d5dc1d42c5adfd1ef3de182ec93692b5a8fb",
+    "scripts/test_merge_mtp.sh": "4c6f11882fbdc18e82e4501dbfb12a3d522474dc6105fc0108476cb4f9b21cfa"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -159,7 +164,8 @@
     "joint_turbo": 17,
     "joint_turbo_a": 18,
     "joint_turbo_b": 19,
-    "joint_turbo_ab": 20
+    "joint_turbo_ab": 20,
+    "joint_merge": 21
   },
   "joint_optimizations": {
     "a": "non-joint VF compile-time isolation (protocol retained)",
@@ -169,7 +175,7 @@
   },
   "launch_workaround": {
     "base": "84769ae5d30b9f1ee1cc04ee34e34b27c86c5ee2",
-    "scope": "mask16..20 AllowJoint=true invokes VF<true> only",
+    "scope": "mask16..21 AllowJoint=true invokes VF<true> only",
     "status": "candidate workaround; root cause unconfirmed; not locally CANN/NPU validated"
   },
   "source_contract": "Upstream guarantees source-page validity/lifetime. Plan retains request/token/causal/stable-prefix checks. Transfer still uses source page table.",
@@ -195,5 +201,12 @@
     "base": "fb868c3",
     "source_pages": "valid by upstream contract; original validation retained",
     "hardware": "pending"
+  },
+  "merge_v1": {
+    "base": "482f4c3637972444a4d3d0fb57f458649888b44b",
+    "prototype_header_sha256": "04d7f8359888d798ec043dc4a9ba52639883d9fed9a938969c893b78f93f7cdf",
+    "contract": "nondecreasing token position per row; same sorted logical inputs for all implementations; upstream valid source pages",
+    "baseline": "abcdf_pages",
+    "hardware_validation": "pending"
   }
 }

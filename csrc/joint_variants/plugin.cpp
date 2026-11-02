@@ -72,7 +72,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 20, "joint variant mask must be 1..20");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 21, "joint variant mask must be 1..21");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
     for (size_t i = 0; i < 4; ++i)
