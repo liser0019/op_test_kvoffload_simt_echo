@@ -3,6 +3,18 @@
 #include "cpu_runtime.h"
 #include "kernel_under_test.h"
 extern "C" __attribute__((visibility("default"))) void run_variant(void** p, const int64_t* d, int32_t* scan) {
+#if JOINT_OPT_MASK >= 37
+  JointDirectTilingData tiling{};
+  tiling.hashCapacity=d[1];tiling.workspaceRowElements=d[2];tiling.maxRows=d[3];
+  tiling.topk=d[4];tiling.capacity=d[5];tiling.maxToken=d[6];tiling.maxRequests=d[7];
+  tiling.blockSize=d[8];tiling.jointHashCapacity=d[9];tiling.scratchElements=d[10];
+  const uint64_t chunk=(std::min(uint64_t{768},std::max(uint64_t{64},uint64_t{3}*d[5])/16U)/4U)*4U;
+  tiling.localMemoryBytes=288U+ (d[10]<=112*1024/4?((d[10]*4+31)&~31ULL):(64+16*chunk)*4);
+  SortedCpuBlocks=d[0];
+  for(SortedCpuBlock=0;SortedCpuBlock<SortedCpuBlocks;++SortedCpuBlock)
+    SortedDirectBody<true>(p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8],p[9],p[10],p[11],p[12],p[13],p[14],p[15],p[16],&tiling);
+  return;
+#else
 #if JOINT_OPT_MASK == 0
   CpuWorkers workers(sparse_kv_plan::PLAN_THREADS);
 #else
@@ -33,6 +45,7 @@ extern "C" __attribute__((visibility("default"))) void run_variant(void** p, con
 #undef VF_ARGUMENTS
     });
   }
+#endif
 }
 
 #if JOINT_OPT_MASK >= 22

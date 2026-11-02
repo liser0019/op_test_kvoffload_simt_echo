@@ -72,7 +72,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 36, "joint variant mask must be 1..36");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 38, "joint variant mask must be 1..38");
     TORCH_CHECK(JointVariantLaunch(variantMask) != nullptr, "joint variant not compiled in this build");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
@@ -119,9 +119,16 @@ class Prepared : public torch::CustomClassHolder {
                                      4U * static_cast<uint64_t>(t);
       d.scratchElements = std::max(d.workspaceRowElements, turboElements);
     }
+    if (variantMask >= 37 && attrs[4])
+      d.scratchElements = std::max(d.workspaceRowElements, uint64_t{64} + ((4U*t+c+7U)&~uint64_t{7U}) + std::max(uint64_t{3}*c,uint64_t{64}));
     const uint64_t alignedBytes = (d.scratchElements * 4U + 31U) & ~uint64_t{31U};
     const bool ub = alignedBytes <= sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_BYTES;
-    d.localMemoryBytes = sparse_kv_plan_config::PLAN_SCAN_BYTES + (ub ? alignedBytes : 0U);
+    uint64_t stageBytes=0;
+    if(variantMask>=37) {
+      const uint64_t chunk=(std::min(uint64_t{768}, std::max(uint64_t{64},uint64_t{3}*c)/16U)/4U)*4U;
+      stageBytes=(64U+16U*chunk)*4U;
+    }
+    d.localMemoryBytes = sparse_kv_plan_config::PLAN_SCAN_BYTES + (ub ? alignedBytes : stageBytes);
     TORCH_CHECK(d.scratchElements <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / rows),
                 "joint workspace size overflow");
     const uint64_t requiredWorkspace = variantMask == 16 ?

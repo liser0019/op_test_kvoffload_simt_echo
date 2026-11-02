@@ -618,6 +618,11 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
 #endif
 }
 
+#if JOINT_OPT_MASK >= 37
+#include "sorted_stage.h"
+#include "sorted_controller.h"
+#endif
+
 }  // namespace
 
 
@@ -631,6 +636,11 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
     GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
     GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
+#if JOINT_OPT_MASK >= 37
+  SortedDirectBody<AllowJoint>(reqIds,topkIndices,stablePrefixLens,visibleSeqLens,tokenToReq,activeRows,lastReqIds,
+      slotToToken,lruSlots,currentSlots,missCount,missTokens,missSlots,compactWorkspace,rowModes,residentRows,residentBlockTable,tiling);
+#else
+
 
   const auto* gm = reinterpret_cast<const __gm__ SparseKvPlanTilingData*>(tiling);
   SparseKvPlanTilingData tilingData;
@@ -727,7 +737,9 @@ __aicore__ inline void JointDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_A
       reinterpret_cast<__gm__ int32_t*>(residentBlockTable), tilingData.jointHashCapacity, tilingData.scratchElements);
 #endif
 
+#endif
 }
+
 extern "C" __global__ __aicore__ void sparse_kv_plan_joint_kernel(
     GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
     GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,

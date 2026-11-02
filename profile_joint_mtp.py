@@ -77,7 +77,7 @@ def duration_ratios(stats):
     pairs += [(n, "abcdf_pages") for n in stats if n in common.PAGED_NAMES and n != "abcdf_pages"]
     pairs += [(name, base) for name in stats if name in common.VARIANTS
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
-    pairs += [(n, base) for n in common.MERGE_NAMES for base in ("abcdf_pages", "joint_merge", "private_turbo") if n != base]
+    pairs += [(n, base) for n in common.MERGE_NAMES for base in ("abcdf_pages", "joint_merge", "joint_merge_bd", "private_turbo") if n != base]
     pairs += [("joint_bitmap", "joint_abc"), ("joint_turbo", "joint_abc"),
               ("joint_turbo", "joint_bitmap"), ("private_turbo", "private_a")]
     pairs += [(name, base) for name in stats if name in ("joint_turbo_a", "joint_turbo_b", "joint_turbo_ab")
@@ -159,7 +159,7 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
             "us_per_query_row_p50": float(np.percentile(samples, 50)) / case["rows"],
             "us_per_request_p50": float(np.percentile(samples, 50)) / case["requests"],
             "joint_enabled": bundles[name]["joint_enabled"], "layout": bundles[name]["layout"],
-            "correctness": final[name]}
+            "correctness": final[name], "implementation": common.description(name) if name in common.VARIANTS else {"name":name}}
     result = {"status": "passed", "workload": describe(case), "stats": stats,
               "execution_orders": orders, "audit": audits, "target_samples": records,
               "raw_csv": [str(p) for p in paths], "capture_start_wait": wait_record}
@@ -292,6 +292,16 @@ def report_text(report):
                     ratios = [f"{run[n + '_over_' + b + '_p50']:.3f}" if n + '_over_' + b + '_p50' in run else "—"
                               for b in ("abcdf_pages", "joint_merge")]
                     lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {n} | {run['stats'][n]['p50_us']:.3f} | " + " | ".join(ratios) + " |")
+    if any(any(n in common.SORTED_NAMES for n in run["stats"]) for run in report["runs"]):
+        lines += ["", "## 无 resident Hash：流式有序并集", "",
+                  "sorted_stream与sorted_mrgsort使用同一规划主体，后者在MTP1/3多路有效输入时调用硬件MrgSort。MTP0不执行归并。",
+                  "| 工况 | MTP | 实现 | P50 μs | 候选/ABCDF | 候选/原Merge | 候选/BD |", "|---|---:|---|---:|---:|---:|---:|"]
+        for run in report["runs"]:
+            w=run["workload"]
+            for n in common.SORTED_NAMES:
+                if n in run["stats"]:
+                    values=[f"{run[n+'_over_'+b+'_p50']:.3f}" if n+'_over_'+b+'_p50' in run else "—" for b in ("abcdf_pages","joint_merge","joint_merge_bd")]
+                    lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {n} | {run['stats'][n]['p50_us']:.3f} | "+" | ".join(values)+" |")
     lines += ["", "## 相对MTP关闭：一次调用耗时比", "",
         "| 对照 | 工况/重合模式 | 实现 | MTP | MTP开启 P50 / MTP关闭 P50 |",
         "|---|---|---|---:|---:|"]

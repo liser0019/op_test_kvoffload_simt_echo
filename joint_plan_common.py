@@ -11,7 +11,7 @@ from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
 ROOT = Path(__file__).resolve().parent
-from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS, MERGE_NAMES
+from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS, MERGE_NAMES, SORTED_NAMES
 PAGED_NAMES = ("abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab")
 INDEPENDENT = ("abcdf", *PAGED_NAMES)
 IMPLEMENTATIONS = ("abcdf", "abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab", "private", "joint", *VARIANTS)
@@ -82,7 +82,7 @@ def prepare(torch, case, name, inputs=None):
     enabled = is_joint(name) and case["mtp"] > 0
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"],
-                  name == "joint_bitmap", is_turbo)
+                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES)
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name in INDEPENDENT:
         host = {key: case[key].copy() for key in ABCDF_STATE}
@@ -91,6 +91,7 @@ def prepare(torch, case, name, inputs=None):
     else:
         max_queries = (info["scratch_elements"] - 2 * info["joint_hash_capacity"] - case["capacity"]
                        if is_turbo and enabled else None)
+        if name in SORTED_NAMES: max_queries=4*case["topk"] if enabled else None
         host = initial_arrays(case, enabled, max_queries)
     host["workspace"] = np.full(info["workspace_elements"], np.iinfo(np.int32).max, np.int32)
     tensors, buffers, initial = {}, {}, {}
@@ -193,7 +194,8 @@ def check(case, bundle, before=None):
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES)
+    if bundle["name"] in SORTED_NAMES: max_queries=4*case["topk"] if bundle["joint_enabled"] else None
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES)
 
 
 def dump_failure(case, bundle, destination):

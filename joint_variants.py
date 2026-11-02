@@ -18,8 +18,10 @@ MERGE_OPTIONS = {"a": "resident bucket forwarding in partition high bits",
 MERGE_VARIANTS = {"merge_" + "".join(c for i, c in enumerate(MERGE_OPTIONS) if bits & (1 << i)): 21 + bits
                   for bits in range(1, 16)}
 MASKS.update(MERGE_VARIANTS)
-MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS))
-TURBO_MASKS = tuple(range(17, 37))
+MASKS.update(sorted_stream=37, sorted_mrgsort=38)
+SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort")
+MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
+TURBO_MASKS = tuple(range(17, 39))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
@@ -30,6 +32,10 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask >= 37:
+        return {"mask": mask, "structure": "hash-free sorted query union + resident binary lookup",
+                "merge_engine": "hardware MrgSort exhaustion" if mask==38 else "SIMT packet merge",
+                "baseline": "abcdf_pages", "source": "sorted inputs; no TopK precomputed hit metadata"}
     if mask >= 22:
         bits = mask - 21
         return {"mask": mask, "merge_bits": bits, "structure": "Merge ABCD factorial",

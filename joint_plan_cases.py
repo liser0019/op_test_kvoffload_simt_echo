@@ -11,7 +11,7 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint", "overlap40")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
@@ -19,11 +19,13 @@ def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=Fals
     scratch = max(row, 2 * j + capacity + (4 * topk if turbo and joint else 0))
     if bitmap and joint:
         scratch = max(row, (max_token + 31) // 32 + 2 * capacity)
+    if sorted_union and joint:
+        scratch=max(row,64+((4*topk+capacity+7)&~7)+max(3*capacity,64))
     aligned = (scratch * 4 + 31) & ~31
     ub = aligned <= 112 * 1024
     return {"hash_capacity": h, "joint_hash_capacity": j, "scratch_elements": scratch,
             "workspace_elements": rows * (scratch + max_token) if bitmap else (1 if ub else rows * scratch),
-            "dynamic_ub_bytes": 288 + (aligned if ub else 0), "scratch_path": "UB" if ub else "GM"}
+            "dynamic_ub_bytes": 288 + (aligned if ub else ((64+16*(min(768,max(64,3*capacity)//16)//4*4))*4 if sorted_union else 0)), "scratch_path": "UB" if ub else "GM"}
 
 
 def groups(case, joint):
@@ -174,7 +176,7 @@ def describe(case):
             "logical_input_sha256": array_hash({k: case[k] for k in (*INPUTS, "last_req_ids", "slot_to_token", "lru_slots")})}
 
 
-def validate(case, before, actual, joint, max_group_queries=None, merge=False):
+def validate(case, before, actual, joint, max_group_queries=None, merge=False, float_keys=False):
     """Private对独立golden逐字段比较；joint对集合、LRU、miss填充和逐行寻址完整校验。"""
     expected = {key: value.copy() for key, value in before.items()}
     sets, group_info = valid_sets(case), []
@@ -189,7 +191,8 @@ def validate(case, before, actual, joint, max_group_queries=None, merge=False):
             q = (end - first) * topk
             bits = max(1, (q - 1).bit_length())
             supported = (1 < end - first <= 4 and capacity <= 32768 and q <= 65535
-                         and (case["max_token"] - 1) * (1 << bits) <= 0xffffffff and fits_queries)
+                         and (case["max_token"] - 1) * (1 << bits) <= 0xffffffff and fits_queries
+                         and (not float_keys or case["max_token"] <= 16777216))
             merge_reset = (before["row_modes"][first] != 1 or not 0 <= request < len(case["req_ids"])
                            or before["last_req_ids"][first] != case["req_ids"][request])
             stable = max(0, min(case["max_token"], min(map(int, case["stable_prefix_lens"][first:end]))))

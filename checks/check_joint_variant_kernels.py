@@ -21,12 +21,13 @@ def build(directory, mask):
     source = (ROOT / "csrc/joint_variants/kernel.cpp").read_text()
     source = source[:source.index("// Direct launch adaptation only:")]
     source = source.replace('../joint_plan/', '')
+    if mask >= 37: source = '#include "sorted_cann_cpu.h"\n' + source
     (directory / 'kernel_under_test.h').write_text(source)
     config = (ROOT / 'csrc/joint_plan/sparse_kv_plan_config.h').read_text()
     config, count = re.subn(r'PLAN_THREADS = 1024U', 'PLAN_THREADS = 64U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -51,11 +52,12 @@ def build(directory, mask):
     return library
 
 
-def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False):
-    info = layout(case['topk'], case['capacity'], case['rows'], enabled, case['max_token'], bitmap, turbo)
+def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False):
+    info = layout(case['topk'], case['capacity'], case['rows'], enabled, case['max_token'], bitmap, turbo, sorted_union)
     scratch = max(info['scratch_elements'], 112 * 1024 // 4 + 1) if force_gm else info['scratch_elements']
     max_queries = (scratch - 2 * info['joint_hash_capacity'] - case['capacity']
                    if turbo and enabled else None)
+    if sorted_union: max_queries=4*case["topk"] if enabled else None
     expected = initial_arrays(case, enabled, max_queries) if before is None else before
     arrays = {k: v.copy() for k, v in expected.items()}
     arrays.update({key: case[key].copy() for key in INPUTS})
@@ -89,7 +91,7 @@ def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=F
     if abcdf:
         validate_abcdf(case, expected, arrays)
     else:
-        validate(case, expected, arrays, enabled, max_queries, merge=merge)
+        validate(case, expected, arrays, enabled, max_queries, merge=merge, float_keys=sorted_union)
     return {key: arrays[key].copy() for key in expected}
 
 
@@ -101,6 +103,10 @@ def main():
     records = []
     with tempfile.TemporaryDirectory(prefix='joint_variants_cpu_') as tmp:
         for name in args.variants:
+            if name.startswith("sorted_"):
+                from checks.check_sorted_plan import main as check_sorted
+                records.append({"variant":name,"checks":check_sorted([name])})
+                continue
             if name.startswith("merge_"):
                 from checks.check_merge_abcd import main as check_merge_abcd
                 records.append({"variant": name, "checks": check_merge_abcd([name])})
