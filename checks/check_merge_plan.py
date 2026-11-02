@@ -13,7 +13,7 @@ from joint_plan_cases import make_case, sort_topk, require_sorted_topk, initial_
 def cases():
     for mtp in (0, 1, 3):
         for scenario in ("cold_reset", "full_cache_75pct", "full_cache_90pct", "full_cache_stable_hit"):
-            for overlap in ("shared", "independent", "disjoint"):
+            for overlap in ("shared", "independent", "disjoint", "overlap40"):
                 yield make_case(2, 65, 128, 262144, mtp, scenario, overlap, block_size=8)
     # Full 256K token range, actual 112KiB UB allocation; >32768 and >65535 tokens.
     for mtp in (1, 3):

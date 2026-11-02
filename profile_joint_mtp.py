@@ -247,6 +247,19 @@ def report_text(report):
                           if name + '_over_' + base + '_p50' in run else "—"
                           for base in ("abcdf", "private_turbo", "joint_turbo")]
                 lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | " + " | ".join(ratios) + " |")
+    lines += ["", "## draft 行与首行的 token 重合率", "",
+              "分母为 TopK；分子为因果有效 token 的集合交集。此项与缓存命中率分开。",
+              "每个范围覆盖本次所有请求组对应的 draft 行。", "",
+              "| 工况/重合 | MTP | draft1 最小~最大 | draft2 最小~最大 | draft3 最小~最大 |",
+              "|---|---:|---|---|---|"]
+    for run in report["runs"]:
+        w = run["workload"]
+        groups = w.get("row0_overlap_fraction", [])
+        columns = []
+        for pos in (1, 2, 3):
+            values = [g[pos] for g in groups if len(g) > pos]
+            columns.append(f"{min(values):.2%}~{max(values):.2%}" if values else "—")
+        lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | " + " | ".join(columns) + " |")
     lines += ["", "各行实际初始命中数/比例见 JSON workload.initial_hit_positions_per_row / initial_hit_fraction_per_row。",
               "75pct 是首行构造标签，independent 后续 query 不保证同一命中率；输入未因候选修改。"]
     lines += ["", "## 带页表 ABCDF 的 A/B/AB 对照", "",

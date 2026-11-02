@@ -143,7 +143,7 @@ def run_gate(torch, regression_repeat=100, failure_dir=None, implementations=com
     regression = input_write_regression(torch, regression_repeat, failure_dir, implementations)
     records = []
     for mtp in (0, 1, 3):
-        for pattern in ("shared", "partial", "independent", "disjoint"):
+        for pattern in ("shared", "partial", "independent", "disjoint", "overlap40"):
             for scenario in ("cold_reset", "full_cache_75pct"):
                 case = make_case(2, 7, 16, 512, mtp, scenario, pattern, block_size=8)
                 records.append(run_one(torch, case, f"{mtp}/{pattern}/{scenario}", failure_dir, implementations))

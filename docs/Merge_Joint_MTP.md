@@ -1,6 +1,6 @@
 # Merge Joint V1：与原独立带页表 ABCDF 同场对照
 
-脚本 `scripts/test_merge_mtp.sh` 只测 `abcdf_pages` 和 `joint_merge`，不测 Transfer。新实现是独立的 mask 21，旧候选和带页表基线没有切换到 Merge。固定请求数 32；MTP0/1/3 分别是 32/64/128 行，TopK 2048、capacity 4096、max_token 262144。默认测 cold_reset 和 full_cache_75pct、independent 重合模式，先每档预热 2、正式 5 次。75% 是首行构造目标，报告中有各行实际初始命中率。
+脚本 `scripts/test_merge_mtp.sh` 只测 `abcdf_pages` 和 `joint_merge`，不测 Transfer。新实现是独立的 mask 21，旧候选和带页表基线没有切换到 Merge。固定请求数 32；MTP0/1/3 分别是 32/64/128 行，TopK 2048、capacity 4096、max_token 262144。默认测 cold_reset 和 full_cache_75pct、overlap40 重合模式（每个 draft 行与首行至少 40% token 相同），先每档预热 2、正式 5 次。75% 是首行构造目标，报告中有各行实际初始命中率。
 
 ## 读代码与原型修正
 
@@ -31,3 +31,12 @@ bash scripts/test_merge_mtp.sh
 ## 本地验证边界
 
 `python3 -B checks/check_merge_plan.py` 使用实际 C++ VF、64 个 CPU 模拟线程与 UBSan，独立检查联合提交、回退、生产 token 编码、排序拒绝、跨 tile 重复、owner 选择、因果过滤、连续状态及 canary。不能代替 1024 线程设备同步、Bisheng 地址空间编译、实际 UB 访问或硬件性能验证。
+
+
+## 升序、缓存命中率与行间重合率
+
+Merge 脚本用 `--sorted-topk` 在计时外对两路共同输入排序。旧 independent 生成器的随机顺序保留给旧实验；它从约 2*TopK 的候选池随机选择，重合率期望约 50%，没有逐行至少 40% 的保证。
+
+当前默认 `overlap40` 保留原 independent 随机选择，仅当某条 draft 与首行的交集不足 `ceil(0.4*TopK)` 时补齐，不强制所有行恰好 40%。TopK=2048 时下限为 820 个，即 40.0390625%；不是排序后相同数组下标数，也不是两个集合的 Jaccard 比。每个 draft 可以共享首行的不同历史子集，仍保留因果可见的新 token。默认生产尺寸 seed=2026 原本已满足下限，所以排序后查询与原 independent 一致。
+
+首行满缓存 75% 命中保持 1536/2048；后续 draft 的缓存命中率由所选 token 和初始缓存共同决定，不强制为 75%。报告的 `row0_overlap_fraction` 和 `initial_hit_fraction_per_row` 分别记录这两个比例，并保留同一输入指纹。

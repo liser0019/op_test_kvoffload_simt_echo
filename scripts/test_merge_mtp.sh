@@ -15,7 +15,7 @@ bash build_joint_plan.sh --soc=ascend950 2>&1 | tee "$OUTPUT/build.log"
 "$PYTHON" -B -X faulthandler profile_joint_mtp.py --device 0 \
  --implementations abcdf_pages joint_merge --sorted-topk --requests 32 --mtp 0 1 3 \
  --topk 2048 --capacity 4096 --max-token 262144 --block-size 64 --seed 2026 \
- --scenarios cold_reset full_cache_75pct --overlaps independent --warmup "${WARMUP:-2}" --repeat "${REPEAT:-5}" \
+ --scenarios cold_reset full_cache_75pct --overlaps overlap40 --warmup "${WARMUP:-2}" --repeat "${REPEAT:-5}" \
  --regression-repeat 5 --correctness-report "$OUTPUT/gate.json" \
  --temp-dir "$TMPDIR" --output "$OUTPUT/profile" 2>&1 | tee "$OUTPUT/profile.log"
 echo "完成：$OUTPUT/profile/ 下的 joint_matrix_*/report.md 和 data_index.json"

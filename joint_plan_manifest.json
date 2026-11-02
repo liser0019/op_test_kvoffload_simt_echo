@@ -59,11 +59,11 @@
     "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
-    "joint_plan_cases.py": "a28d417dbb4242f753e01bdee430c21cd59b5706fd34eebd3a727f986189176e",
+    "joint_plan_cases.py": "193c15dd0ca7a9135ed304992a21f4e82b06d92fcc85307d98b2f098244ae137",
     "joint_plan_common.py": "4d6d22e805d947e0662d257c4e831fb7461b492f3426c4039451e0f7909d46cc",
-    "profile_joint_mtp.py": "2332615cc01c00b4e901cb8d106f27a01c3a6e84de7a5a75cd7097189053fcda",
+    "profile_joint_mtp.py": "9d7e6faed11aa854084e4671f486789b78a01f0f7a330d67e148a6eefe2d94d4",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "b6e3598b3f0b803ae5d2e85baffa4dea0a5d39dc718cce4e059f8ae2bcdd4a03",
+    "checks/check_joint_plan.py": "3aabb0382a5b33ce7b8e0c8fdea1eb94be14514c400786901fba29a709873ae5",
     "checks/check_joint_models.py": "335936f92a82d9d6b8337c7ee23236af2d3df71dcf4f7a8ce4a83718fb70740d",
     "checks/joint_build_info.py": "fa381043fe011678d1547cd63c35de1d9b34c6bcc904afc439eefdc9d3fab67d",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
@@ -123,10 +123,11 @@
     "checks/check_paged_abcdf_kernels.py": "6d81a47e3ddd855eba2803057994ca8a3cdda2e8ae497a3c5e3c276a1546db3e",
     "scripts/test_paged_abcdf_ab.sh": "4c9fdbb05c1b8d06831cfb3be61cabc19cf423a7a3d75605971050a6fc943fba",
     "docs/带页表ABCDF_AB优化实验.md": "e30b2f7c0c090271190a61432285123ccde68304876b4d1a0bd33fbf92f01351",
-    "checks/check_merge_plan.py": "13bb0e401b850a743320d4b4aec2fb858ef0bf89d55f6760267e8ad360db6871",
+    "checks/check_merge_plan.py": "add74f800f4354265ddd51c997cb181d97b4c3185ee26778bdaf9f3afc18f169",
     "csrc/joint_variants/merge_plan.h": "0dfc8cd9f6343de69d09e4d6cd7d82835a854bbbe7c0849d019569080e8109d2",
-    "docs/Merge_Joint_MTP.md": "72a817647884e0219fcf0ac98aa3d5dc1d42c5adfd1ef3de182ec93692b5a8fb",
-    "scripts/test_merge_mtp.sh": "4c6f11882fbdc18e82e4501dbfb12a3d522474dc6105fc0108476cb4f9b21cfa"
+    "docs/Merge_Joint_MTP.md": "6cd7123ea4c1b7f6e06eff6b021f6e6b800a8fb55e77053b1313a857ab35a4e0",
+    "scripts/test_merge_mtp.sh": "b74898d1b5a5601f671117a49083a646a2bca8737b9fa368c2eba1664a98bff9",
+    "checks/check_overlap40_inputs.py": "01f355287c779e4bd4a0a3191511b22a3ce0b82857b850ad1eb10d9805d5b6ab"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -207,6 +208,7 @@
     "prototype_header_sha256": "04d7f8359888d798ec043dc4a9ba52639883d9fed9a938969c893b78f93f7cdf",
     "contract": "nondecreasing token position per row; same sorted logical inputs for all implementations; upstream valid source pages",
     "baseline": "abcdf_pages",
-    "hardware_validation": "pending"
+    "hardware_validation": "pending",
+    "input_overlap": "overlap40: retain independent sampling; repair only rows below ceil(0.4*TopK) intersection with row0; sorted common inputs outside timing"
   }
 }
