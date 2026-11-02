@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""CPU compile/link of full and merge-only dispatch, including holes; no CANN."""
+from pathlib import Path
+import subprocess, tempfile,sys
+ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
+from checks.generate_joint_variants import generate
+from joint_variants import MASKS
+
+def main():
+    for subset in (False,True):
+        with tempfile.TemporaryDirectory() as tmp:
+            d=Path(tmp);generate(d,merge_only=subset)
+            declaration=(ROOT/'csrc/joint_plan/launch.h').read_text().split('extern "C" void launch_joint_plan',1)[1]
+            declaration='extern "C" void launch_joint_plan'+declaration.strip()
+            selected={n:m for n,m in MASKS.items() if not subset or n.startswith('merge')}
+            assert len(list(d.glob('variant_*.cpp')))==len(selected)
+            text='#include <cstdint>\n#include <cassert>\n#include "'+str(ROOT/'csrc/joint_plan/launch.h')+'"\n#include "variant_dispatch.h"\n'
+            for name in selected:text+=declaration.replace('launch_joint_plan','launch_joint_plan_'+name).rstrip(';')+' {}\n'
+            text+='int main() { assert(JointVariantLaunch(0)==nullptr); assert(JointVariantLaunch(37)==nullptr);\n'
+            for name,mask in MASKS.items():text+=f'assert((JointVariantLaunch({mask}) != nullptr) == {str(name in selected).lower()});\n'
+            text+='}\n';(d/'probe.cpp').write_text(text)
+            subprocess.run(['g++','-std=c++17',str(d/'probe.cpp'),'-o',str(d/'probe')],check=True)
+            subprocess.run([str(d/'probe')],check=True)
+    print('full/merge-only dispatch compile+link checks passed (CPU)')
+if __name__=='__main__':main()

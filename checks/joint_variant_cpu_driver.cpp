@@ -34,3 +34,10 @@ extern "C" __attribute__((visibility("default"))) void run_variant(void** p, con
     });
   }
 }
+
+#if JOINT_OPT_MASK >= 22
+extern "C" __attribute__((visibility("default"))) void run_merge_pair(int32_t* a, uint32_t na, int32_t* b, uint32_t nb, int32_t* out) {
+  for (uint32_t t = 0; t < sparse_kv_plan_config::PLAN_THREADS; ++t)
+    MergePairChunks(a, na, b, nb, out, t);
+}
+#endif

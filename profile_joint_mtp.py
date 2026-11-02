@@ -77,7 +77,7 @@ def duration_ratios(stats):
     pairs += [(n, "abcdf_pages") for n in stats if n in common.PAGED_NAMES and n != "abcdf_pages"]
     pairs += [(name, base) for name in stats if name in common.VARIANTS
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
-    pairs += [("joint_merge", "abcdf_pages"), ("joint_merge", "private_turbo")]
+    pairs += [(n, base) for n in common.MERGE_NAMES for base in ("abcdf_pages", "joint_merge", "private_turbo") if n != base]
     pairs += [("joint_bitmap", "joint_abc"), ("joint_turbo", "joint_abc"),
               ("joint_turbo", "joint_bitmap"), ("private_turbo", "private_a")]
     pairs += [(name, base) for name in stats if name in ("joint_turbo_a", "joint_turbo_b", "joint_turbo_ab")
@@ -282,6 +282,16 @@ def report_text(report):
             if key in run:
                 w = run["workload"]
                 lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {run[key]:.3f} |")
+    if any(any(n.startswith("joint_merge_") for n in run["stats"]) for run in report["runs"]):
+        lines += ["", "## Merge ABCD 全组合", "", "比值小于1表示候选更快；MTP0不执行联合归并。", "",
+                  "| 工况/重合 | MTP | 候选 | P50 μs | 候选/带页表ABCDF | 候选/原Merge |", "|---|---:|---|---:|---:|---:|"]
+        for run in report["runs"]:
+            w = run["workload"]
+            for n in run["stats"]:
+                if n.startswith("joint_merge_"):
+                    ratios = [f"{run[n + '_over_' + b + '_p50']:.3f}" if n + '_over_' + b + '_p50' in run else "—"
+                              for b in ("abcdf_pages", "joint_merge")]
+                    lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {n} | {run['stats'][n]['p50_us']:.3f} | " + " | ".join(ratios) + " |")
     lines += ["", "## 相对MTP关闭：一次调用耗时比", "",
         "| 对照 | 工况/重合模式 | 实现 | MTP | MTP开启 P50 / MTP关闭 P50 |",
         "|---|---|---|---:|---:|"]
@@ -336,7 +346,7 @@ def main():
     parser.add_argument("--describe-only", action="store_true")
     parser.add_argument("--output", type=Path, default=Path("/workspace/joint_plan_results/profile"))
     args = parser.parse_args()
-    if "joint_merge" in args.implementations and not args.sorted_topk:
+    if any(n in common.MERGE_NAMES for n in args.implementations) and not args.sorted_topk:
         parser.error("joint_merge必须显式指定--sorted-topk，以相同升序输入比较")
     if args.warmup < 0 or args.repeat <= 0 or args.regression_repeat <= 0 or 0 not in args.mtp:
         parser.error("warmup>=0、repeat>0且mtp列表必须含0")

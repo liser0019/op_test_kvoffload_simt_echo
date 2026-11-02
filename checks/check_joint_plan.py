@@ -13,7 +13,7 @@ from harness_io import preflight_args, write_json, record_failure
 
 
 def run_one(torch, case, label, failure_dir=None, implementations=common.DEFAULT_IMPLEMENTATIONS):
-    if "joint_merge" in implementations:
+    if any(n in common.MERGE_NAMES for n in implementations):
         case = sort_topk(case)
     inputs = common.upload_inputs(torch, case)
     records = []
@@ -31,7 +31,7 @@ def continuous_gate(torch, failure_dir=None, implementations=common.DEFAULT_IMPL
     case = make_case(2, 7, 16, 512, 3, block_size=8)
     records = []
     for name in implementations:
-        if "joint_merge" in implementations:
+        if any(n in common.MERGE_NAMES for n in implementations):
             case = sort_topk(case)
         bundle = common.prepare(torch, case, name)
         for step, (pattern, active) in enumerate((("independent", 8), ("disjoint", 8), ("shared", 8),
@@ -43,7 +43,7 @@ def continuous_gate(torch, failure_dir=None, implementations=common.DEFAULT_IMPL
             if step == 5:
                 # 同一请求的行不连续：按连续片段分别规划，不越片段共享。
                 current["token_to_req"][:] = [0, 1, 0, 1, 0, 1, 0, 1]
-            if "joint_merge" in implementations:
+            if any(n in common.MERGE_NAMES for n in implementations):
                 current = sort_topk(current)
             bundle["phase"] = f"continuous-step-{step + 1}/{pattern}"
             bundle["workload"] = {key: current.get(key) for key in bundle["workload"]}
@@ -76,7 +76,7 @@ def context_gate(torch, implementations=common.DEFAULT_IMPLEMENTATIONS):
     for name in implementations:
         if name in common.INDEPENDENT:
             continue
-        if "joint_merge" in implementations:
+        if any(n in common.MERGE_NAMES for n in implementations):
             case = sort_topk(case)
         bundle = common.prepare(torch, case, name)
         ctx, p, attrs = bundle["context"], bundle["ordered"], bundle["attrs"]
@@ -109,7 +109,7 @@ def input_write_regression(torch, repeats=100, failure_dir=None, implementations
         if name in common.INDEPENDENT:
             continue
         print(f"输入错写回归 implementation={name}, repeat={repeats}", flush=True)
-        if "joint_merge" in implementations:
+        if any(n in common.MERGE_NAMES for n in implementations):
             case = sort_topk(case)
         bundle = common.prepare(torch, case, name)
         try:
@@ -135,7 +135,7 @@ def validate_gate_report(path, environment, minimum_repeats=100, implementations
             or any(original.get(key) != environment.get(key)
                    for key in ("device", "device_name", "hostname", "library_sha256", "identity"))):
         raise RuntimeError("门禁报告不匹配本设备/库/源码，或缺少三方完整门禁及足量输入错写回归")
-    return {"status": "passed", "reused_report": str(Path(path).resolve()),
+    return {"status": "passed", "validation_scope": gate.get("validation_scope", "original_joint_gate"), "reused_report": str(Path(path).resolve()),
             "input_write_regression": gate["input_write_regression"], "implementations": gate["implementations"]}
 
 
@@ -160,13 +160,13 @@ def run_gate(torch, regression_repeat=100, failure_dir=None, implementations=com
     duplicate = make_case(1, 7, 16, 256, 3, block_size=8)
     duplicate["topk_indices"][:] = [5, 5, 6, 6, 7, 7, 7]
     records.append(run_one(torch, duplicate, "duplicate_query_without_invalid_pages", failure_dir, implementations))
-    if "joint_merge" in implementations:
+    if any(n in common.MERGE_NAMES for n in implementations):
         for blocked in (False, True):
             c = make_case(1, 7, 16, 262144, 3, block_size=8)
             c["slot_to_token"][:] = [200000 if blocked or i < 2 else 200000 + i for i in range(16)]
             c["topk_indices"][:] = [200000, 200000, 200001, 200002, 200002, 200020, 200021]
             records.append(run_one(torch, c, f"merge_duplicate_residents/blocked={blocked}", failure_dir,
-                                   [n for n in implementations if n == "joint_merge" or n in common.INDEPENDENT]))
+                                   [n for n in implementations if n in common.MERGE_NAMES or n in common.INDEPENDENT]))
     for active in (-1, 0, 3, 5, 99):
         case = make_case(2, 7, 16, 512, 3, block_size=8)
         case["active_rows"] = active

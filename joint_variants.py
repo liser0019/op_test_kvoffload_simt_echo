@@ -11,7 +11,15 @@ MASKS["bitmap"] = 16
 MASKS["turbo"] = 17
 MASKS.update(turbo_a=18, turbo_b=19, turbo_ab=20)
 MASKS["merge"] = 21
-TURBO_MASKS = (17, 18, 19, 20, 21)
+MERGE_OPTIONS = {"a": "resident bucket forwarding in partition high bits",
+                 "b": "tiled merge-path pairwise linear merge",
+                 "c": "single currentSlots store per query",
+                 "d": "stage-end tile barriers with ping-pong Scan"}
+MERGE_VARIANTS = {"merge_" + "".join(c for i, c in enumerate(MERGE_OPTIONS) if bits & (1 << i)): 21 + bits
+                  for bits in range(1, 16)}
+MASKS.update(MERGE_VARIANTS)
+MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS))
+TURBO_MASKS = tuple(range(17, 37))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
@@ -22,6 +30,11 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask >= 22:
+        bits = mask - 21
+        return {"mask": mask, "merge_bits": bits, "structure": "Merge ABCD factorial",
+                "optimizations": [v for i, v in enumerate(MERGE_OPTIONS.values()) if bits & (1 << i)],
+                "baseline": "abcdf_pages", "merge_reference": "joint_merge"}
     if mask == 21:
         return {"mask": 21, "structure": "resident-first + sorted miss rank-scatter merge",
                 "optimizations": ["sorted TopK contract", "resident LRU-last owner", "miss-only union",

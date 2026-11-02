@@ -26,7 +26,7 @@ def build(directory, mask):
     config, count = re.subn(r'PLAN_THREADS = 1024U', 'PLAN_THREADS = 64U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -101,6 +101,10 @@ def main():
     records = []
     with tempfile.TemporaryDirectory(prefix='joint_variants_cpu_') as tmp:
         for name in args.variants:
+            if name.startswith("merge_"):
+                from checks.check_merge_abcd import main as check_merge_abcd
+                records.append({"variant": name, "checks": check_merge_abcd([name])})
+                continue
             if name == "merge":
                 from checks.check_merge_plan import main as check_merge
                 records.append({"variant": name, "checks": check_merge()})

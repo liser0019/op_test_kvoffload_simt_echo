@@ -11,7 +11,7 @@ from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
 ROOT = Path(__file__).resolve().parent
-from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS
+from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS, MERGE_NAMES
 PAGED_NAMES = ("abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab")
 INDEPENDENT = ("abcdf", *PAGED_NAMES)
 IMPLEMENTATIONS = ("abcdf", "abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab", "private", "joint", *VARIANTS)
@@ -67,7 +67,7 @@ def upload_inputs(torch, case):
 
 
 def update_inputs(torch, bundle, case):
-    if bundle["name"] == "joint_merge":
+    if bundle["name"] in MERGE_NAMES:
         require_sorted_topk(case)
     for key in INPUTS:
         bundle["inputs"][key].copy_(torch.from_numpy(np.ascontiguousarray(case[key])).to(bundle["inputs"][key].device))
@@ -77,7 +77,7 @@ def update_inputs(torch, bundle, case):
 def prepare(torch, case, name, inputs=None):
     if name not in IMPLEMENTATIONS:
         raise ValueError("Unknown implementation: " + name)
-    if name == "joint_merge":
+    if name in MERGE_NAMES:
         require_sorted_topk(case)
     enabled = is_joint(name) and case["mtp"] > 0
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
@@ -193,7 +193,7 @@ def check(case, bundle, before=None):
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] == "joint_merge")
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES)
 
 
 def dump_failure(case, bundle, destination):
