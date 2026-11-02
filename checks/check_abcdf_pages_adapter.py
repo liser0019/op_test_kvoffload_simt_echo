@@ -42,6 +42,17 @@ for mtp in (0,1,3):
     try:c.check(case,b)
     except AssertionError:pass
     else:raise AssertionError('page input write not detected')
+for name in c.PAGED_NAMES[1:]:
+    spy=Mock()
+    setattr(proxy.ops.sparse_kv_plan_op,"plan_"+name,spy)
+    case=make_case(2,7,16,512,3,overlap='independent',block_size=8)
+    inputs={k:torch.from_numpy(case[k].copy()) for k in c.INPUTS}
+    inputs['active_rows']=torch.tensor([case['rows']],dtype=torch.int32)
+    bundle=c.prepare(proxy,case,name,inputs)
+    assert len(bundle['ordered'])==15 and len(bundle['attrs'])==5
+    gold=reference_simt(case)
+    for key in (*c.ABCDF_STATE,*c.ABCDF_OUTPUT):bundle['state'][key].copy_(torch.from_numpy(gold[key]))
+    c.check(case,bundle);c.invoke(bundle);assert spy.call_count==1
 assert old.call_count==new.call_count==3
 names=['abcdf','abcdf_pages']
 with tempfile.TemporaryDirectory() as tmp:

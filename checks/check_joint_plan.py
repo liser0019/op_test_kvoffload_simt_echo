@@ -68,7 +68,7 @@ def context_gate(torch, implementations=common.DEFAULT_IMPLEMENTATIONS):
             return
         raise AssertionError("非法prepared上下文未在下发前拒绝")
     for name in implementations:
-        if name in ("abcdf", "abcdf_pages"):
+        if name in common.INDEPENDENT:
             continue
         bundle = common.prepare(torch, case, name)
         ctx, p, attrs = bundle["context"], bundle["ordered"], bundle["attrs"]
@@ -98,7 +98,7 @@ def input_write_regression(torch, repeats=100, failure_dir=None, implementations
     case = make_case(32, 2048, 4096, 262144, 1, "full_cache_75pct", "shared", 2026, 64)
     records = {}
     for name in implementations:
-        if name in ("abcdf", "abcdf_pages"):
+        if name in common.INDEPENDENT:
             continue
         print(f"输入错写回归 implementation={name}, repeat={repeats}", flush=True)
         bundle = common.prepare(torch, case, name)
@@ -115,10 +115,10 @@ def validate_gate_report(path, environment, minimum_repeats=100, implementations
     gate, original = report.get("gate", {}), report.get("environment", {})
     if (report.get("status") != "passed" or gate.get("status") != "passed"
             or not set(implementations).issubset(gate.get("implementations", []))
-            or not (set(implementations) - {"abcdf", "abcdf_pages"}).issubset(
+            or not (set(implementations) - set(common.INDEPENDENT)).issubset(
                 gate.get("input_write_regression", {}).get("per_implementation", {}))
             or any(gate.get("input_write_regression", {}).get("per_implementation", {}).get(name, {}).get("status") != "passed"
-                   for name in implementations if name not in ("abcdf", "abcdf_pages"))
+                   for name in implementations if name not in common.INDEPENDENT)
             or gate.get("input_write_regression", {}).get("status") != "passed"
             or gate.get("input_write_regression", {}).get("input_restore") is not False
             or gate.get("input_write_regression", {}).get("checked_iterations", 0) < minimum_repeats

@@ -12,11 +12,14 @@ from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initia
 
 ROOT = Path(__file__).resolve().parent
 from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS
-IMPLEMENTATIONS = ("abcdf", "abcdf_pages", "private", "joint", *VARIANTS)
+PAGED_NAMES = ("abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab")
+INDEPENDENT = ("abcdf", *PAGED_NAMES)
+IMPLEMENTATIONS = ("abcdf", "abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab", "private", "joint", *VARIANTS)
 KERNELS = {"abcdf_pages": "sparse_kv_plan_kernel_plan_abcdf_pages", "abcdf": "sparse_kv_plan_kernel_plan_abcdf",
            "private": "sparse_kv_plan_private_kernel", "joint": "sparse_kv_plan_joint_kernel"}
 KERNELS.update({name: "sparse_kv_plan_" + name.split("_", 1)[0] + "_kernel_" + name.split("_", 1)[1]
                 for name in VARIANTS})
+KERNELS.update({n: "sparse_kv_plan_kernel_plan_" + n for n in PAGED_NAMES})
 ABCDF_STATE = ("last_req_ids", "slot_to_token", "lru_slots")
 ABCDF_OUTPUT = ("current_slots", "miss_count", "miss_tokens", "miss_slots")
 TENSOR_ORDER = (*INPUTS, "active_rows", "last_req_ids", "slot_to_token", "lru_slots",
@@ -77,7 +80,7 @@ def prepare(torch, case, name, inputs=None):
     info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"],
                   name == "joint_bitmap", is_turbo)
     inputs = upload_inputs(torch, case) if inputs is None else inputs
-    if name in ("abcdf", "abcdf_pages"):
+    if name in INDEPENDENT:
         host = {key: case[key].copy() for key in ABCDF_STATE}
         host.update({key: np.full((case["rows"],) if key == "miss_count" else
                                   (case["rows"], case["topk"]), POISON, np.int32) for key in ABCDF_OUTPUT})
@@ -95,17 +98,17 @@ def prepare(torch, case, name, inputs=None):
         view.copy_(torch.from_numpy(np.ascontiguousarray(array)).to(device))
         tensors[key], buffers[key], initial[key] = view, storage, view.clone()
     all_tensors = inputs | tensors
-    ordered = [all_tensors[key] for key in (TENSOR_ORDER[:14] if name in ("abcdf", "abcdf_pages") else TENSOR_ORDER)]
-    attrs = [case[key] for key in (("topk", "capacity", "max_token") if name in ("abcdf", "abcdf_pages")
+    ordered = [all_tensors[key] for key in (TENSOR_ORDER[:14] if name in INDEPENDENT else TENSOR_ORDER)]
+    attrs = [case[key] for key in (("topk", "capacity", "max_token") if name in INDEPENDENT
                                    else ("topk", "capacity", "max_token", "block_size"))]
     context = None
-    if name not in ("abcdf", "abcdf_pages"):
+    if name not in INDEPENDENT:
         attrs.append(int(enabled))
         if name in VARIANTS:
             context = torch.classes.mtp_joint_plan.PreparedVariant(ordered, attrs, is_joint(name), VARIANTS[name])
         else:
             context = torch.classes.mtp_joint_plan.Prepared(ordered, attrs, is_joint(name))
-    if name == "abcdf_pages":
+    if name in PAGED_NAMES:
         blocks = (case["max_token"] + case["block_size"] - 1) // case["block_size"]
         host_blocks = case["requests"] * blocks
         if host_blocks > np.iinfo(np.int32).max:
@@ -124,14 +127,17 @@ def prepare(torch, case, name, inputs=None):
         raise AssertionError("Python/C++ tiling模型不一致")
     if name in VARIANTS and native.get("variant_mask") != VARIANTS[name]:
         raise AssertionError("Prepared variant mask mismatch")
-    if name == "abcdf_pages":
+    if name in PAGED_NAMES:
         native["interface"] = "independent ABCDF with source-page validation, 15 tensors + 5 attributes"
         native["page_table_sha256"] = hashlib.sha256(table.tobytes()).hexdigest()
-    native["experiment"] = description(name)
+    native["experiment"] = ({"family": "independent paged ABCDF", "optimization_mask":
+        {"abcdf_pages": 0, "abcdf_pages_a": 1, "abcdf_pages_b": 2, "abcdf_pages_ab": 3}[name],
+        "A": "warm scratch token forwarding", "B": "ping-pong register-total Scan"}
+        if name in PAGED_NAMES else description(name))
     return {"name": name, "torch": torch, "invocation_count": 0,
             "workload": {key: case.get(key) for key in ("scenario", "overlap", "mtp", "rows", "requests", "topk", "capacity", "max_token", "seed")}, "joint_enabled": enabled, "inputs": inputs, "state": tensors,
             "buffers": buffers, "initial": initial, "host_initial": host,
-            "page_table_host": table.copy() if name == "abcdf_pages" else None, "ordered": ordered, "attrs": attrs, "context": context, "layout": info | native}
+            "page_table_host": table.copy() if name in PAGED_NAMES else None, "ordered": ordered, "attrs": attrs, "context": context, "layout": info | native}
 
 
 def restore(torch, bundle):
@@ -142,8 +148,8 @@ def restore(torch, bundle):
 
 def invoke(bundle):
     bundle["invocation_count"] = bundle.get("invocation_count", 0) + 1
-    if bundle["name"] in ("abcdf", "abcdf_pages"):
-        getattr(bundle["torch"].ops.sparse_kv_plan_op, "plan_abcdf_pages" if bundle["name"] == "abcdf_pages" else "plan_abcdf")(*bundle["ordered"], *bundle["attrs"])
+    if bundle["name"] in INDEPENDENT:
+        getattr(bundle["torch"].ops.sparse_kv_plan_op, "plan_" + bundle["name"])(*bundle["ordered"], *bundle["attrs"])
     else:
         bundle["context"].run(bundle["ordered"], bundle["attrs"])
 
@@ -154,18 +160,18 @@ def close(bundle):
 
 
 def snapshot(bundle):
-    keys = (*ABCDF_STATE, *ABCDF_OUTPUT) if bundle["name"] in ("abcdf", "abcdf_pages") else (*PERSISTENT, *OUTPUTS)
+    keys = (*ABCDF_STATE, *ABCDF_OUTPUT) if bundle["name"] in INDEPENDENT else (*PERSISTENT, *OUTPUTS)
     return {key: bundle["state"][key].cpu().numpy().copy() for key in keys}
 
 
 def poison(bundle):
-    for key in (ABCDF_OUTPUT if bundle["name"] in ("abcdf", "abcdf_pages") else OUTPUTS):
+    for key in (ABCDF_OUTPUT if bundle["name"] in INDEPENDENT else OUTPUTS):
         bundle["state"][key].fill_(POISON)
     bundle["state"]["workspace"].fill_(np.iinfo(np.int32).max)
 
 
 def check(case, bundle, before=None):
-    if bundle["name"] == "abcdf_pages":
+    if bundle["name"] in PAGED_NAMES:
         np.testing.assert_array_equal(bundle["inputs"]["block_table"].cpu().numpy(), bundle["page_table_host"], err_msg="read-only/block_table")
     before = bundle["host_initial"] if before is None else before
     for key, storage in bundle["buffers"].items():
@@ -175,8 +181,11 @@ def check(case, bundle, before=None):
         np.testing.assert_array_equal(bundle["inputs"][key].cpu().numpy(), case[key], err_msg="input write/" + key)
     np.testing.assert_array_equal(bundle["inputs"]["active_rows"].cpu().numpy(),
                                  [case.get("active_rows", case["rows"])], err_msg="active_rows write")
-    if bundle["name"] in ("abcdf", "abcdf_pages"):
-        return validate_abcdf(case, before, snapshot(bundle))
+    if bundle["name"] in INDEPENDENT:
+        result = validate_abcdf(case, before, snapshot(bundle))
+        if bundle["name"] in PAGED_NAMES:
+            result["protocol"] = "independent paged ABCDF, 15 tensors; upstream guarantees valid source pages"
+        return result
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)

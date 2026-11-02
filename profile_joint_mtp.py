@@ -74,6 +74,7 @@ def execution_order(names, iteration):
 
 def duration_ratios(stats):
     pairs = [("abcdf_pages", "abcdf"), ("private", "abcdf"), ("joint", "abcdf"), ("private", "joint")]
+    pairs += [(n, "abcdf_pages") for n in stats if n in common.PAGED_NAMES and n != "abcdf_pages"]
     pairs += [(name, base) for name in stats if name in common.VARIANTS
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
     pairs += [("joint_bitmap", "joint_abc"), ("joint_turbo", "joint_abc"),
@@ -210,7 +211,7 @@ def report_text(report):
             lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | "
                 f"{w['requests']}/{w['query_rows']} | {name} | {stat['p50_us']:.3f} | {stat['p95_us']:.3f} | "
                 f"{stat['count']} | {c['total_transfer_descriptors']} | " +
-                ("不适用 |" if name in ("abcdf", "abcdf_pages") else f"{c['joint_groups']}/{c['overflow_groups']} |"))
+                ("不适用 |" if name in common.INDEPENDENT else f"{c['joint_groups']}/{c['overflow_groups']} |"))
     lines += ["", "## 同一MTP输入下：三方耗时比", "",
               "比值均为左侧P50除以右侧P50；大于1表示左侧耗时更长。", "",
               "| 对照 | 工况/重合模式 | MTP | private/abcdf | joint/abcdf | private/joint |",
@@ -247,6 +248,16 @@ def report_text(report):
                 lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | " + " | ".join(ratios) + " |")
     lines += ["", "各行实际初始命中数/比例见 JSON workload.initial_hit_positions_per_row / initial_hit_fraction_per_row。",
               "75pct 是首行构造标签，independent 后续 query 不保证同一命中率；输入未因候选修改。"]
+    lines += ["", "## 带页表 ABCDF 的 A/B/AB 对照", "",
+              "候选P50 / 同轮带页表基线P50，小于1表示更快。", "",
+              "| 工况/重合 | MTP | 候选 | 候选/abcdf_pages |",
+              "|---|---:|---|---:|"]
+    for run in report["runs"]:
+        w = run["workload"]
+        for name in common.PAGED_NAMES[1:]:
+            key = name + "_over_abcdf_pages_p50"
+            if key in run:
+                lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {name} | {run[key]:.3f} |")
     lines += ["", "## 相对MTP关闭：一次调用耗时比", "",
         "| 对照 | 工况/重合模式 | 实现 | MTP | MTP开启 P50 / MTP关闭 P50 |",
         "|---|---|---|---:|---:|"]

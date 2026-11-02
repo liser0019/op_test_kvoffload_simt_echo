@@ -1,5 +1,5 @@
 {
-  "experiment": "abcdf-source-page-validation-compare",
+  "experiment": "paged-abcdf-ub-forwarding-pingpong-scan",
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
@@ -30,7 +30,10 @@
     "joint_turbo": "sparse_kv_plan_joint_kernel_turbo",
     "joint_turbo_a": "sparse_kv_plan_joint_kernel_turbo_a",
     "joint_turbo_b": "sparse_kv_plan_joint_kernel_turbo_b",
-    "joint_turbo_ab": "sparse_kv_plan_joint_kernel_turbo_ab"
+    "joint_turbo_ab": "sparse_kv_plan_joint_kernel_turbo_ab",
+    "abcdf_pages_a": "sparse_kv_plan_kernel_plan_abcdf_pages_a",
+    "abcdf_pages_b": "sparse_kv_plan_kernel_plan_abcdf_pages_b",
+    "abcdf_pages_ab": "sparse_kv_plan_kernel_plan_abcdf_pages_ab"
   },
   "mtp": [
     0,
@@ -46,7 +49,7 @@
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
     "build_joint_plan.sh": "3f260db9d4a066fd65e16e1da4c22862a295446ecc44a8c0868a9a81c9d3dccc",
-    "joint_plan/CMakeLists.txt": "9673bd0a6643262de74cb8029c46c70bbe05cfd4ef56e0c103ed25997ec1d561",
+    "joint_plan/CMakeLists.txt": "c4c56d9cf8cbdd5ea8310d64ff55aa7000ec187ee101e97f81c604bc65818bfd",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -56,10 +59,10 @@
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
     "joint_plan_cases.py": "6b129c56806312b946b0c33ea3e95a84272a1564cb32c117ff0c42bb33b87174",
-    "joint_plan_common.py": "10f288b6d25cc0c895b5b7b39b727639615a1abf624e54c9b8e062b4f4a31260",
-    "profile_joint_mtp.py": "1451038c2e572ae71da44a412a3785359f810d57035d847431b231606a2f3c74",
+    "joint_plan_common.py": "1433e9978d5c6cc94ceaf92e8fe6c86a62ed2b8d68d5377de56bcfae3e18e1ac",
+    "profile_joint_mtp.py": "229b601d94039d9a1d9bcadb81751d89b9a059c8baf3174614ac2f726ebd82e5",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "b73c4a6db3e30f3509fa41c2d2a5191c732677a0850f185e32aaa59f6cb1cc47",
+    "checks/check_joint_plan.py": "b29ca2263d59f1cb793a9df4d0e68f97c601696225c1adffeb9df9c72bf4c3ab",
     "checks/check_joint_models.py": "5ffd96070f9695ff15c2fe1d03b3184ebe461f4111c9b6e86858464dd4afdd2e",
     "checks/joint_build_info.py": "fa381043fe011678d1547cd63c35de1d9b34c6bcc904afc439eefdc9d3fab67d",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
@@ -102,7 +105,23 @@
     "csrc/abcdf_pages/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222",
     "scripts/test_abcdf_page_compare.sh": "df4f32f11749f8f1eeba165e42536356226026afc63acad74ab7dd2790d2f348",
     "docs/ABCDF_页表对照.md": "e0699441c28775d41a6141108ef3fca5ca5b5e4685143ea5880a2d6d76cd4184",
-    "checks/check_abcdf_pages_adapter.py": "c496a4ae142965d5bb7c932653cee1cfd5a63030a571f62f3c3ad08bbb716b98"
+    "checks/check_abcdf_pages_adapter.py": "8dbe5a2118df24052138990cd9a4764fac53ce9a9a29d9e9f8916b4c89b2bd82",
+    "csrc/abcdf_paged_opt/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
+    "csrc/abcdf_paged_opt/variant_config.h": "e46868124d3b5b534852f3fb6ad2044af9671e43414d43b15d677896e7a9ec43",
+    "csrc/abcdf_paged_opt/plan_kernel_impl.h": "7fa46f36bb0e4e52fcf4aa33ad56d286611fc0427f78fbb217e574ffe819d4c0",
+    "csrc/abcdf_paged_opt/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222",
+    "csrc/abcdf_paged_opt/ab/symbol_aliases.h": "6c2f596315eaec12db684e8cf05008030374b59fc30ee80a8ea7a04180894f8b",
+    "csrc/abcdf_paged_opt/ab/plugin.cpp": "f5baafa9fcd40d84800b9ab190bb6900c423c448bf2044503a48909e4081b190",
+    "csrc/abcdf_paged_opt/ab/kernel.cpp": "30471fb6ababce194334201ed00537d32fb468c7ac7ceac6c3b213d3c17ea779",
+    "csrc/abcdf_paged_opt/b/symbol_aliases.h": "42e2edaef0335370638f37c268266bad9326fd3e2891c4b0d779e0993019d1b5",
+    "csrc/abcdf_paged_opt/b/plugin.cpp": "67471f44195390abb485d049676a7127223db3d625b14009c68f464c8180fe4d",
+    "csrc/abcdf_paged_opt/b/kernel.cpp": "a26cea7eaf00cb2fe250385360267b3252f18cedccc1eaa55223921fc0a726a2",
+    "csrc/abcdf_paged_opt/a/symbol_aliases.h": "f2a7b261a8cf2e568a2138def84d6138c66905753d778a7f50b5005df252d207",
+    "csrc/abcdf_paged_opt/a/plugin.cpp": "55106cc8d5dbd7489618b0cd3c8d752c396e02a7a91795be2f8f2863fab0ce02",
+    "csrc/abcdf_paged_opt/a/kernel.cpp": "29733e450474918816ef4290aa0aa52777e83935a30bcb2745bc6a9b3e880f4a",
+    "checks/check_paged_abcdf_kernels.py": "6d81a47e3ddd855eba2803057994ca8a3cdda2e8ae497a3c5e3c276a1546db3e",
+    "scripts/test_paged_abcdf_ab.sh": "4c9fdbb05c1b8d06831cfb3be61cabc19cf423a7a3d75605971050a6fc943fba",
+    "docs/带页表ABCDF_AB优化实验.md": "e30b2f7c0c090271190a61432285123ccde68304876b4d1a0bd33fbf92f01351"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -169,5 +188,12 @@
     "path": "csrc/abcdf_pages",
     "policy": "four common headers preserved verbatim from 75cf8b2; wrapper symbols renamed only",
     "hardware_validation": "pending"
+  },
+  "paged_optimization": {
+    "A": "warm UB token forwarding",
+    "B": "register-total ping-pong Scan",
+    "base": "fb868c3",
+    "source_pages": "valid by upstream contract; original validation retained",
+    "hardware": "pending"
   }
 }

@@ -175,7 +175,21 @@ add_custom_command(OUTPUT "${ABCDF_PAGES_OBJECT}"
     DEPENDS "${ABCDF_PAGES_DIR}/kernel.cpp" ${ABCDF_PAGES_HEADERS}
         "${JOINT_ROOT}/joint_plan_manifest.json" VERBATIM)
 set_source_files_properties("${ABCDF_PAGES_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
-add_library(mtp_joint_plan_ops SHARED "${ABCDF_PAGES_DIR}/plugin.cpp" "${ABCDF_PAGES_OBJECT}" "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
+set(PAGED_OPT_OBJECTS)
+set(PAGED_OPT_PLUGINS)
+foreach(_name a b ab)
+    set(_dir "${JOINT_ROOT}/csrc/abcdf_paged_opt")
+    set(_obj "${CMAKE_CURRENT_BINARY_DIR}/abcdf_pages_${_name}.o")
+    file(GLOB _headers CONFIGURE_DEPENDS "${_dir}/*.h" "${_dir}/${_name}/*.h")
+    add_custom_command(OUTPUT "${_obj}"
+        COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+            ${JOINT_FLAGS} ${JOINT_INCLUDES} -I${_dir} -c "${_dir}/${_name}/kernel.cpp" -o "${_obj}"
+        DEPENDS "${_dir}/${_name}/kernel.cpp" ${_headers} "${JOINT_ROOT}/joint_plan_manifest.json" VERBATIM)
+    set_source_files_properties("${_obj}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+    list(APPEND PAGED_OPT_OBJECTS "${_obj}")
+    list(APPEND PAGED_OPT_PLUGINS "${_dir}/${_name}/plugin.cpp")
+endforeach()
+add_library(mtp_joint_plan_ops SHARED ${PAGED_OPT_OBJECTS} ${PAGED_OPT_PLUGINS} "${ABCDF_PAGES_DIR}/plugin.cpp" "${ABCDF_PAGES_OBJECT}" "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
     "${JOINT_OBJECT}" "${ABCDF_DIR}/plugin.cpp" "${ABCDF_OBJECT}"
     "${JOINT_VARIANT_DIR}/plugin.cpp" ${JOINT_VARIANT_OBJECTS})
 target_include_directories(mtp_joint_plan_ops PRIVATE "${JOINT_GENERATED}")
