@@ -12,8 +12,8 @@ from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initia
 
 ROOT = Path(__file__).resolve().parent
 from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS
-IMPLEMENTATIONS = ("abcdf", "private", "joint", *VARIANTS)
-KERNELS = {"abcdf": "sparse_kv_plan_kernel_plan_abcdf",
+IMPLEMENTATIONS = ("abcdf", "abcdf_pages", "private", "joint", *VARIANTS)
+KERNELS = {"abcdf_pages": "sparse_kv_plan_kernel_plan_abcdf_pages", "abcdf": "sparse_kv_plan_kernel_plan_abcdf",
            "private": "sparse_kv_plan_private_kernel", "joint": "sparse_kv_plan_joint_kernel"}
 KERNELS.update({name: "sparse_kv_plan_" + name.split("_", 1)[0] + "_kernel_" + name.split("_", 1)[1]
                 for name in VARIANTS})
@@ -77,7 +77,7 @@ def prepare(torch, case, name, inputs=None):
     info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"],
                   name == "joint_bitmap", is_turbo)
     inputs = upload_inputs(torch, case) if inputs is None else inputs
-    if name == "abcdf":
+    if name in ("abcdf", "abcdf_pages"):
         host = {key: case[key].copy() for key in ABCDF_STATE}
         host.update({key: np.full((case["rows"],) if key == "miss_count" else
                                   (case["rows"], case["topk"]), POISON, np.int32) for key in ABCDF_OUTPUT})
@@ -95,16 +95,26 @@ def prepare(torch, case, name, inputs=None):
         view.copy_(torch.from_numpy(np.ascontiguousarray(array)).to(device))
         tensors[key], buffers[key], initial[key] = view, storage, view.clone()
     all_tensors = inputs | tensors
-    ordered = [all_tensors[key] for key in (TENSOR_ORDER[:14] if name == "abcdf" else TENSOR_ORDER)]
-    attrs = [case[key] for key in (("topk", "capacity", "max_token") if name == "abcdf"
+    ordered = [all_tensors[key] for key in (TENSOR_ORDER[:14] if name in ("abcdf", "abcdf_pages") else TENSOR_ORDER)]
+    attrs = [case[key] for key in (("topk", "capacity", "max_token") if name in ("abcdf", "abcdf_pages")
                                    else ("topk", "capacity", "max_token", "block_size"))]
     context = None
-    if name != "abcdf":
+    if name not in ("abcdf", "abcdf_pages"):
         attrs.append(int(enabled))
         if name in VARIANTS:
             context = torch.classes.mtp_joint_plan.PreparedVariant(ordered, attrs, is_joint(name), VARIANTS[name])
         else:
             context = torch.classes.mtp_joint_plan.Prepared(ordered, attrs, is_joint(name))
+    if name == "abcdf_pages":
+        blocks = (case["max_token"] + case["block_size"] - 1) // case["block_size"]
+        host_blocks = case["requests"] * blocks
+        if host_blocks > np.iinfo(np.int32).max:
+            raise ValueError("source physical block id exceeds int32")
+        table = np.random.default_rng(case["seed"] + 90001).permutation(host_blocks).astype(np.int32).reshape(case["requests"], blocks)
+        device_table = torch.from_numpy(table).to(device)
+        inputs = dict(inputs, block_table=device_table)
+        ordered.insert(5, device_table)
+        attrs += [case["block_size"], host_blocks]
     torch.npu.synchronize()
     native = json.loads(context.info()) if context is not None else {
         "joint_enabled": 0, "dynamic_ub_bytes": info["dynamic_ub_bytes"],
@@ -114,11 +124,14 @@ def prepare(torch, case, name, inputs=None):
         raise AssertionError("Python/C++ tiling模型不一致")
     if name in VARIANTS and native.get("variant_mask") != VARIANTS[name]:
         raise AssertionError("Prepared variant mask mismatch")
+    if name == "abcdf_pages":
+        native["interface"] = "independent ABCDF with source-page validation, 15 tensors + 5 attributes"
+        native["page_table_sha256"] = hashlib.sha256(table.tobytes()).hexdigest()
     native["experiment"] = description(name)
     return {"name": name, "torch": torch, "invocation_count": 0,
             "workload": {key: case.get(key) for key in ("scenario", "overlap", "mtp", "rows", "requests", "topk", "capacity", "max_token", "seed")}, "joint_enabled": enabled, "inputs": inputs, "state": tensors,
             "buffers": buffers, "initial": initial, "host_initial": host,
-            "ordered": ordered, "attrs": attrs, "context": context, "layout": info | native}
+            "page_table_host": table.copy() if name == "abcdf_pages" else None, "ordered": ordered, "attrs": attrs, "context": context, "layout": info | native}
 
 
 def restore(torch, bundle):
@@ -129,8 +142,8 @@ def restore(torch, bundle):
 
 def invoke(bundle):
     bundle["invocation_count"] = bundle.get("invocation_count", 0) + 1
-    if bundle["name"] == "abcdf":
-        bundle["torch"].ops.sparse_kv_plan_op.plan_abcdf(*bundle["ordered"], *bundle["attrs"])
+    if bundle["name"] in ("abcdf", "abcdf_pages"):
+        getattr(bundle["torch"].ops.sparse_kv_plan_op, "plan_abcdf_pages" if bundle["name"] == "abcdf_pages" else "plan_abcdf")(*bundle["ordered"], *bundle["attrs"])
     else:
         bundle["context"].run(bundle["ordered"], bundle["attrs"])
 
@@ -141,17 +154,19 @@ def close(bundle):
 
 
 def snapshot(bundle):
-    keys = (*ABCDF_STATE, *ABCDF_OUTPUT) if bundle["name"] == "abcdf" else (*PERSISTENT, *OUTPUTS)
+    keys = (*ABCDF_STATE, *ABCDF_OUTPUT) if bundle["name"] in ("abcdf", "abcdf_pages") else (*PERSISTENT, *OUTPUTS)
     return {key: bundle["state"][key].cpu().numpy().copy() for key in keys}
 
 
 def poison(bundle):
-    for key in (ABCDF_OUTPUT if bundle["name"] == "abcdf" else OUTPUTS):
+    for key in (ABCDF_OUTPUT if bundle["name"] in ("abcdf", "abcdf_pages") else OUTPUTS):
         bundle["state"][key].fill_(POISON)
     bundle["state"]["workspace"].fill_(np.iinfo(np.int32).max)
 
 
 def check(case, bundle, before=None):
+    if bundle["name"] == "abcdf_pages":
+        np.testing.assert_array_equal(bundle["inputs"]["block_table"].cpu().numpy(), bundle["page_table_host"], err_msg="read-only/block_table")
     before = bundle["host_initial"] if before is None else before
     for key, storage in bundle["buffers"].items():
         for guard in (storage[:GUARD], storage[-GUARD:]):
@@ -160,7 +175,7 @@ def check(case, bundle, before=None):
         np.testing.assert_array_equal(bundle["inputs"][key].cpu().numpy(), case[key], err_msg="input write/" + key)
     np.testing.assert_array_equal(bundle["inputs"]["active_rows"].cpu().numpy(),
                                  [case.get("active_rows", case["rows"])], err_msg="active_rows write")
-    if bundle["name"] == "abcdf":
+    if bundle["name"] in ("abcdf", "abcdf_pages"):
         return validate_abcdf(case, before, snapshot(bundle))
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]

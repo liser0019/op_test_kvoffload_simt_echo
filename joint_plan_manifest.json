@@ -1,10 +1,11 @@
 {
-  "experiment": "turbo-frozen-lookup-and-row-scan",
+  "experiment": "abcdf-source-page-validation-compare",
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
   "upstream_policy": "Upstream snapshots unchanged; active Plan ABI removes source-page validation. Exact allowed transformation and thread1 mode publication remain checked.",
   "kernels": {
+    "abcdf_pages": "sparse_kv_plan_kernel_plan_abcdf_pages",
     "abcdf": "sparse_kv_plan_kernel_plan_abcdf",
     "private": "sparse_kv_plan_private_kernel",
     "joint": "sparse_kv_plan_joint_kernel",
@@ -45,7 +46,7 @@
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
     "build_joint_plan.sh": "3f260db9d4a066fd65e16e1da4c22862a295446ecc44a8c0868a9a81c9d3dccc",
-    "joint_plan/CMakeLists.txt": "4245b2b502bb6735e178f2fddc880459cf381db99d2a46e5b82e295dd4e13c2d",
+    "joint_plan/CMakeLists.txt": "9673bd0a6643262de74cb8029c46c70bbe05cfd4ef56e0c103ed25997ec1d561",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -55,10 +56,10 @@
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
     "joint_plan_cases.py": "6b129c56806312b946b0c33ea3e95a84272a1564cb32c117ff0c42bb33b87174",
-    "joint_plan_common.py": "fff8c1ad659d0dff8866feadd080bb09fd532cf4061697b4929fa94c8bab1f83",
-    "profile_joint_mtp.py": "374c084df1b4993cee5a989f4b120c70e256fcf7ee952dd53f467090ca549a6a",
+    "joint_plan_common.py": "10f288b6d25cc0c895b5b7b39b727639615a1abf624e54c9b8e062b4f4a31260",
+    "profile_joint_mtp.py": "1451038c2e572ae71da44a412a3785359f810d57035d847431b231606a2f3c74",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "9080788c8097883c0d772c867cab174369d45da9fe86ebf280834c9458ffb58d",
+    "checks/check_joint_plan.py": "b73c4a6db3e30f3509fa41c2d2a5191c732677a0850f185e32aaa59f6cb1cc47",
     "checks/check_joint_models.py": "5ffd96070f9695ff15c2fe1d03b3184ebe461f4111c9b6e86858464dd4afdd2e",
     "checks/joint_build_info.py": "fa381043fe011678d1547cd63c35de1d9b34c6bcc904afc439eefdc9d3fab67d",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
@@ -90,7 +91,18 @@
     "csrc/joint_variants/turbo_plan.h": "dba224ed25dc36c87e0a74803eb3dd151da62ebfa82ac25d97aac6f28ef1b603",
     "csrc/joint_variants/turbo_union_experiments.h": "022de9d6e92c0749c25b0e34c744f1f1f1e62cfbccf3a0273d5d69a90a9bc2f2",
     "scripts/test_turbo_phase_scan.sh": "b8c24abc37b44260e4470c1a444df42370e00616a102c82b0e541c2b1c870cb1",
-    "docs/Turbo_分阶段查询与行Scan实验.md": "b4752e0efee97bd2360d4f80490f9beccf4ae926a40e4b4b942b53e04a3b4cce"
+    "docs/Turbo_分阶段查询与行Scan实验.md": "b4752e0efee97bd2360d4f80490f9beccf4ae926a40e4b4b942b53e04a3b4cce",
+    "csrc/abcdf_pages/symbol_aliases.h": "31ed9a1e3edf34e9b550890dc8a408c9c651e343b8d728caf0eea0256841092a",
+    "csrc/abcdf_pages/plugin.cpp": "4ccf2d0acfa7a3b9f1c169fc368ef83d6d67c177b7487a05389d755220cd1db2",
+    "csrc/abcdf_pages/plan_plugin_impl.h": "0d344379aa4f7f406f5adfe55f52dc67ec8c8883b544d3e50253d5da58d4bd05",
+    "csrc/abcdf_pages/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
+    "csrc/abcdf_pages/variant_config.h": "e46868124d3b5b534852f3fb6ad2044af9671e43414d43b15d677896e7a9ec43",
+    "csrc/abcdf_pages/plan_kernel_impl.h": "6564d52abe1b41ca60df8b4bb27dae6cc4fa0430473b6c3bfeb0056a4ef25e84",
+    "csrc/abcdf_pages/kernel.cpp": "5a8afa7ecc3040e5c7b455090d19a645803af2e58b48374bf559d1a481e66963",
+    "csrc/abcdf_pages/sparse_kv_plan_launch.h": "64bad93a9edc031f358eebe312ba9be8dc784a17229bffec7009ba2b410b0222",
+    "scripts/test_abcdf_page_compare.sh": "df4f32f11749f8f1eeba165e42536356226026afc63acad74ab7dd2790d2f348",
+    "docs/ABCDF_页表对照.md": "e0699441c28775d41a6141108ef3fca5ca5b5e4685143ea5880a2d6d76cd4184",
+    "checks/check_abcdf_pages_adapter.py": "c496a4ae142965d5bb7c932653cee1cfd5a63030a571f62f3c3ad08bbb716b98"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -151,5 +163,11 @@
       "joint_turbo_ab"
     ],
     "status": "CPU/static validation only; CANN/NPU/performance unverified"
+  },
+  "page_validation_reference": {
+    "commit": "75cf8b29cbb7fe1d7d40cd33533017b03d35e53d",
+    "path": "csrc/abcdf_pages",
+    "policy": "four common headers preserved verbatim from 75cf8b2; wrapper symbols renamed only",
+    "hardware_validation": "pending"
   }
 }

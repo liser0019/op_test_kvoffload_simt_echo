@@ -73,7 +73,7 @@ def execution_order(names, iteration):
 
 
 def duration_ratios(stats):
-    pairs = [("private", "abcdf"), ("joint", "abcdf"), ("private", "joint")]
+    pairs = [("abcdf_pages", "abcdf"), ("private", "abcdf"), ("joint", "abcdf"), ("private", "joint")]
     pairs += [(name, base) for name in stats if name in common.VARIANTS
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
     pairs += [("joint_bitmap", "joint_abc"), ("joint_turbo", "joint_abc"),
@@ -210,7 +210,7 @@ def report_text(report):
             lines.append(f"| {run['comparison']} | {w['scenario']}/{w['overlap']} | {w['mtp']} | "
                 f"{w['requests']}/{w['query_rows']} | {name} | {stat['p50_us']:.3f} | {stat['p95_us']:.3f} | "
                 f"{stat['count']} | {c['total_transfer_descriptors']} | " +
-                ("不适用 |" if name == "abcdf" else f"{c['joint_groups']}/{c['overflow_groups']} |"))
+                ("不适用 |" if name in ("abcdf", "abcdf_pages") else f"{c['joint_groups']}/{c['overflow_groups']} |"))
     lines += ["", "## 同一MTP输入下：三方耗时比", "",
               "比值均为左侧P50除以右侧P50；大于1表示左侧耗时更长。", "",
               "| 对照 | 工况/重合模式 | MTP | private/abcdf | joint/abcdf | private/joint |",

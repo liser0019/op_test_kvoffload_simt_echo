@@ -165,7 +165,17 @@ foreach(_name a b ab c ac bc abc d ad bd abd cd acd bcd abcd bitmap turbo turbo_
     set_source_files_properties("${_object}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
     list(APPEND JOINT_VARIANT_OBJECTS "${_object}")
 endforeach()
-add_library(mtp_joint_plan_ops SHARED "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
+set(ABCDF_PAGES_DIR "${JOINT_ROOT}/csrc/abcdf_pages")
+set(ABCDF_PAGES_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/abcdf_pages.o")
+file(GLOB ABCDF_PAGES_HEADERS CONFIGURE_DEPENDS "${ABCDF_PAGES_DIR}/*.h")
+add_custom_command(OUTPUT "${ABCDF_PAGES_OBJECT}"
+    COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+        ${JOINT_FLAGS} ${JOINT_INCLUDES} -I${ABCDF_PAGES_DIR}
+        -c "${ABCDF_PAGES_DIR}/kernel.cpp" -o "${ABCDF_PAGES_OBJECT}"
+    DEPENDS "${ABCDF_PAGES_DIR}/kernel.cpp" ${ABCDF_PAGES_HEADERS}
+        "${JOINT_ROOT}/joint_plan_manifest.json" VERBATIM)
+set_source_files_properties("${ABCDF_PAGES_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+add_library(mtp_joint_plan_ops SHARED "${ABCDF_PAGES_DIR}/plugin.cpp" "${ABCDF_PAGES_OBJECT}" "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
     "${JOINT_OBJECT}" "${ABCDF_DIR}/plugin.cpp" "${ABCDF_OBJECT}"
     "${JOINT_VARIANT_DIR}/plugin.cpp" ${JOINT_VARIANT_OBJECTS})
 target_include_directories(mtp_joint_plan_ops PRIVATE "${JOINT_GENERATED}")
