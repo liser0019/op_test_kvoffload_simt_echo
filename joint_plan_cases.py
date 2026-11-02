@@ -11,7 +11,7 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint", "overlap40")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
@@ -20,12 +20,12 @@ def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=Fals
     if bitmap and joint:
         scratch = max(row, (max_token + 31) // 32 + 2 * capacity)
     if sorted_union and joint:
-        scratch=max(row,64+((4*topk+capacity+7)&~7)+max(3*capacity,64))
+        scratch=max(row,(128 if union_next else 64)+((4*topk+capacity+7)&~7)+max(3*capacity,64))
     aligned = (scratch * 4 + 31) & ~31
     ub = aligned <= 112 * 1024
     return {"hash_capacity": h, "joint_hash_capacity": j, "scratch_elements": scratch,
             "workspace_elements": rows * (scratch + max_token) if bitmap else (1 if ub else rows * scratch),
-            "dynamic_ub_bytes": 288 + (aligned if ub else ((64+16*(min(768,max(64,3*capacity)//16)//4*4))*4 if sorted_union else 0)), "scratch_path": "UB" if ub else "GM"}
+            "dynamic_ub_bytes": 288 + (aligned if ub else (((128 if union_next else 64)+16*(min(768,max(64,3*capacity)//16)//4*4))*4 if sorted_union else 0)), "scratch_path": "UB" if ub else "GM"}
 
 
 def groups(case, joint):
@@ -176,7 +176,7 @@ def describe(case):
             "logical_input_sha256": array_hash({k: case[k] for k in (*INPUTS, "last_req_ids", "slot_to_token", "lru_slots")})}
 
 
-def validate(case, before, actual, joint, max_group_queries=None, merge=False, float_keys=False):
+def validate(case, before, actual, joint, max_group_queries=None, merge=False, float_keys=False, preserve_tail=False, single_sorted=False):
     """Private对独立golden逐字段比较；joint对集合、LRU、miss填充和逐行寻址完整校验。"""
     expected = {key: value.copy() for key, value in before.items()}
     sets, group_info = valid_sets(case), []
@@ -219,6 +219,21 @@ def validate(case, before, actual, joint, max_group_queries=None, merge=False, f
                 for key in ("last_req_ids", "slot_to_token", "lru_slots", "current_slots", "miss_count"):
                     expected[key][row] = gold[key][0]
                 count = int(gold["miss_count"][0])
+                if single_sorted and end-first==1:
+                    query=case["topk_indices"][row];qbits=max(1,(topk-1).bit_length())
+                    reset=(before["row_modes"][row]!=0 or before["last_req_ids"][row]!=case["req_ids"][request]) if 0<=request<len(case["req_ids"]) else True
+                    stable=max(0,min(case["max_token"],int(case["stable_prefix_lens"][row])))
+                    selected=[] if reset else [int(s) for s in before["lru_slots"][row]
+                        if 0<=int(before["slot_to_token"][row,s])<stable and int(before["slot_to_token"][row,s]) in sets[row]]
+                    hit_tokens={int(before["slot_to_token"][row,s]) for s in selected}
+                    eligible=(0<=request<len(case["req_ids"]) and capacity<=32768 and topk<=65535 and case["max_token"]<=16777216
+                        and (case["max_token"]-1)*(1<<qbits)<=0xffffffff and np.all(query[1:]>query[:-1])
+                        and len(sets[row]-hit_tokens)<=capacity-len(selected))
+                    if eligible:
+                        group_info[-1]["path"]="private_sorted"
+                        if preserve_tail:
+                            for key in ("miss_tokens","miss_slots"):
+                                np.testing.assert_array_equal(actual[key][row,count:],before[key][row,count:],err_msg="single sorted preserved tail")
                 for key in ("miss_tokens", "miss_slots"):
                     np.testing.assert_array_equal(actual[key][row, :count], gold[key][0, :count], err_msg=key)
                 expected["row_modes"][row] = 0
@@ -255,7 +270,7 @@ def validate(case, before, actual, joint, max_group_queries=None, merge=False, f
         if merge:
             for row, n in zip(range(first, end), expected_counts):
                 for key in ("miss_tokens", "miss_slots"):
-                    np.testing.assert_array_equal(actual[key][row, n:], -1, err_msg="merge unused descriptor tail")
+                    np.testing.assert_array_equal(actual[key][row, n:], before[key][row, n:] if preserve_tail else -1, err_msg="merge unused descriptor tail")
         for row, n in zip(range(first, end), expected_counts):
             expected["miss_count"][row] = n
             expected["row_modes"][row] = 1 if row == first else 2
@@ -284,6 +299,8 @@ def validate(case, before, actual, joint, max_group_queries=None, merge=False, f
                 raise AssertionError("不可见/非法token必须输出-1，不能使用其他行加载的未来token")
     return {"status": "passed", "groups": group_info,
             "joint_groups": sum(g["path"] == "joint" for g in group_info),
+            "single_sorted_groups": sum(g["path"] == "private_sorted" for g in group_info),
+            "descriptor_tail_contract": "preserve on sorted path; original fallback unchanged" if preserve_tail else "original contract",
             "overflow_groups": sum(g["path"] == "overflow_private" for g in group_info),
             "miss_count_per_row": actual["miss_count"][:active].astype(int).tolist(),
             "total_transfer_descriptors": int(actual["miss_count"][:active].sum())}

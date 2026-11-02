@@ -25,10 +25,24 @@ HW_OPTIONS={"a":"no empty refill / direct single queue", "b":"32-bin resident se
 HW_SWEEP={"hw_"+"".join(c for i,c in enumerate(HW_OPTIONS) if bits&(1<<i)):38+bits for bits in range(1,32)}
 HW_SWEEP.update(hw_abcd_512=70,hw_bcd_512=71,hw_ac_512=72,hw_c_512=73)
 MASKS.update(HW_SWEEP)
+UNION_OPTIONS = {"a": "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+                 "b": "uint16 query-to-union map in UB, int32 GM fallback",
+                 "c": "fuse consumed-packet processing with next refill preparation",
+                 "d": "initialize invalid queries only; preserve unused miss descriptor tail"}
+UNION_SWEEP = {"union_" + ("".join(c for i,c in enumerate(UNION_OPTIONS) if bits & (1<<i)) or "base") + "_" + str(threads):
+               74 + group*16 + bits for group,threads in enumerate((1024,512,256)) for bits in range(16)}
+MASKS.update(UNION_SWEEP)
+UNION_NAMES=tuple("joint_"+n for n in UNION_SWEEP)
+def union_config(name):
+    mask=VARIANTS.get(name,0)
+    if mask<74: return None
+    return {"bits":(mask-74)%16,"threads":(1024,512,256)[(mask-74)//16],"single_sorted":True,
+            "descriptor_tail":"preserve" if (mask-74)&8 else "minus_one"}
+
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
-SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES)
+SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 74))
+TURBO_MASKS = tuple(range(17, 122))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
@@ -39,6 +53,13 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask >= 74:
+        c=union_config(name)
+        return {"mask":mask,**c,"structure":"AC hardware foundation + new ABCD factorial",
+                "merge_engine":"hardware MrgSort", "optimizations":[v for i,v in enumerate(UNION_OPTIONS.values()) if c["bits"]&(1<<i)],
+                "baseline":"abcdf_pages", "hardware_reference":"joint_hw_ac_512",
+                "single_contract":"strictly increasing input uses sorted private protocol; duplicate rows fall back",
+                "private_fallback_threads":1024}
     if mask >= 39:
         bits=mask-38 if mask<=69 else {70:15,71:14,72:5,73:4}[mask]
         return {"mask":mask,"hardware_bits":bits,"threads":512 if mask>=70 else 256 if bits&16 else 1024,

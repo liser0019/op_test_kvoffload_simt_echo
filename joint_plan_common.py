@@ -80,9 +80,11 @@ def prepare(torch, case, name, inputs=None):
     if name in MERGE_NAMES:
         require_sorted_topk(case)
     enabled = is_joint(name) and case["mtp"] > 0
+    union_next = name.startswith("joint_union_")
+    controller_enabled = enabled or union_next
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
-    info = layout(case["topk"], case["capacity"], case["rows"], enabled, case["max_token"],
-                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES)
+    info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
+                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next)
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name in INDEPENDENT:
         host = {key: case[key].copy() for key in ABCDF_STATE}
@@ -108,7 +110,7 @@ def prepare(torch, case, name, inputs=None):
                                    else ("topk", "capacity", "max_token", "block_size"))]
     context = None
     if name not in INDEPENDENT:
-        attrs.append(int(enabled))
+        attrs.append(int(controller_enabled))
         if name in VARIANTS:
             context = torch.classes.mtp_joint_plan.PreparedVariant(ordered, attrs, is_joint(name), VARIANTS[name])
         else:
@@ -128,10 +130,12 @@ def prepare(torch, case, name, inputs=None):
         "joint_enabled": 0, "dynamic_ub_bytes": info["dynamic_ub_bytes"],
         "interface": "independent ABCDF without source-page validation, 14 tensors + 3 attributes (no block_table)",
         "tiling_upload": "per_call_original_interface; excluded by kernel-duration filter"}
-    if native["dynamic_ub_bytes"] != info["dynamic_ub_bytes"] or native["joint_enabled"] != int(enabled):
+    if native["dynamic_ub_bytes"] != info["dynamic_ub_bytes"] or native["joint_enabled"] != int(controller_enabled):
         raise AssertionError("Python/C++ tiling模型不一致")
     if name in VARIANTS and native.get("variant_mask") != VARIANTS[name]:
         raise AssertionError("Prepared variant mask mismatch")
+    native["logical_joint_enabled"] = bool(enabled)
+    native["single_sorted_requested"] = union_next and case["mtp"] == 0
     if name in PAGED_NAMES:
         native["interface"] = "independent ABCDF with source-page validation, 15 tensors + 5 attributes"
         native["page_table_sha256"] = hashlib.sha256(table.tobytes()).hexdigest()
@@ -195,7 +199,7 @@ def check(case, bundle, before=None):
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
     if bundle["name"] in SORTED_NAMES: max_queries=4*case["topk"] if bundle["joint_enabled"] else None
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES)
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=bundle["name"].startswith("joint_union_"))
 
 
 def dump_failure(case, bundle, destination):

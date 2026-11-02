@@ -7,16 +7,18 @@ JOINT_RESOURCES=OFF
 JOINT_MERGE_ONLY=OFF
 JOINT_SORTED_ONLY=OFF
 JOINT_SWEEP_ONLY=OFF
+JOINT_UNION_ONLY=OFF
 for arg in "$@"; do
   case "$arg" in
     --soc=ascend950) ;;
     --merge-only) JOINT_MERGE_ONLY=ON ;;
     --sorted-only) JOINT_SORTED_ONLY=ON ;;
     --sweep-only) JOINT_SWEEP_ONLY=ON ;;
+    --union-only) JOINT_UNION_ONLY=ON ;;
     --debug-info) JOINT_DEBUG=ON ;;
     --resource-usage) JOINT_RESOURCES=ON ;;
     --help|-h)
-      echo "用法: PYTHON=python3 JOBS=3 bash build_joint_plan.sh [--soc=ascend950] [--debug-info] [--resource-usage] [--merge-only] [--sorted-only] [--sweep-only]"
+      echo "用法: PYTHON=python3 JOBS=3 bash build_joint_plan.sh [--soc=ascend950] [--debug-info] [--resource-usage] [--merge-only] [--sorted-only] [--sweep-only] [--union-only]"
       exit 0 ;;
     *) echo "未知参数: $arg" >&2; exit 2 ;;
   esac
@@ -27,14 +29,16 @@ JOINT_PYTHON="$(command -v -- "${PYTHON:-python3}")"
 JOINT_ARGS=(-S "$JOINT_ROOT/joint_plan" -B "$JOINT_BUILD_DIR"
   -DCMAKE_BUILD_TYPE=Release -DNPU_ARCH=ascend950
   -DPython3_EXECUTABLE="$JOINT_PYTHON" -DJOINT_DEBUG_INFO="$JOINT_DEBUG"
-  -DJOINT_RESOURCE_USAGE="$JOINT_RESOURCES" -DJOINT_MERGE_ONLY="$JOINT_MERGE_ONLY" -DJOINT_SORTED_ONLY="$JOINT_SORTED_ONLY" -DJOINT_SWEEP_ONLY="$JOINT_SWEEP_ONLY")
+  -DJOINT_RESOURCE_USAGE="$JOINT_RESOURCES" -DJOINT_MERGE_ONLY="$JOINT_MERGE_ONLY" -DJOINT_SORTED_ONLY="$JOINT_SORTED_ONLY" -DJOINT_SWEEP_ONLY="$JOINT_SWEEP_ONLY" -DJOINT_UNION_ONLY="$JOINT_UNION_ONLY")
 for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
   if [[ -n "${!name:-}" ]]; then JOINT_ARGS+=("-D$name=${!name}"); fi
 done
 cmake "${JOINT_ARGS[@]}"
 cmake --build "$JOINT_BUILD_DIR" --target mtp_joint_plan_ops --parallel "${JOBS:-3}"
 echo "产物: $JOINT_BUILD_DIR/libmtp_joint_plan_ops.so"
-if [[ "$JOINT_SWEEP_ONLY" == ON ]]; then
+if [[ "$JOINT_UNION_ONLY" == ON ]]; then
+  echo "下一步: bash scripts/test_union_next.sh --skip-build (NPU0，新ABCD×1024/512/256，初筛与独立复测)"
+elif [[ "$JOINT_SWEEP_ONLY" == ON ]]; then
   echo "下一步: bash scripts/test_hardware_sweep.sh (NPU0，一次启动筛选和复测)"
 elif [[ "$JOINT_SORTED_ONLY" == ON ]]; then
   echo "下一步: bash scripts/test_sorted_hardware.sh (NPU0，专项门禁后同场profiling)"

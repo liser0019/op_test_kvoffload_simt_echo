@@ -78,6 +78,7 @@ def duration_ratios(stats):
     pairs += [(name, base) for name in stats if name in common.VARIANTS
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
     pairs += [(n, base) for n in common.MERGE_NAMES for base in ("abcdf_pages", "joint_merge", "joint_merge_bd", "joint_sorted_mrgsort", "private_turbo") if n != base]
+    pairs += [(n,"joint_hw_ac_512") for n in stats if n.startswith("joint_union_")]
     pairs += [("joint_bitmap", "joint_abc"), ("joint_turbo", "joint_abc"),
               ("joint_turbo", "joint_bitmap"), ("private_turbo", "private_a")]
     pairs += [(name, base) for name in stats if name in ("joint_turbo_a", "joint_turbo_b", "joint_turbo_ab")
@@ -294,7 +295,7 @@ def report_text(report):
                     lines.append(f"| {w['scenario']}/{w['overlap']} | {w['mtp']} | {n} | {run['stats'][n]['p50_us']:.3f} | " + " | ".join(ratios) + " |")
     if any(any(n in common.SORTED_NAMES for n in run["stats"]) for run in report["runs"]):
         lines += ["", "## 无 resident Hash：流式有序并集", "",
-                  "sorted_stream与sorted_mrgsort使用同一规划主体，后者在MTP1/3多路有效输入时调用硬件MrgSort。MTP0不执行归并。",
+                  "sorted_stream与sorted_mrgsort使用同一规划主体，后者在MTP1/3多路有效输入时调用硬件MrgSort。MTP0不执行多路归并；joint_union_*额外测试单行有序private路径。",
                   "| 工况 | MTP | 实现 | P50 μs | 候选/ABCDF | 候选/原Merge | 候选/BD |", "|---|---:|---|---:|---:|---:|---:|"]
         for run in report["runs"]:
             w=run["workload"]

@@ -1,5 +1,5 @@
 {
-  "experiment": "hardware-five-factor-sweep-confirm",
+  "experiment": "hardware-union-next-abcd-threads-single-sorted",
   "framework_base": "a5beb2500dfee0af0a0004990f7f2be62305bae2",
   "upstream_commit": "bba63d05762a467e496c0f8a8ae687dc632a706f",
   "threads": 1024,
@@ -31,9 +31,6 @@
     "joint_turbo_a": "sparse_kv_plan_joint_kernel_turbo_a",
     "joint_turbo_b": "sparse_kv_plan_joint_kernel_turbo_b",
     "joint_turbo_ab": "sparse_kv_plan_joint_kernel_turbo_ab",
-    "abcdf_pages_a": "sparse_kv_plan_kernel_plan_abcdf_pages_a",
-    "abcdf_pages_b": "sparse_kv_plan_kernel_plan_abcdf_pages_b",
-    "abcdf_pages_ab": "sparse_kv_plan_kernel_plan_abcdf_pages_ab",
     "joint_merge": "sparse_kv_plan_joint_kernel_merge",
     "joint_merge_a": "sparse_kv_plan_joint_kernel_merge_a",
     "joint_merge_b": "sparse_kv_plan_joint_kernel_merge_b",
@@ -86,7 +83,58 @@
     "joint_hw_abcd_512": "sparse_kv_plan_joint_kernel_hw_abcd_512",
     "joint_hw_bcd_512": "sparse_kv_plan_joint_kernel_hw_bcd_512",
     "joint_hw_ac_512": "sparse_kv_plan_joint_kernel_hw_ac_512",
-    "joint_hw_c_512": "sparse_kv_plan_joint_kernel_hw_c_512"
+    "joint_hw_c_512": "sparse_kv_plan_joint_kernel_hw_c_512",
+    "joint_union_base_1024": "sparse_kv_plan_joint_kernel_union_base_1024",
+    "joint_union_a_1024": "sparse_kv_plan_joint_kernel_union_a_1024",
+    "joint_union_b_1024": "sparse_kv_plan_joint_kernel_union_b_1024",
+    "joint_union_ab_1024": "sparse_kv_plan_joint_kernel_union_ab_1024",
+    "joint_union_c_1024": "sparse_kv_plan_joint_kernel_union_c_1024",
+    "joint_union_ac_1024": "sparse_kv_plan_joint_kernel_union_ac_1024",
+    "joint_union_bc_1024": "sparse_kv_plan_joint_kernel_union_bc_1024",
+    "joint_union_abc_1024": "sparse_kv_plan_joint_kernel_union_abc_1024",
+    "joint_union_d_1024": "sparse_kv_plan_joint_kernel_union_d_1024",
+    "joint_union_ad_1024": "sparse_kv_plan_joint_kernel_union_ad_1024",
+    "joint_union_bd_1024": "sparse_kv_plan_joint_kernel_union_bd_1024",
+    "joint_union_abd_1024": "sparse_kv_plan_joint_kernel_union_abd_1024",
+    "joint_union_cd_1024": "sparse_kv_plan_joint_kernel_union_cd_1024",
+    "joint_union_acd_1024": "sparse_kv_plan_joint_kernel_union_acd_1024",
+    "joint_union_bcd_1024": "sparse_kv_plan_joint_kernel_union_bcd_1024",
+    "joint_union_abcd_1024": "sparse_kv_plan_joint_kernel_union_abcd_1024",
+    "joint_union_base_512": "sparse_kv_plan_joint_kernel_union_base_512",
+    "joint_union_a_512": "sparse_kv_plan_joint_kernel_union_a_512",
+    "joint_union_b_512": "sparse_kv_plan_joint_kernel_union_b_512",
+    "joint_union_ab_512": "sparse_kv_plan_joint_kernel_union_ab_512",
+    "joint_union_c_512": "sparse_kv_plan_joint_kernel_union_c_512",
+    "joint_union_ac_512": "sparse_kv_plan_joint_kernel_union_ac_512",
+    "joint_union_bc_512": "sparse_kv_plan_joint_kernel_union_bc_512",
+    "joint_union_abc_512": "sparse_kv_plan_joint_kernel_union_abc_512",
+    "joint_union_d_512": "sparse_kv_plan_joint_kernel_union_d_512",
+    "joint_union_ad_512": "sparse_kv_plan_joint_kernel_union_ad_512",
+    "joint_union_bd_512": "sparse_kv_plan_joint_kernel_union_bd_512",
+    "joint_union_abd_512": "sparse_kv_plan_joint_kernel_union_abd_512",
+    "joint_union_cd_512": "sparse_kv_plan_joint_kernel_union_cd_512",
+    "joint_union_acd_512": "sparse_kv_plan_joint_kernel_union_acd_512",
+    "joint_union_bcd_512": "sparse_kv_plan_joint_kernel_union_bcd_512",
+    "joint_union_abcd_512": "sparse_kv_plan_joint_kernel_union_abcd_512",
+    "joint_union_base_256": "sparse_kv_plan_joint_kernel_union_base_256",
+    "joint_union_a_256": "sparse_kv_plan_joint_kernel_union_a_256",
+    "joint_union_b_256": "sparse_kv_plan_joint_kernel_union_b_256",
+    "joint_union_ab_256": "sparse_kv_plan_joint_kernel_union_ab_256",
+    "joint_union_c_256": "sparse_kv_plan_joint_kernel_union_c_256",
+    "joint_union_ac_256": "sparse_kv_plan_joint_kernel_union_ac_256",
+    "joint_union_bc_256": "sparse_kv_plan_joint_kernel_union_bc_256",
+    "joint_union_abc_256": "sparse_kv_plan_joint_kernel_union_abc_256",
+    "joint_union_d_256": "sparse_kv_plan_joint_kernel_union_d_256",
+    "joint_union_ad_256": "sparse_kv_plan_joint_kernel_union_ad_256",
+    "joint_union_bd_256": "sparse_kv_plan_joint_kernel_union_bd_256",
+    "joint_union_abd_256": "sparse_kv_plan_joint_kernel_union_abd_256",
+    "joint_union_cd_256": "sparse_kv_plan_joint_kernel_union_cd_256",
+    "joint_union_acd_256": "sparse_kv_plan_joint_kernel_union_acd_256",
+    "joint_union_bcd_256": "sparse_kv_plan_joint_kernel_union_bcd_256",
+    "joint_union_abcd_256": "sparse_kv_plan_joint_kernel_union_abcd_256",
+    "abcdf_pages_a": "sparse_kv_plan_kernel_plan_abcdf_pages_a",
+    "abcdf_pages_b": "sparse_kv_plan_kernel_plan_abcdf_pages_b",
+    "abcdf_pages_ab": "sparse_kv_plan_kernel_plan_abcdf_pages_ab"
   },
   "mtp": [
     0,
@@ -101,8 +149,8 @@
   "hardware_validation": "not_run_on_development_machine",
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
-    "build_joint_plan.sh": "641604f50c8df393f58baae9bca1205d661631d4ee360e4515f811eaf20b4f92",
-    "joint_plan/CMakeLists.txt": "48fbc4451038b218d0e6c752050fa5454c9c2463d58aa51db953f5161e3abc54",
+    "build_joint_plan.sh": "e3688c8037a63c22da93d08f569cb1c600e849bb1197597fc168e1850f9a962e",
+    "joint_plan/CMakeLists.txt": "99bc4db1d8d243c928fee88608fe9af7021821be784db2572ec3a7d1a88536cb",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -111,12 +159,12 @@
     "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
-    "joint_plan_cases.py": "a70a5698dc5fa7f2cf0b370d106d2e189534b40209b96dbe67188e8309d9ccd8",
-    "joint_plan_common.py": "67063e73c8b2a8908800a10f4b44b883ea01c44240aec1f57a5b70c9779c6ae0",
-    "profile_joint_mtp.py": "a3179ad9777ff92639ce39ab05fccaf6d4d6ba8bc988318b6d968c4b69620b3b",
+    "joint_plan_cases.py": "8ba5ed6fa161937684f90e57240ac660c0211ea16685190ba9ee8b70199ee9b8",
+    "joint_plan_common.py": "7bfb16ece426d0ac5cd77a58c37e7e67dec855b27f5120d49c447387456a9350",
+    "profile_joint_mtp.py": "2a5847f9018311d66ca5b4ad8c1d4dd02347a31c7714461adf978582eefc37fa",
     "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
     "checks/check_joint_plan.py": "fc00820dcfb69f2f68da638de85a1ae4cf18f2acb1b279d467b315066377af72",
-    "checks/check_joint_models.py": "e8517b744025bdfe5d564450c2ec60bd2a182e211717d446dfa9b1372c9a7b81",
+    "checks/check_joint_models.py": "86f77c255095d926997841ff3ffc589aa40b8b541df76f3d80dfcae1a75199ec",
     "checks/joint_build_info.py": "fa381043fe011678d1547cd63c35de1d9b34c6bcc904afc439eefdc9d3fab67d",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "b368b278d50c6982fd408ef2a80eb8f79e1faa7f8589922ee6f69caf66900c54",
@@ -131,15 +179,15 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "5b58829a0137451c1f7c9c2a77c090eb59281dcf04c9854aedd6e62cf8719242",
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "joint_variants.py": "d9959b2738a19f574a0220f7f2432d5d01a825741099a8014e53132a3365b697",
-    "checks/generate_joint_variants.py": "4217b3c3144461a83e5e3005da8752d8f368c9ff291c97313988e48ff6b6c80e",
-    "checks/check_joint_variant_kernels.py": "199b3558f6f7f981bca5eb2a22f2b94a2756821a651ae1522d52e1d01d1ffd4e",
-    "checks/joint_variant_cpu_driver.cpp": "2f8a77f83a5bc8dc076f4bdef73230cc82b00e72f916aa29cf8902ebb1ad28c7",
+    "joint_variants.py": "f60ef56c4fbfd52aef75acc65266baa024b5ddbc69d6e33317f6ec3e5a64fc5a",
+    "checks/generate_joint_variants.py": "7a034efed2803666a5e4395454f2040d253c44cd439d32e9b6191c2868c8486e",
+    "checks/check_joint_variant_kernels.py": "4353b3a0dde8d0be86685af5df872686afe5297675c1168a4d5af45659538b2d",
+    "checks/joint_variant_cpu_driver.cpp": "f9ab7cb8c0926a230abf90b479dbcf91bd36a7cab316e636e25aca6423d84db1",
     "checks/simt_variants/cpu_runtime.h": "ff548eac8dbb18c69c6266adb4958f5e1c52b8e5cf096e30edddc452467b7471",
     "csrc/joint_variants/sparse_kv_joint_plan.h": "c49bb5a237e4d97d90744a2faa73b8e942037ac7bb36756fd9e80ad91748d1c9",
-    "csrc/joint_variants/plugin.cpp": "42b2d3caa3826707cbdee9c027c74e7de0f62073867494a2999d5e7cd037f356",
-    "csrc/joint_variants/options.h": "6197ee9a19f4408dc55aafe4011c0b86d32b0d8ef8d186e7d1d738a8d4535f29",
-    "csrc/joint_variants/kernel.cpp": "098104642ee06cbd288094c1d3835b1137ed92589a8986449b8dd5944c68b059",
+    "csrc/joint_variants/plugin.cpp": "d5d75e982944d76d58baf0f11e59e75cf14f79533aaaae34e994321685eb9327",
+    "csrc/joint_variants/options.h": "4b66a8f8d25d1d71cebca1ae98bf74b70c928358c01a1626ea62f5ffee13bb18",
+    "csrc/joint_variants/kernel.cpp": "3570cf8e30affc8f7fa3db4bf93a4e40319e34cd0665be14d2aee79626e996f4",
     "csrc/joint_variants/bitmap_plan.h": "f667fe4216b90bc24eb4ce7113025e1d9ebc5a739860cdeaf170f0e12e1d3eb2",
     "checks/run_bitmap_single_vf_probe.py": "ac44c6b9cfcbe022c568908759dd733326a2693aaa5110ce570a25629bce08d7",
     "checks/check_bitmap_launch_structure.py": "9bd0e0aa1ff1c3bb52871945b56e503d4165864f76b9ad88de710dd7fe2b8182",
@@ -185,8 +233,8 @@
     "scripts/test_merge_abcd.sh": "1762e5005b2fa69574c9c183e945e69294665b395a4bdd470be1a1949289f764",
     "checks/check_merge_abcd_npu.py": "fcc06c2e1695b26df37ffd9240df1fdd31825d34db36df083e259bf79c798fb7",
     "checks/check_merge_abcd.py": "e9010fcf1a465814a3f2f6b60888d2e10e215cfd5b92944d8b520fa8520a7c48",
-    "checks/check_merge_catalog.py": "67a921840097483415abdc5b21287cd9df44dc91ba765b69c5f14610f7d89d19",
-    "checks/simt_variants/sorted_cann_cpu.h": "d273cd7433c4c7d1fcfc8211b30f471a0925fe49592a13481df93fd4a0c68d0a",
+    "checks/check_merge_catalog.py": "7be08f376bf30c7f3c495cda70ff93b009f2c8cb3813e439c8ff7f385105e9ff",
+    "checks/simt_variants/sorted_cann_cpu.h": "deac7d028983a34701e71c990b8f603dfd5a194ea2bd05cf3c3a66732549a91f",
     "docs/无Hash与硬件归并实验.md": "2c4c346daf1fc6c460a1bb4d245c9e32f4d19b024f98a8f08f0612bdc2d2583f",
     "csrc/joint_variants/sorted_stage.h": "4211576da32eacd78af61506a79aa76c940348ac5d4bf5c1713486480913fac6",
     "scripts/test_sorted_hardware.sh": "33e6bd4f69355a3a99b264cd1b15cc3ec0e86dff9760e6d7083c28df0b802d73",
@@ -198,7 +246,16 @@
     "csrc/joint_variants/sorted_sweep_stage.h": "81aafbbfe266818c9427170a2ea6cf3ffb03b4f49ea95d8ebb1ecc87aa18e71b",
     "docs/硬件归并五因素批量实验.md": "7a42b1e8513a73b6b9ee6bd59b7ff77b9e46e41b87026475b49cddae4fcb727e",
     "checks/check_sweep_runner.py": "67a5d6ea36ce20478f4143ad6ee7db8cdbe910ea68fc949b4258fd183764b77d",
-    "scripts/test_hardware_sweep.sh": "c389e3cc85ab7b9ac1e27f14156b68b9bf6c3d12b737ec9f8250ceb5ac09764f"
+    "scripts/test_hardware_sweep.sh": "c389e3cc85ab7b9ac1e27f14156b68b9bf6c3d12b737ec9f8250ceb5ac09764f",
+    "csrc/joint_variants/union_next_stage.h": "6386b024369eef74dbadd8493552e9ca36c51a55ab6a67fe4881f4d77e328129",
+    "csrc/joint_variants/union_next_controller.h": "31d4673df902f361d64cbc3e65c79c10d9a9c10117963e707ddd994827f72477",
+    "csrc/joint_variants/union_next_simd.h": "dbd928b7ba002eef746e02845faa76c19592cd22d28b59790bc432b693716a11",
+    "checks/check_union_next.py": "e5348e9c4f9588899937b5be7f8cb9c05126dfebc497cea252643a954c9a5fd0",
+    "checks/check_union_next_npu.py": "44b71e54174715fee86d88a3a990c15fdac557fa9e5a615a3fe502e8fbe35d57",
+    "checks/check_union_next_runner.py": "932a016ee6d11884246e07ced631b11b75101f665395125ed6b31a30b8a0829c",
+    "run_union_next_sweep.py": "0e98c69997ce98516817b75a404989a53fd4808bb0854f8d8cd909e067c77e12",
+    "scripts/test_union_next.sh": "00611d62b934b55a67899dbdb8823707a24753079642a54c62406665af5c8021",
+    "docs/硬件归并_ABCD与线程对照.md": "d5978c44740a2cd6a4490c0776f919ee26a0d3d3e8f9ec778d9e5d6f5a94cdca"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -213,7 +270,7 @@
     "interface": "14 tensors + 3 attributes; source-page validation removed; no joint metadata",
     "kernel": "sparse_kv_plan_kernel_plan_abcdf"
   },
-  "optimization_base": "f5b44bf215de903b8f0666420f2c85b180265905",
+  "optimization_base": "b7020a702cedd07fe0ca863fcfaaa83fb6b0189e",
   "joint_variant_masks": {
     "private_a": 1,
     "private_turbo": 17,
@@ -289,7 +346,55 @@
     "joint_hw_abcd_512": 70,
     "joint_hw_bcd_512": 71,
     "joint_hw_ac_512": 72,
-    "joint_hw_c_512": 73
+    "joint_hw_c_512": 73,
+    "joint_union_base_1024": 74,
+    "joint_union_a_1024": 75,
+    "joint_union_b_1024": 76,
+    "joint_union_ab_1024": 77,
+    "joint_union_c_1024": 78,
+    "joint_union_ac_1024": 79,
+    "joint_union_bc_1024": 80,
+    "joint_union_abc_1024": 81,
+    "joint_union_d_1024": 82,
+    "joint_union_ad_1024": 83,
+    "joint_union_bd_1024": 84,
+    "joint_union_abd_1024": 85,
+    "joint_union_cd_1024": 86,
+    "joint_union_acd_1024": 87,
+    "joint_union_bcd_1024": 88,
+    "joint_union_abcd_1024": 89,
+    "joint_union_base_512": 90,
+    "joint_union_a_512": 91,
+    "joint_union_b_512": 92,
+    "joint_union_ab_512": 93,
+    "joint_union_c_512": 94,
+    "joint_union_ac_512": 95,
+    "joint_union_bc_512": 96,
+    "joint_union_abc_512": 97,
+    "joint_union_d_512": 98,
+    "joint_union_ad_512": 99,
+    "joint_union_bd_512": 100,
+    "joint_union_abd_512": 101,
+    "joint_union_cd_512": 102,
+    "joint_union_acd_512": 103,
+    "joint_union_bcd_512": 104,
+    "joint_union_abcd_512": 105,
+    "joint_union_base_256": 106,
+    "joint_union_a_256": 107,
+    "joint_union_b_256": 108,
+    "joint_union_ab_256": 109,
+    "joint_union_c_256": 110,
+    "joint_union_ac_256": 111,
+    "joint_union_bc_256": 112,
+    "joint_union_abc_256": 113,
+    "joint_union_d_256": 114,
+    "joint_union_ad_256": 115,
+    "joint_union_bd_256": 116,
+    "joint_union_abd_256": 117,
+    "joint_union_cd_256": 118,
+    "joint_union_acd_256": 119,
+    "joint_union_bcd_256": 120,
+    "joint_union_abcd_256": 121
   },
   "joint_optimizations": {
     "a": "non-joint VF compile-time isolation (protocol retained)",
@@ -380,5 +485,828 @@
     "hardware_validation": "pending; CPU models only on development machine",
     "selection": "top per nonzero MTP workload; fresh confirmation, separate raw data",
     "reference_policy": "sorted_stage/controller and paged ABCDF byte-preserved"
+  },
+  "union_next": {
+    "reference": "joint_hw_ac_512",
+    "baseline": "abcdf_pages",
+    "candidates": {
+      "joint_union_base_1024": {
+        "mask": 74,
+        "bits": 0,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_a_1024": {
+        "mask": 75,
+        "bits": 1,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_b_1024": {
+        "mask": 76,
+        "bits": 2,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ab_1024": {
+        "mask": 77,
+        "bits": 3,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_c_1024": {
+        "mask": 78,
+        "bits": 4,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ac_1024": {
+        "mask": 79,
+        "bits": 5,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bc_1024": {
+        "mask": 80,
+        "bits": 6,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abc_1024": {
+        "mask": 81,
+        "bits": 7,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_d_1024": {
+        "mask": 82,
+        "bits": 8,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ad_1024": {
+        "mask": 83,
+        "bits": 9,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bd_1024": {
+        "mask": 84,
+        "bits": 10,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abd_1024": {
+        "mask": 85,
+        "bits": 11,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_cd_1024": {
+        "mask": 86,
+        "bits": 12,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_acd_1024": {
+        "mask": 87,
+        "bits": 13,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bcd_1024": {
+        "mask": 88,
+        "bits": 14,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abcd_1024": {
+        "mask": 89,
+        "bits": 15,
+        "threads": 1024,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_base_512": {
+        "mask": 90,
+        "bits": 0,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_a_512": {
+        "mask": 91,
+        "bits": 1,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_b_512": {
+        "mask": 92,
+        "bits": 2,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ab_512": {
+        "mask": 93,
+        "bits": 3,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_c_512": {
+        "mask": 94,
+        "bits": 4,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ac_512": {
+        "mask": 95,
+        "bits": 5,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bc_512": {
+        "mask": 96,
+        "bits": 6,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abc_512": {
+        "mask": 97,
+        "bits": 7,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_d_512": {
+        "mask": 98,
+        "bits": 8,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ad_512": {
+        "mask": 99,
+        "bits": 9,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bd_512": {
+        "mask": 100,
+        "bits": 10,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abd_512": {
+        "mask": 101,
+        "bits": 11,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_cd_512": {
+        "mask": 102,
+        "bits": 12,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_acd_512": {
+        "mask": 103,
+        "bits": 13,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bcd_512": {
+        "mask": 104,
+        "bits": 14,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abcd_512": {
+        "mask": 105,
+        "bits": 15,
+        "threads": 512,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_base_256": {
+        "mask": 106,
+        "bits": 0,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_a_256": {
+        "mask": 107,
+        "bits": 1,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_b_256": {
+        "mask": 108,
+        "bits": 2,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ab_256": {
+        "mask": 109,
+        "bits": 3,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_c_256": {
+        "mask": 110,
+        "bits": 4,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ac_256": {
+        "mask": 111,
+        "bits": 5,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bc_256": {
+        "mask": 112,
+        "bits": 6,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abc_256": {
+        "mask": 113,
+        "bits": 7,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "minus_one",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_d_256": {
+        "mask": 114,
+        "bits": 8,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_ad_256": {
+        "mask": 115,
+        "bits": 9,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bd_256": {
+        "mask": 116,
+        "bits": 10,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abd_256": {
+        "mask": 117,
+        "bits": 11,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_cd_256": {
+        "mask": 118,
+        "bits": 12,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_acd_256": {
+        "mask": 119,
+        "bits": 13,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_bcd_256": {
+        "mask": 120,
+        "bits": 14,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      },
+      "joint_union_abcd_256": {
+        "mask": 121,
+        "bits": 15,
+        "threads": 256,
+        "single_sorted": true,
+        "descriptor_tail": "preserve",
+        "structure": "AC hardware foundation + new ABCD factorial",
+        "merge_engine": "hardware MrgSort",
+        "optimizations": [
+          "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
+          "uint16 query-to-union map in UB, int32 GM fallback",
+          "fuse consumed-packet processing with next refill preparation",
+          "initialize invalid queries only; preserve unused miss descriptor tail"
+        ],
+        "baseline": "abcdf_pages",
+        "hardware_reference": "joint_hw_ac_512",
+        "single_contract": "strictly increasing input uses sorted private protocol; duplicate rows fall back",
+        "private_fallback_threads": 1024
+      }
+    },
+    "input_contract": "same sorted causal TopK; fixed requests; draft overlap40; no precomputed hit metadata",
+    "hardware_validation": "not_run; CANN9.1/NPU pending",
+    "tail_contract": "D preserves unused descriptor tail on successful sorted paths; valid prefix strictly checked; fallback unchanged",
+    "mtp0": "single sorted private protocol; duplicates and unsupported inputs fall back to original 1024-thread private"
   }
 }

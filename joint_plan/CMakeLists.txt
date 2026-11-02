@@ -97,6 +97,7 @@ set(JOINT_DIR "${JOINT_ROOT}/csrc/joint_plan")
 set(JOINT_FLAGS -O3 --cce-auto-sync=off -Wno-deprecated-declarations
     -mllvm -cce-vf-remove-membar=false -mllvm -cce-aicore-hoist-movemask=false
     -mllvm -cce-aicore-dcci-before-kernel-end=false)
+option(JOINT_UNION_ONLY "Build AC512 reference + new ABCD/thread candidates" OFF)
 option(JOINT_SWEEP_ONLY "Build hardware sweep and its validated reference" OFF)
 option(JOINT_SORTED_ONLY "Build sorted union and Merge BD references" OFF)
 option(JOINT_MERGE_ONLY "Build Merge candidates without old Joint experiments" OFF)
@@ -116,7 +117,7 @@ set(JOINT_INFO "${CMAKE_CURRENT_BINARY_DIR}/source_info.cpp")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_plan_manifest.json" "${JOINT_ROOT}/checks/joint_build_info.py")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${JOINT_ROOT}/checks/joint_build_info.py"
-    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY}"
+    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY}"
     RESULT_VARIABLE _identity_result)
 if(NOT _identity_result EQUAL 0)
     message(FATAL_ERROR "Joint Plan source identity check failed")
@@ -149,7 +150,9 @@ set(JOINT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/joint_variants")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_variants.py" "${JOINT_ROOT}/checks/generate_joint_variants.py")
 set(_merge_generate_args)
-if(JOINT_SWEEP_ONLY)
+if(JOINT_UNION_ONLY)
+    list(APPEND _merge_generate_args --union-only)
+elseif(JOINT_SWEEP_ONLY)
     list(APPEND _merge_generate_args --sweep-only)
 elseif(JOINT_SORTED_ONLY)
     list(APPEND _merge_generate_args --sorted-only)
@@ -162,11 +165,19 @@ if(NOT _variant_result EQUAL 0)
     message(FATAL_ERROR "Failed to generate Joint variant symbols")
 endif()
 set(JOINT_VARIANT_OBJECTS)
-foreach(_name a b ab c ac bc abc d ad bd abd cd acd bcd abcd bitmap turbo turbo_a turbo_b turbo_ab merge merge_a merge_b merge_ab merge_c merge_ac merge_bc merge_abc merge_d merge_ad merge_bd merge_abd merge_cd merge_acd merge_bcd merge_abcd sorted_stream sorted_mrgsort hw_a hw_b hw_ab hw_c hw_ac hw_bc hw_abc hw_d hw_ad hw_bd hw_abd hw_cd hw_acd hw_bcd hw_abcd hw_e hw_ae hw_be hw_abe hw_ce hw_ace hw_bce hw_abce hw_de hw_ade hw_bde hw_abde hw_cde hw_acde hw_bcde hw_abcde hw_abcd_512 hw_bcd_512 hw_ac_512 hw_c_512)
-    if(JOINT_SWEEP_ONLY AND NOT _name MATCHES "^(hw_.*|sorted_mrgsort)$")
+execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import sys; sys.path.insert(0,r'${JOINT_ROOT}'); from joint_variants import MASKS; print(';'.join(MASKS))"
+    OUTPUT_VARIABLE JOINT_VARIANT_NAMES OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE _catalog_result)
+if(NOT _catalog_result EQUAL 0)
+    message(FATAL_ERROR "Cannot query variant catalog")
+endif()
+foreach(_name IN LISTS JOINT_VARIANT_NAMES)
+    if(JOINT_UNION_ONLY AND NOT _name MATCHES "^(union_.*|hw_ac_512)$")
         continue()
     endif()
-    if(NOT JOINT_SWEEP_ONLY AND JOINT_SORTED_ONLY AND NOT _name MATCHES "^(merge|merge_bd|sorted_stream|sorted_mrgsort)$")
+    if(NOT JOINT_UNION_ONLY AND JOINT_SWEEP_ONLY AND NOT _name MATCHES "^(hw_.*|sorted_mrgsort)$")
+        continue()
+    endif()
+    if(NOT JOINT_UNION_ONLY AND NOT JOINT_SWEEP_ONLY AND JOINT_SORTED_ONLY AND NOT _name MATCHES "^(merge|merge_bd|sorted_stream|sorted_mrgsort)$")
         continue()
     endif()
     if(NOT JOINT_SWEEP_ONLY AND NOT JOINT_SORTED_ONLY AND JOINT_MERGE_ONLY AND NOT _name MATCHES "^merge")
@@ -178,7 +189,7 @@ foreach(_name a b ab c ac bc abc d ad bd abd cd acd bcd abcd bitmap turbo turbo_
             ${JOINT_FLAGS} ${JOINT_INCLUDES} -c "${JOINT_GENERATED}/variant_${_name}.cpp" -o "${_object}"
         DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp"
             "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h" "${JOINT_VARIANT_DIR}/bitmap_plan.h"
-            "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h"
+            "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h" "${JOINT_VARIANT_DIR}/union_next_stage.h" "${JOINT_VARIANT_DIR}/union_next_controller.h" "${JOINT_VARIANT_DIR}/union_next_simd.h"
             "${JOINT_DIR}/launch.h" "${JOINT_DIR}/sparse_kv_plan_config.h"
             "${JOINT_ROOT}/joint_plan_manifest.json"
         COMMENT "Compile Joint experiment ${_name}" VERBATIM)
@@ -198,6 +209,9 @@ set_source_files_properties("${ABCDF_PAGES_OBJECT}" PROPERTIES GENERATED TRUE EX
 set(PAGED_OPT_OBJECTS)
 set(PAGED_OPT_PLUGINS)
 foreach(_name a b ab)
+    if(JOINT_UNION_ONLY)
+        continue()
+    endif()
     set(_dir "${JOINT_ROOT}/csrc/abcdf_paged_opt")
     set(_obj "${CMAKE_CURRENT_BINARY_DIR}/abcdf_pages_${_name}.o")
     file(GLOB _headers CONFIGURE_DEPENDS "${_dir}/*.h" "${_dir}/${_name}/*.h")

@@ -56,3 +56,29 @@ template<typename T,bool Exhaust>void MrgSort(LocalTensor<T> dst,const MrgSortSr
   }
 }
 }
+
+// Reg API semantic model for the actual new SIMD body. No hardware timing/AS model.
+#define __simd_vf__
+template <auto F,typename... A> inline void asc_vf_call(A...a){ F(a...); }
+namespace AscendC {
+enum class CMPMODE { EQ,NE,GE };
+namespace Reg {
+template<typename T>struct RegTensor { T v[64]{}; };
+struct MaskReg { bool v[64]{}; };
+enum class MaskPattern { ALL };
+template<typename T,MaskPattern P=MaskPattern::ALL>MaskReg CreateMask(){MaskReg m;for(auto&v:m.v)v=true;return m;}
+template<typename T>MaskReg UpdateMask(uint32_t& n){MaskReg m;for(uint32_t i=0;i<64;++i)m.v[i]=i<n;n=n>64?n-64:0;return m;}
+template<typename T>void LoadAlign(RegTensor<T>&o,T*p){assert(reinterpret_cast<uintptr_t>(p)%4==0);for(int i=0;i<64;++i)o.v[i]=p[i];}
+template<typename T,typename S>void Duplicate(RegTensor<T>&o,S v){for(auto&x:o.v)x=static_cast<T>(v);}
+template<typename T,typename S>void Adds(RegTensor<T>&o,const RegTensor<T>&a,S b,const MaskReg&m){auto c=a;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=c.v[i]+static_cast<T>(b);}
+template<typename T,typename S>void ShiftLefts(RegTensor<T>&o,const RegTensor<T>&a,S b,const MaskReg&m){auto c=a;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=c.v[i]<<b;}
+template<typename T>void Select(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)o.v[i]=m.v[i]?x.v[i]:y.v[i];}
+template<typename T,CMPMODE M>void Compare(MaskReg&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){for(int i=0;i<64;++i)o.v[i]=m.v[i]&&(M==CMPMODE::EQ?a.v[i]==b.v[i]:M==CMPMODE::NE?a.v[i]!=b.v[i]:a.v[i]>=b.v[i]);}
+template<typename T,CMPMODE M,typename S>void Compares(MaskReg&o,const RegTensor<T>&a,S b,const MaskReg&m){RegTensor<T>x;Duplicate(x,b);Compare<T,M>(o,a,x,m);}
+template<typename T,typename I>void Gather(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<I>&idx){auto x=a;for(int i=0;i<64;++i)o.v[i]=x.v[idx.v[i]%64];}
+template<typename T,typename S,typename I>void Gather(RegTensor<T>&o,S*p,const RegTensor<I>&idx,const MaskReg&m){for(int i=0;i<64;++i)if(m.v[i])std::memcpy(&o.v[i],p+idx.v[i],sizeof(T));}
+template<typename T,typename I>void Scatter(T*p,const RegTensor<T>&a,const RegTensor<I>&idx,const MaskReg&m){for(int i=0;i<64;++i)if(m.v[i])std::memcpy(p+idx.v[i],&a.v[i],sizeof(T));}
+template<typename T>void Add(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]+y.v[i];}
+template<typename T>void Or(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]|y.v[i];}
+}
+}

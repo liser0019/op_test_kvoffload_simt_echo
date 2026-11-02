@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 from joint_variants import MASKS
 
 
-def generate(destination, merge_only=False, sorted_only=False, sweep_only=False):
+def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     launch = (ROOT / "csrc/joint_plan/launch.h").read_text()
@@ -17,6 +17,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False)
                "sparse_kv_plan_private_kernel")
     declarations, entries = [], ["nullptr"] * (max(MASKS.values()) + 1)
     for letters, mask in MASKS.items():
+        if union_only and letters != "hw_ac_512" and not letters.startswith("union_"): continue
         if sweep_only and letters != "sorted_mrgsort" and not letters.startswith("hw_"):
             continue
         if not sweep_only and sorted_only and letters not in ("merge", "merge_bd", "sorted_stream", "sorted_mrgsort"):
@@ -36,7 +37,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False)
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
     text += "inline decltype(&launch_joint_plan) JointVariantLaunch(int64_t mask) {\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {" + ", ".join(entries) + "};\n"
-    text += "  return mask > 0 && mask <= 73 ? launches[mask] : nullptr;\n}\n"
+    text += "  return mask > 0 && mask <= 121 ? launches[mask] : nullptr;\n}\n"
     text += signature + " {\n  auto launch = JointVariantLaunch(mask);\n"
     text += "  if (!launch) throw std::invalid_argument(\"joint mask not built\");\n"
     text += "  launch(" + args + ");\n}\n"
@@ -49,5 +50,6 @@ if __name__ == "__main__":
     parser.add_argument("--merge-only", action="store_true")
     parser.add_argument("--sorted-only", action="store_true")
     parser.add_argument("--sweep-only", action="store_true")
+    parser.add_argument("--union-only", action="store_true")
     args = parser.parse_args()
-    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only)
+    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only)

@@ -7,16 +7,16 @@ from checks.generate_joint_variants import generate
 from joint_variants import MASKS
 
 def main():
-    for subset in ("all","merge","sorted","sweep"):
+    for subset in ("all","merge","sorted","sweep","union"):
         with tempfile.TemporaryDirectory() as tmp:
-            d=Path(tmp);generate(d,merge_only=subset=="merge",sorted_only=subset=="sorted",sweep_only=subset=="sweep")
+            d=Path(tmp);generate(d,merge_only=subset=="merge",sorted_only=subset=="sorted",sweep_only=subset=="sweep",union_only=subset=="union")
             declaration=(ROOT/'csrc/joint_plan/launch.h').read_text().split('extern "C" void launch_joint_plan',1)[1]
             declaration='extern "C" void launch_joint_plan'+declaration.strip()
-            selected={n:m for n,m in MASKS.items() if subset=='all' or (subset=='merge' and n.startswith('merge')) or (subset=='sorted' and n in ('merge','merge_bd','sorted_stream','sorted_mrgsort')) or (subset=='sweep' and (n=='sorted_mrgsort' or n.startswith('hw_')))}
+            selected={n:m for n,m in MASKS.items() if subset=='all' or (subset=='merge' and n.startswith('merge')) or (subset=='sorted' and n in ('merge','merge_bd','sorted_stream','sorted_mrgsort')) or (subset=='sweep' and (n=='sorted_mrgsort' or n.startswith('hw_'))) or (subset=='union' and (n=='hw_ac_512' or n.startswith('union_')))}
             assert len(list(d.glob('variant_*.cpp')))==len(selected)
             text='#include <cstdint>\n#include <cassert>\n#include "'+str(ROOT/'csrc/joint_plan/launch.h')+'"\n#include "variant_dispatch.h"\n'
             for name in selected:text+=declaration.replace('launch_joint_plan','launch_joint_plan_'+name).rstrip(';')+' {}\n'
-            text+='int main() { assert(JointVariantLaunch(0)==nullptr); assert(JointVariantLaunch(74)==nullptr);\n'
+            text+='int main() { assert(JointVariantLaunch(0)==nullptr); assert(JointVariantLaunch(122)==nullptr);\n'
             for name,mask in MASKS.items():text+=f'assert((JointVariantLaunch({mask}) != nullptr) == {str(name in selected).lower()});\n'
             text+='}\n';(d/'probe.cpp').write_text(text)
             subprocess.run(['g++','-std=c++17',str(d/'probe.cpp'),'-o',str(d/'probe')],check=True)

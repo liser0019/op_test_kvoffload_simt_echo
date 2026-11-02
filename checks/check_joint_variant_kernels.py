@@ -27,7 +27,7 @@ def build(directory, mask, model_threads=64):
     config, count = re.subn(r'PLAN_THREADS = 1024U', f'PLAN_THREADS = {model_threads}U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -52,8 +52,8 @@ def build(directory, mask, model_threads=64):
     return library
 
 
-def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False):
-    info = layout(case['topk'], case['capacity'], case['rows'], enabled, case['max_token'], bitmap, turbo, sorted_union)
+def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False):
+    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next, case['max_token'], bitmap, turbo, sorted_union, union_next)
     scratch = max(info['scratch_elements'], 112 * 1024 // 4 + 1) if force_gm else info['scratch_elements']
     max_queries = (scratch - 2 * info['joint_hash_capacity'] - case['capacity']
                    if turbo and enabled else None)
@@ -91,7 +91,7 @@ def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=F
     if abcdf:
         validate_abcdf(case, expected, arrays)
     else:
-        validate(case, expected, arrays, enabled, max_queries, merge=merge, float_keys=sorted_union)
+        validate(case, expected, arrays, enabled, max_queries, merge=merge, float_keys=sorted_union, preserve_tail=preserve_tail, single_sorted=union_next)
     return {key: arrays[key].copy() for key in expected}
 
 
@@ -103,6 +103,8 @@ def main():
     records = []
     with tempfile.TemporaryDirectory(prefix='joint_variants_cpu_') as tmp:
         for name in args.variants:
+            if name.startswith("union_"):
+                raise SystemExit("Use checks/check_union_next.py --variants " + name)
             if name.startswith("hw_"):
                 from checks.check_hardware_sweep import main as check_sweep
                 records.append({"variant":name,"checks":check_sweep([name])})

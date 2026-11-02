@@ -9,7 +9,8 @@ extern "C" __attribute__((visibility("default"))) void run_variant(void** p, con
   tiling.topk=d[4];tiling.capacity=d[5];tiling.maxToken=d[6];tiling.maxRequests=d[7];
   tiling.blockSize=d[8];tiling.jointHashCapacity=d[9];tiling.scratchElements=d[10];
   const uint64_t chunk=(std::min(uint64_t{768},std::max(uint64_t{64},uint64_t{3}*d[5])/16U)/4U)*4U;
-  tiling.localMemoryBytes=288U+ (d[10]<=112*1024/4?((d[10]*4+31)&~31ULL):(64+16*chunk)*4);
+  const uint32_t ctxWords=JOINT_OPT_MASK>=74?128U:64U;
+  tiling.localMemoryBytes=288U+ (d[10]<=112*1024/4?((d[10]*4+31)&~31ULL):(ctxWords+16*chunk)*4);
   SortedCpuBlocks=d[0];
   for(SortedCpuBlock=0;SortedCpuBlock<SortedCpuBlocks;++SortedCpuBlock)
     SortedDirectBody<true>(p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8],p[9],p[10],p[11],p[12],p[13],p[14],p[15],p[16],&tiling);
@@ -52,5 +53,12 @@ extern "C" __attribute__((visibility("default"))) void run_variant(void** p, con
 extern "C" __attribute__((visibility("default"))) void run_merge_pair(int32_t* a, uint32_t na, int32_t* b, uint32_t nb, int32_t* out) {
   for (uint32_t t = 0; t < sparse_kv_plan_config::PLAN_THREADS; ++t)
     MergePairChunks(a, na, b, nb, out, t);
+}
+#endif
+
+#if JOINT_OPT_MASK >= 74
+extern "C" __attribute__((visibility("default"))) void run_next_prefix(int32_t* packet,uint32_t n,int32_t last){
+  uint32_t lanes[64];for(uint32_t i=0;i<64;++i)lanes[i]=i;
+  NextPrefixVf(packet,lanes,n,last);
 }
 #endif
