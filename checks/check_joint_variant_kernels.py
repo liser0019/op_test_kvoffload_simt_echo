@@ -18,9 +18,10 @@ from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
+    refine=mask-127 if 127<=mask<=142 else None
     bounds = mask==126
     integrated = mask in (125,126)
-    cold = mask in COLD_SWEEP.values() or integrated
+    cold = mask in COLD_SWEEP.values() or integrated or refine is not None
     mask = algorithm_mask(mask)
     source = (ROOT / "csrc/joint_variants/kernel.cpp").read_text()
     source = source[:source.index("// Direct launch adaptation only:")]
@@ -31,11 +32,11 @@ def build(directory, mask, model_threads=64):
     config, count = re.subn(r'PLAN_THREADS = 1024U', f'PLAN_THREADS = {model_threads}U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h','integrated_stage.h','phase0_bounds_stage.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h','integrated_stage.h','phase0_bounds_stage.h','refine_options.h','refine_stage.h','refine_controller.h','refine_simd.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
-                 'simt_api/device_sync_functions.h', 'simt_api/device_warp_functions.h'):
+                 'simt_api/device_sync_functions.h', 'simt_api/device_warp_functions.h','simt_api/device_functions.h'):
         path = directory / name
         path.parent.mkdir(exist_ok=True)
         path.write_text('// CPU definitions are in cpu_runtime.h\n')
@@ -50,7 +51,7 @@ def build(directory, mask, model_threads=64):
     library = directory / 'kernel.so'
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
-                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), '-I' + str(directory),
+                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), '-I' + str(directory),
                     '-I' + str(ROOT / 'checks/simt_variants'),
                     str(ROOT / 'checks/joint_variant_cpu_driver.cpp'), '-o', str(library)], check=True)
     return library

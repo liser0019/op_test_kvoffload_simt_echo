@@ -5,10 +5,10 @@ import argparse
 import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from joint_variants import MASKS, algorithm_mask, COLD_SWEEP
+from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,REFINE_SWEEP
 
 
-def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False):
+def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     launch = (ROOT / "csrc/joint_plan/launch.h").read_text()
@@ -17,6 +17,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
                "sparse_kv_plan_private_kernel")
     declarations, entries = [], ["nullptr"] * (max(MASKS.values()) + 1)
     for letters, mask in MASKS.items():
+        if refine_only and letters!="integrated_bounds_512" and letters not in REFINE_SWEEP:continue
         if integrated_only and letters not in ("union_cold_512","hw_ac_cold_512","integrated_512","integrated_bounds_512"): continue
         if cold_compare_only and letters not in ("hw_ac_512","hw_ac_256","union_base_512",*COLD_SWEEP): continue
         if ac_threads_only and letters not in ("hw_ac_512", "hw_ac_256"): continue
@@ -29,9 +30,10 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
             continue
         replacements = {name: name + "_" + letters for name in symbols}
         text = f"// Generated symbol wrapper; Joint options={letters}, mask={mask}.\n#define JOINT_OPT_MASK {algorithm_mask(mask)}\n"
-        if mask in COLD_SWEEP.values() or mask in (125,126): text += "#define JOINT_COLD_FINISH 1\n"
+        if mask in COLD_SWEEP.values() or mask in (125,126) or mask>=127: text += "#define JOINT_COLD_FINISH 1\n"
         if mask in (125,126): text += "#define JOINT_INTEGRATED 1\n"
         if mask==126: text += "#define JOINT_PHASE0_BOUNDS 1\n"
+        if mask>=127:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS {mask-127}\n"
         text += "".join(f"#define {name} {new}\n" for name, new in replacements.items())
         text += '#include "' + str(ROOT / "csrc/joint_variants/kernel.cpp") + '"\n'
         (destination / f"variant_{letters}.cpp").write_text(text)
@@ -43,8 +45,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
     text += "inline decltype(&launch_joint_plan) JointVariantLaunch(int64_t mask) {\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {" + ", ".join(entries) + "};\n"
-    text += "  return mask > 0 && mask <= 126 ? launches[mask] : nullptr;\n}\n"
-    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126) ? 72 : mask; }\n'
+    text += "  return mask > 0 && mask <= 142 ? launches[mask] : nullptr;\n}\n"
+    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 142)) ? 72 : mask; }\n'
     text += signature + " {\n  auto launch = JointVariantLaunch(mask);\n"
     text += "  if (!launch) throw std::invalid_argument(\"joint mask not built\");\n"
     text += "  launch(" + args + ");\n}\n"
@@ -61,5 +63,6 @@ if __name__ == "__main__":
     parser.add_argument("--ac-threads-only", action="store_true")
     parser.add_argument("--cold-compare-only",action="store_true")
     parser.add_argument("--integrated-only",action="store_true")
+    parser.add_argument("--refine-only",action="store_true")
     args = parser.parse_args()
-    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only)
+    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only)

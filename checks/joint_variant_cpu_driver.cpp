@@ -94,3 +94,31 @@ extern "C" __attribute__((visibility("default"))) void run_phase0_bounds(
   bounds[0]=ctx[8];bounds[1]=ctx[12];
 }
 #endif
+
+#ifdef JOINT_REFINE
+extern "C" __attribute__((visibility("default"))) uint32_t refine_threads(){return SORTED_THREADS;}
+extern "C" __attribute__((visibility("default"))) void run_refine_bool(
+    const int32_t* flags,uint32_t n,int32_t* ranks,int32_t* finalTotal){
+  std::vector<int32_t> scan(PLAN_SCAN_STORAGE_ELEMENTS,0);
+  if(!SortedWorkers||SortedWorkerCount!=SORTED_THREADS){
+    SortedWorkers.reset();SortedWorkers=std::make_unique<CpuWorkers>(SORTED_THREADS);SortedWorkerCount=SORTED_THREADS;
+  }
+  SortedWorkers->Run([&]{
+    uint32_t t=threadIdx.x,parity=0;int32_t base=0;
+    for(uint32_t tile=0;tile<n;tile+=SORTED_THREADS){
+      const uint32_t i=tile+t;int32_t total=0;
+      const int32_t rank=RefineBoolScan(scan.data(),i<n&&flags[i]!=0,t,parity,total);
+      if(i<n)ranks[i]=base+rank;
+      asc_syncthreads();base+=total;
+    }
+    if(t==0)*finalTotal=base;
+  });
+}
+#if (JOINT_REFINE_BITS & 8)
+extern "C" __attribute__((visibility("default"))) void run_refine_unique(
+    int32_t* records,int32_t* data,int32_t* ctx,uint32_t n,uint32_t q,uint32_t capacity,
+    uint32_t initialCount,int32_t initialLast,uint32_t more){
+  RefineUniqueMapVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more);
+}
+#endif
+#endif

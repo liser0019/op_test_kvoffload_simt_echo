@@ -120,3 +120,12 @@ class CpuWorkers {
 inline int32_t asc_atomic_or(int32_t* pointer, int32_t value) {
   return std::atomic_ref<int32_t>(*pointer).fetch_or(value);
 }
+
+inline uint32_t asc_ballot(int32_t predicate) {
+  CpuWarp& warp=*cpuContext->warps[threadIdx.x/32];
+  const uint32_t lane=threadIdx.x%32;warp.values[lane]=predicate!=0;
+  warp.sync.arrive_and_wait();uint32_t mask=0;
+  for(uint32_t i=0;i<32;++i)if(warp.values[i])mask|=uint32_t{1}<<i;
+  warp.sync.arrive_and_wait();return mask;
+}
+inline int __popc(unsigned int value){return __builtin_popcount(value);}

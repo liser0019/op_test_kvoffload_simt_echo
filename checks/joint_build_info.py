@@ -218,6 +218,7 @@ def identity():
         raise ValueError("Independent baseline must remain ABCDF(mask47), 1024 threads")
     variant = (ROOT / "csrc/joint_variants/kernel.cpp").read_text()
     prefix = variant[:variant.index('#include "options.h"')].replace('../joint_plan/', '')
+    prefix=prefix.replace('#ifdef JOINT_REFINE\n#include "simt_api/device_functions.h"\n#endif\n','')
     original_prefix = direct[:direct.index('#include "sparse_kv_joint_plan.h"')]
     if prefix != original_prefix:
         raise ValueError("Experimental kernels changed original ABCDF helper computation")

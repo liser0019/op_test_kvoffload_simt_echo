@@ -38,8 +38,16 @@ MASKS["integrated_512"]=125
 MASKS["integrated_bounds_512"]=126
 INTEGRATED_NAME="joint_integrated_512"
 BOUNDS_NAME="joint_integrated_bounds_512"
-INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME)
-INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",*INTEGRATED_NAMES)
+REFINE_OPTIONS={"a":"strict singleton direct unique/UID in Phase0; skip packing and Phase3",
+                "b":"ballot/popcount boolean Scan; packed hit/evict Scan unchanged",
+                "c":"warm UB resident snapshot in partition's earlier lifetime; no extra UB",
+                "d":"complete SIMD Phase3 using Unsqueeze + Scatter; UB only"}
+REFINE_SWEEP={"refine_"+("".join(c for i,c in enumerate(REFINE_OPTIONS) if bits&(1<<i)) or "base")+"_512":127+bits for bits in range(16)}
+MASKS.update(REFINE_SWEEP)
+REFINE_NAMES=tuple("joint_"+n for n in REFINE_SWEEP)
+REFINE_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_base_512")
+INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES)
+INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",INTEGRATED_NAME,BOUNDS_NAME)
 def supports_single_sorted(name):
     return name.startswith("joint_union_") or name in INTEGRATED_NAMES
 
@@ -55,14 +63,14 @@ def union_config(name):
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 127))
+TURBO_MASKS = tuple(range(17, 143))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
+    return 72 if 127<=mask<=142 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -71,6 +79,14 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if 127<=mask<=142:
+        bits=mask-127
+        return description(BOUNDS_NAME) | {"mask":mask,"refine_bits":bits,"parent":BOUNDS_NAME,
+            "structure":"bounds512 + A/B/C/D refinement factorial",
+            "new_optimization_factors":[v for i,v in enumerate(REFINE_OPTIONS.values()) if bits&(1<<i)],
+            "D_GM_fallback":"original SIMT Phase3; B remains active if selected",
+            "B_D_overlap":"D replaces Phase3 on UB; B still applies to Phase5 miss Scan",
+            "A_D_overlap":"A bypasses Phase3 for eligible singleton; D handles remaining groups"}
     if mask==126:
         return description(INTEGRATED_NAME) | {"mask":126,"parent":INTEGRATED_NAME,
             "new_optimization_factors":["Phase0 sorted TopK endpoints bypass both lower_bounds when all valid"],

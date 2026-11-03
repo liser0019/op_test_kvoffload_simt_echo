@@ -1,3 +1,9 @@
+## 当前实验：冻结 bounds512＋新 A/B/C/D 全组合
+
+以 `joint_integrated_bounds_512` 为参考，新加单行直接构造、ballot Scan、resident UB快照、完整SIMD Phase3四项及16配置；固定512线程，保留原回退。默认18路门禁→全路短采样→独立50样本复测，也可 `--full-confirm` 全部正式采集。入口 `bash scripts/test_refine_sweep.sh --device 0`，详见[中文教程](docs/bounds512_ABCD组合优化.md)。新增候选仅通过本地CPU模型/静态检查，尚待CANN/NPU验证。
+
+以下为历史实验说明。
+
 ## 当前推进：512线程整合Plan＋Phase0首尾判断，五路固定对照
 
 保留 `joint_integrated_512`，新增仅优化Phase0端点判断的 `joint_integrated_bounds_512`：实际单行组使用有序private路径，多行组使用AC冷优化联合路径，保留原逐行回退。参考ABCDF及两条冷优化候选保持不变。本轮仅Plan、不扩线程/组合矩阵。运行 `bash scripts/test_integrated_plan.sh --device 0`，构建→门禁→冷/热×MTP0/1/3五路正式50样本；详见[整合版中文说明](docs/整合512线程Plan.md)。新候选尚未在本机执行CANN/NPU验证。

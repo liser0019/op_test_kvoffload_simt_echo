@@ -36,10 +36,10 @@ class TPipe {public:template<typename B>void InitBuffer(B&b,uint32_t n){b.Init(n
   template<HardEvent E>void ReleaseEventID(uint32_t id){auto i=static_cast<unsigned>(E);assert(id==0&&allocated[i]);allocated[i]=false;}
   ~TPipe(){assert(!allocated[0]&&!allocated[1]);}};
 template <TPosition P>class TBuf {
-  std::vector<int32_t> backing;uint32_t bytes=0;
+  std::vector<int32_t> backing;uint32_t bytes=0,offset=16;
  public:
-  void Init(uint32_t n){bytes=n;backing.assign(n/4+32,0x1234567);}
-  template<typename T>LocalTensor<T> Get(){return {reinterpret_cast<T*>(backing.data()+16),static_cast<uint32_t>(bytes/sizeof(T))};}
+  void Init(uint32_t n){bytes=n;backing.assign(n/4+40,0x1234567);offset=16+((8-(reinterpret_cast<uintptr_t>(backing.data()+16)/4)%8)%8);}
+  template<typename T>LocalTensor<T> Get(){return {reinterpret_cast<T*>(backing.data()+offset),static_cast<uint32_t>(bytes/sizeof(T))};}
   ~TBuf(){for(int i=0;i<16;++i){assert(backing[i]==0x1234567);assert(backing[backing.size()-1-i]==0x1234567);}}
 };
 template<typename T>struct MrgSortSrcList {LocalTensor<T> src1,src2,src3,src4;};
@@ -63,8 +63,13 @@ template<typename T,bool Exhaust>void MrgSort(LocalTensor<T> dst,const MrgSortSr
 #define __simd_vf__
 template <auto F,typename... A> inline void asc_vf_call(A...a){ F(a...); }
 namespace AscendC {
-enum class CMPMODE { EQ,NE,GE };
+enum class CMPMODE { EQ,NE,GE,LT };
+enum class RoundMode { CAST_TRUNC };
 namespace Reg {
+enum class RegLayout { UNKNOWN };
+enum class SatMode { NO_SAT };
+enum class MaskMergeMode { ZEROING };
+struct CastTrait {RegLayout layoutMode;SatMode satMode;MaskMergeMode mrgMode;RoundMode roundMode;};
 template<typename T>struct RegTensor { T v[64]{}; };
 struct MaskReg { bool v[64]{}; };
 enum class MaskPattern { ALL };
@@ -75,12 +80,32 @@ template<typename T,typename S>void Duplicate(RegTensor<T>&o,S v){for(auto&x:o.v
 template<typename T,typename S>void Adds(RegTensor<T>&o,const RegTensor<T>&a,S b,const MaskReg&m){auto c=a;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=c.v[i]+static_cast<T>(b);}
 template<typename T,typename S>void ShiftLefts(RegTensor<T>&o,const RegTensor<T>&a,S b,const MaskReg&m){static_assert(std::is_same_v<S,int16_t>,"CANN ShiftLefts scalar must be int16_t");assert(b>=0&&b<int(sizeof(T)*8));auto c=a;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=c.v[i]<<b;}
 template<typename T>void Select(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)o.v[i]=m.v[i]?x.v[i]:y.v[i];}
-template<typename T,CMPMODE M>void Compare(MaskReg&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){for(int i=0;i<64;++i)o.v[i]=m.v[i]&&(M==CMPMODE::EQ?a.v[i]==b.v[i]:M==CMPMODE::NE?a.v[i]!=b.v[i]:a.v[i]>=b.v[i]);}
+template<typename T,CMPMODE M>void Compare(MaskReg&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){for(int i=0;i<64;++i)o.v[i]=m.v[i]&&(M==CMPMODE::EQ?a.v[i]==b.v[i]:M==CMPMODE::NE?a.v[i]!=b.v[i]:M==CMPMODE::GE?a.v[i]>=b.v[i]:a.v[i]<b.v[i]);}
 template<typename T,CMPMODE M,typename S>void Compares(MaskReg&o,const RegTensor<T>&a,S b,const MaskReg&m){RegTensor<T>x;Duplicate(x,b);Compare<T,M>(o,a,x,m);}
 template<typename T,typename I>void Gather(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<I>&idx){auto x=a;for(int i=0;i<64;++i)o.v[i]=x.v[idx.v[i]%64];}
 template<typename T,typename S,typename I>void Gather(RegTensor<T>&o,S*p,const RegTensor<I>&idx,const MaskReg&m){for(int i=0;i<64;++i)if(m.v[i])std::memcpy(&o.v[i],p+idx.v[i],sizeof(T));}
-template<typename T,typename I>void Scatter(T*p,const RegTensor<T>&a,const RegTensor<I>&idx,const MaskReg&m){for(int i=0;i<64;++i)if(m.v[i])std::memcpy(p+idx.v[i],&a.v[i],sizeof(T));}
+template<typename T,typename I>void Scatter(T*p,const RegTensor<T>&a,const RegTensor<I>&idx,const MaskReg&m){
+#ifdef JOINT_REFINE
+  assert(reinterpret_cast<uintptr_t>(p)%32U==0U);
+  std::vector<I> indices(idx.v,idx.v+64);std::sort(indices.begin(),indices.end());
+  assert(std::adjacent_find(indices.begin(),indices.end())==indices.end());
+#endif
+  for(int i=0;i<64;++i)if(m.v[i])std::memcpy(p+idx.v[i],&a.v[i],sizeof(T));
+}
 template<typename T>void Add(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]+y.v[i];}
 template<typename T>void Or(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]|y.v[i];}
+}
+}
+
+namespace AscendC::Reg {
+template<typename T>void Unsqueeze(RegTensor<T>& dst,MaskReg& mask){
+  T count=0;for(int i=0;i<64;++i){dst.v[i]=count;count+=mask.v[i]?1:0;}
+}
+template<typename T>void Neg(RegTensor<T>& out,RegTensor<T>& src,MaskReg& m){
+  auto in=src;for(int i=0;i<64;++i)if(m.v[i])out.v[i]=-in.v[i];
+}
+template<typename T,typename U,const CastTrait& trait>void Cast(RegTensor<T>& out,RegTensor<U>& src,MaskReg& m){
+  static_assert(std::is_same_v<T,int32_t> && std::is_same_v<U,float>);
+  for(int i=0;i<64;++i)out.v[i]=m.v[i]?static_cast<T>(src.v[i]):0;
 }
 }

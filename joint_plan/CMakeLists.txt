@@ -97,6 +97,7 @@ set(JOINT_DIR "${JOINT_ROOT}/csrc/joint_plan")
 set(JOINT_FLAGS -O3 --cce-auto-sync=off -Wno-deprecated-declarations
     -mllvm -cce-vf-remove-membar=false -mllvm -cce-aicore-hoist-movemask=false
     -mllvm -cce-aicore-dcci-before-kernel-end=false)
+option(JOINT_REFINE_ONLY "Build frozen bounds512 and refinement factorial" OFF)
 option(JOINT_INTEGRATED_ONLY "Build integrated512, Phase0 bounds candidate and two cold references only" OFF)
 option(JOINT_COLD_COMPARE_ONLY "Build six-way cold finish comparison only" OFF)
 option(JOINT_AC_THREADS_ONLY "Build only AC512/AC256 thread controls and baselines" OFF)
@@ -120,7 +121,7 @@ set(JOINT_INFO "${CMAKE_CURRENT_BINARY_DIR}/source_info.cpp")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_plan_manifest.json" "${JOINT_ROOT}/checks/joint_build_info.py")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${JOINT_ROOT}/checks/joint_build_info.py"
-    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY};ac_threads_only=${JOINT_AC_THREADS_ONLY};cold_compare_only=${JOINT_COLD_COMPARE_ONLY};integrated_only=${JOINT_INTEGRATED_ONLY}"
+    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY};ac_threads_only=${JOINT_AC_THREADS_ONLY};cold_compare_only=${JOINT_COLD_COMPARE_ONLY};integrated_only=${JOINT_INTEGRATED_ONLY};refine_only=${JOINT_REFINE_ONLY}"
     RESULT_VARIABLE _identity_result)
 if(NOT _identity_result EQUAL 0)
     message(FATAL_ERROR "Joint Plan source identity check failed")
@@ -153,7 +154,9 @@ set(JOINT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/joint_variants")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_variants.py" "${JOINT_ROOT}/checks/generate_joint_variants.py")
 set(_merge_generate_args)
-if(JOINT_INTEGRATED_ONLY)
+if(JOINT_REFINE_ONLY)
+    list(APPEND _merge_generate_args --refine-only)
+elseif(JOINT_INTEGRATED_ONLY)
     list(APPEND _merge_generate_args --integrated-only)
 elseif(JOINT_COLD_COMPARE_ONLY)
     list(APPEND _merge_generate_args --cold-compare-only)
@@ -180,6 +183,9 @@ if(NOT _catalog_result EQUAL 0)
     message(FATAL_ERROR "Cannot query variant catalog")
 endif()
 foreach(_name IN LISTS JOINT_VARIANT_NAMES)
+    if(JOINT_REFINE_ONLY AND NOT _name MATCHES "^(integrated_bounds_512|refine_.*)$")
+        continue()
+    endif()
     if(JOINT_INTEGRATED_ONLY AND NOT _name MATCHES "^(union_cold_512|hw_ac_cold_512|integrated_512|integrated_bounds_512)$")
         continue()
     endif()
@@ -207,7 +213,7 @@ foreach(_name IN LISTS JOINT_VARIANT_NAMES)
             ${JOINT_FLAGS} ${JOINT_INCLUDES} -c "${JOINT_GENERATED}/variant_${_name}.cpp" -o "${_object}"
         DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp"
             "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h" "${JOINT_VARIANT_DIR}/bitmap_plan.h"
-            "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h" "${JOINT_VARIANT_DIR}/union_next_stage.h" "${JOINT_VARIANT_DIR}/union_next_controller.h" "${JOINT_VARIANT_DIR}/union_next_simd.h" "${JOINT_VARIANT_DIR}/cold_finish.h" "${JOINT_VARIANT_DIR}/cold_ac_stage.h" "${JOINT_VARIANT_DIR}/cold_union_stage.h" "${JOINT_VARIANT_DIR}/integrated_stage.h" "${JOINT_VARIANT_DIR}/phase0_bounds_stage.h"
+            "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h" "${JOINT_VARIANT_DIR}/union_next_stage.h" "${JOINT_VARIANT_DIR}/union_next_controller.h" "${JOINT_VARIANT_DIR}/union_next_simd.h" "${JOINT_VARIANT_DIR}/cold_finish.h" "${JOINT_VARIANT_DIR}/cold_ac_stage.h" "${JOINT_VARIANT_DIR}/cold_union_stage.h" "${JOINT_VARIANT_DIR}/integrated_stage.h" "${JOINT_VARIANT_DIR}/phase0_bounds_stage.h" "${JOINT_VARIANT_DIR}/refine_options.h" "${JOINT_VARIANT_DIR}/refine_stage.h" "${JOINT_VARIANT_DIR}/refine_controller.h" "${JOINT_VARIANT_DIR}/refine_simd.h"
             "${JOINT_DIR}/launch.h" "${JOINT_DIR}/sparse_kv_plan_config.h"
             "${JOINT_ROOT}/joint_plan_manifest.json"
         COMMENT "Compile Joint experiment ${_name}" VERBATIM)

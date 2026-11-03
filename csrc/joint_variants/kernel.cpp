@@ -52,6 +52,9 @@
 #include "simt_api/device_atomic_functions.h"
 #include "simt_api/device_sync_functions.h"
 #include "simt_api/device_warp_functions.h"
+#ifdef JOINT_REFINE
+#include "simt_api/device_functions.h"
+#endif
 #include "../joint_plan/sparse_kv_plan_config.h"
 #include "../joint_plan/launch.h"
 #ifndef KERNEL_TASK_TYPE_DEFAULT
@@ -621,7 +624,14 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
 #ifdef JOINT_COLD_FINISH
 #include "cold_finish.h"
 #endif
-#ifdef JOINT_INTEGRATED
+#ifdef JOINT_REFINE
+#include "refine_options.h"
+#include "refine_stage.h"
+#if (JOINT_REFINE_BITS & 8)
+#include "refine_simd.h"
+#endif
+#include "refine_controller.h"
+#elif defined(JOINT_INTEGRATED)
 #ifdef JOINT_PHASE0_BOUNDS
 #include "phase0_bounds_stage.h"
 #else
