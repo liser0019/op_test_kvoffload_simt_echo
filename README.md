@@ -1,6 +1,6 @@
-## 当前推进：一个512线程整合Plan，四路固定对照
+## 当前推进：512线程整合Plan＋Phase0首尾判断，五路固定对照
 
-新增 `joint_integrated_512`：实际单行组使用有序private路径，多行组使用AC冷优化联合路径，保留原逐行回退。参考ABCDF及两条冷优化候选保持不变。本轮仅Plan、不扩线程/组合矩阵。运行 `bash scripts/test_integrated_plan.sh --device 0`，构建→门禁→冷/热×MTP0/1/3四路正式50样本；详见[整合版中文说明](docs/整合512线程Plan.md)。新候选尚未在本机执行CANN/NPU验证。
+保留 `joint_integrated_512`，新增仅优化Phase0端点判断的 `joint_integrated_bounds_512`：实际单行组使用有序private路径，多行组使用AC冷优化联合路径，保留原逐行回退。参考ABCDF及两条冷优化候选保持不变。本轮仅Plan、不扩线程/组合矩阵。运行 `bash scripts/test_integrated_plan.sh --device 0`，构建→门禁→冷/热×MTP0/1/3五路正式50样本；详见[整合版中文说明](docs/整合512线程Plan.md)。新候选尚未在本机执行CANN/NPU验证。
 
 ## 本轮：冷启动收尾六路固定对照
 

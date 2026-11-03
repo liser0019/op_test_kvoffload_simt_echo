@@ -185,6 +185,10 @@ def expected_integrated_stage(text):
     return replace_once(text,"a.rowModes[row]=r==0U?ROW_JOINT:ROW_FOLLOWER;", "a.rowModes[row]=rows==1U?ROW_PRIVATE:(r==0U?ROW_JOINT:ROW_FOLLOWER);")
 
 
+def expected_phase0_bounds_stage(text):
+    return replace_once(text,'        ctx[8+r]=static_cast<int32_t>(SortedLower(a.topkIndices+b,a.topk,0));\n        ctx[12+r]=static_cast<int32_t>(SortedLower(a.topkIndices+b,a.topk,upper));','        // Only Phase0 uses endpoint checks. SortedLower for resident lookup is unchanged.\n        // upper remains row-specific and clipped; equality at upper is NOT visible.\n        if(a.topk>0U && a.topkIndices[b]>=0 && a.topkIndices[b+a.topk-1U]<upper){\n          ctx[8+r]=0;ctx[12+r]=static_cast<int32_t>(a.topk);\n        }else{\n          ctx[8+r]=static_cast<int32_t>(SortedLower(a.topkIndices+b,a.topk,0));\n          ctx[12+r]=static_cast<int32_t>(SortedLower(a.topkIndices+b,a.topk,upper));\n        }')
+
+
 def identity():
     manifest = json.loads((ROOT / "joint_plan_manifest.json").read_text())
     for path, expected in manifest["file_sha256"].items():
@@ -197,6 +201,8 @@ def identity():
     base=ROOT/'csrc/joint_variants'
     if expected_integrated_stage((base/'cold_ac_stage.h').read_text())!=(base/'integrated_stage.h').read_text():
         raise ValueError('Integrated stage differs beyond single-row private semantics')
+    if expected_phase0_bounds_stage((base/'integrated_stage.h').read_text())!=(base/'phase0_bounds_stage.h').read_text():
+        raise ValueError('Phase0 bounds candidate differs beyond endpoint fast path')
     original = (ROOT / "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp").read_text()
     direct = (ROOT / "csrc/joint_plan/kernel.cpp").read_text()
     if expected_fixed_region(original) != compute_region(direct):

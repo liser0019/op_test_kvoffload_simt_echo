@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT));sys.dont_w
 import joint_plan_common as common
 import run_integrated_plan as runner
 from checks.generate_joint_variants import generate
-from checks.joint_build_info import expected_integrated_stage
+from checks.joint_build_info import expected_integrated_stage,expected_phase0_bounds_stage
 from joint_plan_cases import layout
 from joint_variants import INTEGRATED_COMPARE_NAMES as NAMES,description,supports_single_sorted
 from profile_joint_mtp import read_kernels,execution_order,duration_ratios
@@ -20,12 +20,15 @@ class Checks(unittest.TestCase):
         self.assertEqual(source,expected_integrated_stage((base/'cold_ac_stage.h').read_text()))
         self.assertIn('rows==1U && i && a.topkIndices[qb+i]==a.topkIndices[qb+i-1U]',source)
         self.assertIn('if(t==1U)a.rowModes[row]=rows==1U?ROW_PRIVATE:',source)
+        self.assertEqual((base/'phase0_bounds_stage.h').read_text(),expected_phase0_bounds_stage(source))
     def test_minimal_build_and_host_layout(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp);generate(p,integrated_only=True)
             self.assertEqual({f.stem for f in p.glob('variant_*.cpp')},{'variant_'+n.split('_',1)[1] for n in NAMES[1:]})
             source=(p/'variant_integrated_512.cpp').read_text()
             for token in ('#define JOINT_OPT_MASK 72','#define JOINT_COLD_FINISH 1','#define JOINT_INTEGRATED 1'):self.assertIn(token,source)
+            self.assertNotIn('JOINT_PHASE0_BOUNDS',source)
+            self.assertIn('#define JOINT_PHASE0_BOUNDS 1',(p/'variant_integrated_bounds_512.cpp').read_text())
         self.assertTrue(supports_single_sorted(NAMES[-1]));self.assertFalse(supports_single_sorted(NAMES[2]))
         for rows in (32,64,128):
             candidate=layout(2048,4096,rows,True,262144,False,True,True,False)
@@ -44,13 +47,15 @@ class Checks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'kernel_details.csv'
             p.write_text('Name,Duration(us),Start Time(us)\nTensorMove,1,0\n'+'\n'.join(f'{common.KERNELS[n]},1,{i*10+10}' for i,n in enumerate(order))+'\n')
-            self.assertEqual(len(read_kernels([p],NAMES,5,order)),20)
+            self.assertEqual(len(read_kernels([p],NAMES,5,order)),len(NAMES)*5)
             with self.assertRaises(RuntimeError):read_kernels([p],NAMES,6,order)
             with self.assertRaises(RuntimeError):read_kernels([p],NAMES,5,list(reversed(order)))
             p.write_text(p.read_text().replace('Duration(us)','Duration(ms)'))
             with self.assertRaises(RuntimeError):read_kernels([p],NAMES,5,order)
         ratios=duration_ratios({n:{'p50_us':10} for n in NAMES})
-        for parent in NAMES[:3]:self.assertEqual(ratios[f'{NAMES[-1]}_over_{parent}_p50'],1)
+        for parent in NAMES[:4]:self.assertEqual(ratios[f'{NAMES[-1]}_over_{parent}_p50'],1)
+        ratios=duration_ratios({NAMES[-2]:{'p50_us':20},NAMES[-1]:{'p50_us':10}})
+        self.assertEqual(ratios[f'{NAMES[-1]}_over_{NAMES[-2]}_p50'],.5)
     def test_report_keeps_slow_results_and_requires_full_matrix(self):
         r={'implementations':list(NAMES),'runs':[]}
         for scene in ('cold_reset','full_cache_75pct'):
@@ -63,6 +68,13 @@ class Checks(unittest.TestCase):
         for name in NAMES:self.assertIn(name,text)
         bad=copy.deepcopy(r);bad['runs'].pop()
         with self.assertRaises(RuntimeError):validate_cold_capture(bad,NAMES,['cold_reset','full_cache_75pct'])
+    def test_compact_phase0_gate_keeps_all_boundary_patterns(self):
+        from checks.check_phase0_bounds import boundary_cases
+        full=list(boundary_cases());compact=list(boundary_cases(compact=True))
+        def key(label):return label.split('/mtp')[0]
+        self.assertEqual({key(n) for n,c in full},{key(n) for n,c in compact})
+        self.assertEqual(len(compact),15)
+        self.assertEqual({c['mtp'] for n,c in compact},{0,1,3})
     def test_gate_failure_stops_before_profile(self):
         with tempfile.TemporaryDirectory() as tmp:
             output=Path(tmp)/'results'

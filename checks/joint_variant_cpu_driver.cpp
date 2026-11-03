@@ -72,3 +72,25 @@ extern "C" __attribute__((visibility("default"))) void sorted_config(uint32_t* o
 #ifdef JOINT_COLD_CPU_MODEL
 extern "C" __attribute__((visibility("default"))) uint32_t cold_calls(){return ColdCpuCalls;}
 #endif
+
+#ifdef JOINT_PHASE0_BOUNDS
+// CPU-only entry to observe exact Phase0 legal intervals in the real stage.
+// No diagnostics, extra arguments or stores are added to the device kernel.
+extern "C" __attribute__((visibility("default"))) void run_phase0_bounds(
+    int32_t* values, uint32_t count, int32_t visible, int32_t* bounds) {
+  JointPlanArgs args{};
+  int32_t request=0;
+  args.topkIndices=values;args.topk=count;args.capacity=16;
+  args.visibleSeqLens=&visible;args.tokenToReq=&request;
+  args.maxToken=262144;args.maxRequests=1;
+  args.scratchElements=64U+((count+16U+7U)&~7U)+64U;
+  std::vector<int32_t> data(count+4U*args.capacity+8U,-777);
+  std::vector<int32_t> ctx(64U,-777),scan(PLAN_SCAN_STORAGE_ELEMENTS,-777);
+  if(!SortedWorkers||SortedWorkerCount!=SORTED_THREADS){
+    SortedWorkers.reset();SortedWorkers=std::make_unique<CpuWorkers>(SORTED_THREADS);
+    SortedWorkerCount=SORTED_THREADS;
+  }
+  SortedWorkers->Run([&]{SortedStage<0>(args,0,1,data.data(),ctx.data(),nullptr,scan.data());});
+  bounds[0]=ctx[8];bounds[1]=ctx[12];
+}
+#endif

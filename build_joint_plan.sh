@@ -43,7 +43,7 @@ cmake "${JOINT_ARGS[@]}"
 cmake --build "$JOINT_BUILD_DIR" --target mtp_joint_plan_ops --parallel "${JOBS:-3}"
 echo "产物: $JOINT_BUILD_DIR/libmtp_joint_plan_ops.so"
 if [[ "$JOINT_INTEGRATED_ONLY" == ON ]]; then
-  echo "下一步: bash scripts/test_integrated_plan.sh --skip-build --device 0 (四路固定对照)"
+  echo "下一步: bash scripts/test_integrated_plan.sh --skip-build --device 0 (五路固定对照，含Phase0首尾判断)"
 elif [[ "$JOINT_COLD_COMPARE_ONLY" == ON ]]; then
   echo "下一步: bash scripts/test_cold_finish.sh --skip-build --device 0 (六路固定对照)"
 elif [[ "$JOINT_AC_THREADS_ONLY" == ON ]]; then

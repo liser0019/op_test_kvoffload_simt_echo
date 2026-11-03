@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Server-only six-way gate: strict existing checks plus cold/warm/mode continuations."""
+"""Server-only cold/integrated gate: strict existing checks plus cold/warm/mode continuations."""
 from pathlib import Path
 import argparse,sys
 import numpy as np
@@ -43,6 +43,26 @@ def transition_gate(torch,names,failure_dir):
     return records
 
 
+def bounds_gate(torch,names,failure_dir):
+    from joint_variants import BOUNDS_NAME,INTEGRATED_NAME
+    if BOUNDS_NAME not in names:return []
+    from checks.check_phase0_bounds import boundary_cases
+    chosen=[n for n in (INTEGRATED_NAME,BOUNDS_NAME) if n in names]
+    records=[]
+    # Each boundary pattern once; main gate/formal matrix still cover MTP0/1/3.
+    for label,raw in boundary_cases(compact=True):
+        c=sort_topk(raw);inputs=common.upload_inputs(torch,c)
+        for name in chosen:
+            b=common.prepare(torch,c,name,inputs)
+            b['workload']['phase0_boundary_case']=label
+            print('Phase0 boundary:',name,label,flush=True)
+            try:
+                records.append({'case':'phase0/'+label,'implementation':name,
+                    'audit':common.audit(torch,c,b,1,failure_dir)})
+            finally:common.close(b)
+    return records
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);common.add_runtime_arguments(p)
     p.add_argument('--implementations',nargs='+',choices=tuple(dict.fromkeys((*COLD_COMPARE_NAMES,*INTEGRATED_COMPARE_NAMES))),default=list(COLD_COMPARE_NAMES))
@@ -53,7 +73,8 @@ def main():
         torch,_,env=common.load_runtime(a);out['environment']=env
         result=common_gate(torch,a.implementations,a.regression_repeat,a.report.parent/'failure_state')
         result['cold_transitions']=transition_gate(torch,a.implementations,a.report.parent/'failure_state')
-        result['validation_scope']='cold_finish_six_way_v1; existing strict gate + 8-step cold/warm/all-miss/mode transitions'
+        result['phase0_bounds_cases']=bounds_gate(torch,a.implementations,a.report.parent/'failure_state')
+        result['validation_scope']='cold_finish_integrated_bounds_v2; strict gate + 8-step continuations + Phase0 boundary cases when selected'
         out.update(status='passed',gate=result);write_json(a.report,out)
     except BaseException as exc:record_failure(a.report,out,exc);raise
 if __name__=='__main__':main()

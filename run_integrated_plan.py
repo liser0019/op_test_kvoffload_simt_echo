@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""四路固定对照：ABCDF、两条冻结冷优化参考、一个512线程整合候选；仅Plan。"""
+"""五路固定对照：ABCDF、两条冻结冷优化参考、整合版及Phase0首尾判断候选；仅Plan。"""
 from pathlib import Path
 import argparse,json,os,subprocess,sys,time
 ROOT=Path(__file__).resolve().parent
@@ -12,18 +12,18 @@ NAMES=INTEGRATED_COMPARE_NAMES
 
 
 def summary_text(path,report):
-    lines=['# 512线程单行/联合整合：四路固定对照','',
+    lines=['# 512线程整合与Phase0首尾判断：五路固定对照','',
       '所有实现均正式采集，不初筛、不拼接不同实现的赢家。仅设备目标kernel Duration，单位μs。',
       '整合版实际按连续请求组行数选择算法；输入先共同排序，保留重复token和因果可见性。',
       '单行使用private协议；多行使用joint协议；不支持时回退原1024线程逐行实现。',
       '两条冻结参考的MTP0执行路径不同；AC冷参考仍走原1024线程逐行路径。','',
-      '| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 实现/ABCDF | 实现/单行冷参考 | 实现/联合冷参考 | 共享/回退 | 单行有序组 |',
-      '|---|---|---|---:|---:|---:|---:|---|---:|']
+      '| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 实现/ABCDF | 实现/单行冷参考 | 实现/联合冷参考 | 实现/原整合版 | 共享/回退 | 单行有序组 |',
+      '|---|---|---|---:|---:|---:|---:|---:|---|---:|']
     for run in report['runs']:
         w=run['workload'];stats=run['stats']
         for name in NAMES:
             s=stats[name];c=s['correctness']
-            ratios=[s['p50_us']/stats[n]['p50_us'] for n in NAMES[:3]]
+            ratios=[s['p50_us']/stats[n]['p50_us'] for n in NAMES[:4]]
             lines.append(f"| {w['scenario']}/MTP{w['mtp']} | {name} | {s['p50_us']:.3f}/{s['p95_us']:.3f} | {s['count']} | "+' | '.join(f'{r:.3f}' for r in ratios)+f" | {c.get('joint_groups',0)}/{c.get('overflow_groups',0)} | {c.get('single_sorted_groups',0)} |")
     lines+=['','比值方向为左侧实现P50/参考P50，小于1表示更快。整合后可能改变编译资源，不能预先保证继承各参考的最优耗时。',
       '','采集前恢复初态，逐样本完整校验；固定地址预热，不代表生产访问轨迹或冷硬件缓存。',

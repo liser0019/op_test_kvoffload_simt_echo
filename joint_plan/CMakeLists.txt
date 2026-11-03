@@ -97,7 +97,7 @@ set(JOINT_DIR "${JOINT_ROOT}/csrc/joint_plan")
 set(JOINT_FLAGS -O3 --cce-auto-sync=off -Wno-deprecated-declarations
     -mllvm -cce-vf-remove-membar=false -mllvm -cce-aicore-hoist-movemask=false
     -mllvm -cce-aicore-dcci-before-kernel-end=false)
-option(JOINT_INTEGRATED_ONLY "Build integrated512 and its two cold references only" OFF)
+option(JOINT_INTEGRATED_ONLY "Build integrated512, Phase0 bounds candidate and two cold references only" OFF)
 option(JOINT_COLD_COMPARE_ONLY "Build six-way cold finish comparison only" OFF)
 option(JOINT_AC_THREADS_ONLY "Build only AC512/AC256 thread controls and baselines" OFF)
 option(JOINT_UNION_ONLY "Build AC512 reference + new ABCD/thread candidates" OFF)
@@ -180,7 +180,7 @@ if(NOT _catalog_result EQUAL 0)
     message(FATAL_ERROR "Cannot query variant catalog")
 endif()
 foreach(_name IN LISTS JOINT_VARIANT_NAMES)
-    if(JOINT_INTEGRATED_ONLY AND NOT _name MATCHES "^(union_cold_512|hw_ac_cold_512|integrated_512)$")
+    if(JOINT_INTEGRATED_ONLY AND NOT _name MATCHES "^(union_cold_512|hw_ac_cold_512|integrated_512|integrated_bounds_512)$")
         continue()
     endif()
     if(JOINT_COLD_COMPARE_ONLY AND NOT _name MATCHES "^(hw_ac_512|hw_ac_256|union_base_512|union_cold_512|hw_ac_cold_512)$")
@@ -207,7 +207,7 @@ foreach(_name IN LISTS JOINT_VARIANT_NAMES)
             ${JOINT_FLAGS} ${JOINT_INCLUDES} -c "${JOINT_GENERATED}/variant_${_name}.cpp" -o "${_object}"
         DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp"
             "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h" "${JOINT_VARIANT_DIR}/bitmap_plan.h"
-            "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h" "${JOINT_VARIANT_DIR}/union_next_stage.h" "${JOINT_VARIANT_DIR}/union_next_controller.h" "${JOINT_VARIANT_DIR}/union_next_simd.h" "${JOINT_VARIANT_DIR}/cold_finish.h" "${JOINT_VARIANT_DIR}/cold_ac_stage.h" "${JOINT_VARIANT_DIR}/cold_union_stage.h" "${JOINT_VARIANT_DIR}/integrated_stage.h"
+            "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h" "${JOINT_VARIANT_DIR}/union_next_stage.h" "${JOINT_VARIANT_DIR}/union_next_controller.h" "${JOINT_VARIANT_DIR}/union_next_simd.h" "${JOINT_VARIANT_DIR}/cold_finish.h" "${JOINT_VARIANT_DIR}/cold_ac_stage.h" "${JOINT_VARIANT_DIR}/cold_union_stage.h" "${JOINT_VARIANT_DIR}/integrated_stage.h" "${JOINT_VARIANT_DIR}/phase0_bounds_stage.h"
             "${JOINT_DIR}/launch.h" "${JOINT_DIR}/sparse_kv_plan_config.h"
             "${JOINT_ROOT}/joint_plan_manifest.json"
         COMMENT "Compile Joint experiment ${_name}" VERBATIM)

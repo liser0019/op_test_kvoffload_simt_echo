@@ -7,7 +7,7 @@ import os
 import platform
 from pathlib import Path
 import numpy as np
-from joint_variants import supports_single_sorted
+from joint_variants import supports_single_sorted,INTEGRATED_NAMES
 from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
@@ -81,7 +81,7 @@ def prepare(torch, case, name, inputs=None):
     if name in MERGE_NAMES:
         require_sorted_topk(case)
     # Integrated entry groups actual tokenToReq runs even if a fixture calls it MTP0.
-    enabled = is_joint(name) and (case["mtp"] > 0 or name == "joint_integrated_512")
+    enabled = is_joint(name) and (case["mtp"] > 0 or name in INTEGRATED_NAMES)
     union_next = name.startswith("joint_union_")
     controller_enabled = enabled or supports_single_sorted(name)
     is_turbo = VARIANTS.get(name) in TURBO_MASKS

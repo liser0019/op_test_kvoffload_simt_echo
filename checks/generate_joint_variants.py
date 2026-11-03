@@ -17,7 +17,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
                "sparse_kv_plan_private_kernel")
     declarations, entries = [], ["nullptr"] * (max(MASKS.values()) + 1)
     for letters, mask in MASKS.items():
-        if integrated_only and letters not in ("union_cold_512","hw_ac_cold_512","integrated_512"): continue
+        if integrated_only and letters not in ("union_cold_512","hw_ac_cold_512","integrated_512","integrated_bounds_512"): continue
         if cold_compare_only and letters not in ("hw_ac_512","hw_ac_256","union_base_512",*COLD_SWEEP): continue
         if ac_threads_only and letters not in ("hw_ac_512", "hw_ac_256"): continue
         if union_only and letters not in ("hw_ac_512", "hw_ac_256", "hw_ac_cold_512") and not letters.startswith("union_"): continue
@@ -29,8 +29,9 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
             continue
         replacements = {name: name + "_" + letters for name in symbols}
         text = f"// Generated symbol wrapper; Joint options={letters}, mask={mask}.\n#define JOINT_OPT_MASK {algorithm_mask(mask)}\n"
-        if mask in COLD_SWEEP.values() or mask==125: text += "#define JOINT_COLD_FINISH 1\n"
-        if mask==125: text += "#define JOINT_INTEGRATED 1\n"
+        if mask in COLD_SWEEP.values() or mask in (125,126): text += "#define JOINT_COLD_FINISH 1\n"
+        if mask in (125,126): text += "#define JOINT_INTEGRATED 1\n"
+        if mask==126: text += "#define JOINT_PHASE0_BOUNDS 1\n"
         text += "".join(f"#define {name} {new}\n" for name, new in replacements.items())
         text += '#include "' + str(ROOT / "csrc/joint_variants/kernel.cpp") + '"\n'
         (destination / f"variant_{letters}.cpp").write_text(text)
@@ -42,8 +43,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
     text += "inline decltype(&launch_joint_plan) JointVariantLaunch(int64_t mask) {\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {" + ", ".join(entries) + "};\n"
-    text += "  return mask > 0 && mask <= 125 ? launches[mask] : nullptr;\n}\n"
-    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125) ? 72 : mask; }\n'
+    text += "  return mask > 0 && mask <= 126 ? launches[mask] : nullptr;\n}\n"
+    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126) ? 72 : mask; }\n'
     text += signature + " {\n  auto launch = JointVariantLaunch(mask);\n"
     text += "  if (!launch) throw std::invalid_argument(\"joint mask not built\");\n"
     text += "  launch(" + args + ");\n}\n"

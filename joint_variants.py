@@ -35,10 +35,13 @@ MASKS.update(UNION_SWEEP)
 COLD_SWEEP={"union_cold_512":123,"hw_ac_cold_512":124}
 MASKS.update(COLD_SWEEP)
 MASKS["integrated_512"]=125
+MASKS["integrated_bounds_512"]=126
 INTEGRATED_NAME="joint_integrated_512"
-INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",INTEGRATED_NAME)
+BOUNDS_NAME="joint_integrated_bounds_512"
+INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME)
+INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",*INTEGRATED_NAMES)
 def supports_single_sorted(name):
-    return name.startswith("joint_union_") or name==INTEGRATED_NAME
+    return name.startswith("joint_union_") or name in INTEGRATED_NAMES
 
 COLD_NAMES=tuple("joint_"+n for n in COLD_SWEEP)
 COLD_COMPARE_NAMES=("abcdf_pages","joint_hw_ac_512","joint_hw_ac_256","joint_union_base_512",*COLD_NAMES)
@@ -50,16 +53,16 @@ def union_config(name):
             "descriptor_tail":"preserve" if (mask-74)&8 else "minus_one"}
 
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
-SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, INTEGRATED_NAME)
+SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 126))
+TURBO_MASKS = tuple(range(17, 127))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return {122:59,123:90,124:72,125:72}.get(mask,mask)
+    return {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -68,6 +71,10 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask==126:
+        return description(INTEGRATED_NAME) | {"mask":126,"parent":INTEGRATED_NAME,
+            "new_optimization_factors":["Phase0 sorted TopK endpoints bypass both lower_bounds when all valid"],
+            "phase0_bounds":True,"bounds_fallback":"unchanged lower_bound(0) and lower_bound(clipped row upper)"}
     if mask==125:
         return {"mask":125,"algorithm_mask":72,"threads":512,"private_fallback_threads":1024,
                 "structure":"one sorted controller; singleton private + multi-row joint",

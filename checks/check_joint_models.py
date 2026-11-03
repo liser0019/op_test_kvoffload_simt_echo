@@ -305,7 +305,7 @@ class VariantChecks(unittest.TestCase):
     def test_all_masks_unique_symbols_and_dispatch(self):
         from joint_variants import MASKS, algorithm_mask
         from checks.generate_joint_variants import generate
-        self.assertEqual(set(MASKS.values()), set(range(1, 126)))
+        self.assertEqual(set(MASKS.values()), set(range(1, 127)))
         self.assertEqual(len(set(common.KERNELS.values())), len(common.IMPLEMENTATIONS))
         with tempfile.TemporaryDirectory() as tmp:
             generate(tmp)
