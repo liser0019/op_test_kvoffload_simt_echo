@@ -73,6 +73,12 @@ struct CastTrait {RegLayout layoutMode;SatMode satMode;MaskMergeMode mrgMode;Rou
 template<typename T>struct RegTensor { T v[64]{}; };
 struct MaskReg { bool v[64]{}; };
 enum class MaskPattern { ALL };
+enum class LoadDist { DIST_DINTLV_B32 };
+template<typename T,LoadDist dist>void LoadAlign(RegTensor<T>& a,RegTensor<T>& b,T* p){
+  static_assert(sizeof(T)==4 && dist==LoadDist::DIST_DINTLV_B32);
+  assert(reinterpret_cast<uintptr_t>(p)%32U==0U);
+  for(int i=0;i<64;++i){std::memcpy(&a.v[i],p+2*i,4);std::memcpy(&b.v[i],p+2*i+1,4);}
+}
 template<typename T,MaskPattern P=MaskPattern::ALL>MaskReg CreateMask(){MaskReg m;for(auto&v:m.v)v=true;return m;}
 template<typename T>MaskReg UpdateMask(uint32_t& n){MaskReg m;for(uint32_t i=0;i<64;++i)m.v[i]=i<n;n=n>64?n-64:0;return m;}
 template<typename T>void LoadAlign(RegTensor<T>&o,T*p){assert(reinterpret_cast<uintptr_t>(p)%4==0);for(int i=0;i<64;++i)o.v[i]=p[i];}

@@ -118,7 +118,31 @@ extern "C" __attribute__((visibility("default"))) void run_refine_bool(
 extern "C" __attribute__((visibility("default"))) void run_refine_unique(
     int32_t* records,int32_t* data,int32_t* ctx,uint32_t n,uint32_t q,uint32_t capacity,
     uint32_t initialCount,int32_t initialLast,uint32_t more){
+#ifdef JOINT_EXEC
+  ExecUniqueMapVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more);
+#else
   RefineUniqueMapVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more);
+#endif
 }
 #endif
+#endif
+
+#ifdef JOINT_EXEC
+extern "C" __attribute__((visibility("default"))) void run_exec_packed(
+    const int32_t* classes,uint32_t n,uint32_t* ranks,uint32_t* finalTotal){
+  std::vector<int32_t> scan(PLAN_SCAN_STORAGE_ELEMENTS,0);
+  if(!SortedWorkers||SortedWorkerCount!=SORTED_THREADS){
+    SortedWorkers.reset();SortedWorkers=std::make_unique<CpuWorkers>(SORTED_THREADS);SortedWorkerCount=SORTED_THREADS;
+  }
+  SortedWorkers->Run([&]{
+    uint32_t t=threadIdx.x,parity=0,base=0;
+    for(uint32_t tile=0;tile<n;tile+=SORTED_THREADS){
+      const uint32_t i=tile+t;const int32_t c=i<n?classes[i]:-1;int32_t total=0;
+      const int32_t rank=ExecPackedScan(scan.data(),c==0,c==1,t,parity,total);
+      if(i<n)ranks[i]=base+static_cast<uint32_t>(rank);
+      asc_syncthreads();base+=static_cast<uint32_t>(total);
+    }
+    if(t==0)*finalTotal=base;
+  });
+}
 #endif

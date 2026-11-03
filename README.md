@@ -1,3 +1,9 @@
+## 当前实验：ABD512执行优化四因素组合
+
+基于已上机验证的 `joint_refine_abd_512`，新增交错加载、hit/evict ballot Scan、单行VF合并、打包游标四项及16配置；另保留ABCDF、bounds、旧ABD、旧BD，共20路。固定512线程，旧算法及回退保留。入口 `bash scripts/test_exec_sweep.sh --device 3`，自动构建→门禁→初筛→独立50样本复测；加 `--full-confirm` 全部正式采集。详见[中文教程](docs/ABD512执行优化组合实验.md)。新候选尚未进行本机CANN/NPU验证。
+
+以下为历史实验说明。
+
 ## 当前实验：冻结 bounds512＋新 A/B/C/D 全组合
 
 以 `joint_integrated_bounds_512` 为参考，新加单行直接构造、ballot Scan、resident UB快照、完整SIMD Phase3四项及16配置；固定512线程，保留原回退。默认18路门禁→全路短采样→独立50样本复测，也可 `--full-confirm` 全部正式采集。入口 `bash scripts/test_refine_sweep.sh --device 0`，详见[中文教程](docs/bounds512_ABCD组合优化.md)。新增候选仅通过本地CPU模型/静态检查，尚待CANN/NPU验证。

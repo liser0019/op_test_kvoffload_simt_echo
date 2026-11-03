@@ -46,7 +46,15 @@ REFINE_SWEEP={"refine_"+("".join(c for i,c in enumerate(REFINE_OPTIONS) if bits&
 MASKS.update(REFINE_SWEEP)
 REFINE_NAMES=tuple("joint_"+n for n in REFINE_SWEEP)
 REFINE_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_base_512")
-INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES)
+EXEC_OPTIONS={"a":"full-block deinterleaving LoadAlign; masked Gather tail",
+              "b":"hit/evict packed ballot Scan; old cross-warp/barriers retained",
+              "c":"single actual group Phase0+5 in one SIMT VF",
+              "d":"packet index carry cursor when chunk>=threads; old small-chunk path"}
+EXEC_SWEEP={"exec_"+("".join(c for i,c in enumerate(EXEC_OPTIONS) if bits&(1<<i)) or "base")+"_512":143+bits for bits in range(16)}
+MASKS.update(EXEC_SWEEP)
+EXEC_NAMES=tuple("joint_"+n for n in EXEC_SWEEP)
+EXEC_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_abd_512","joint_refine_bd_512","joint_exec_base_512")
+INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES)
 INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",INTEGRATED_NAME,BOUNDS_NAME)
 def supports_single_sorted(name):
     return name.startswith("joint_union_") or name in INTEGRATED_NAMES
@@ -63,14 +71,14 @@ def union_config(name):
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 143))
+TURBO_MASKS = tuple(range(17, 159))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return 72 if 127<=mask<=142 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
+    return 72 if 127<=mask<=158 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -79,6 +87,13 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if 143<=mask<=158:
+        bits=mask-143
+        return description("joint_refine_abd_512") | {"mask":mask,"exec_bits":bits,"parent":"joint_refine_abd_512",
+            "structure":"ABD512 execution-factor factorial",
+            "new_optimization_factors":[v for i,v in enumerate(EXEC_OPTIONS.values()) if bits&(1<<i)],
+            "load_tail":"old masked Gather for <64 records",
+            "fused_single":"Phase0 and Phase5 share one VF; original block barriers retained"}
     if 127<=mask<=142:
         bits=mask-127
         return description(BOUNDS_NAME) | {"mask":mask,"refine_bits":bits,"parent":BOUNDS_NAME,
