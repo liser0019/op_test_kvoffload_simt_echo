@@ -1,6 +1,6 @@
 ## 本轮：硬件归并新 ABCD × 1024/512/256
 
-新增48个组合候选，以带页表ABCDF和已验证AC512为固定参考；增加MTP0单行有序private路径。详见 [中文教程](docs/硬件归并_ABCD与线程对照.md)。服务器入口 `bash scripts/test_union_next.sh --device 0`，自动构建、门禁、初筛和独立50样本复测。新候选尚待CANN9.1/NPU验证。
+新增48个组合候选及原AC的256线程对照，以带页表ABCDF和已验证AC512为固定参考；增加MTP0单行有序private路径。详见 [中文教程](docs/硬件归并_ABCD与线程对照.md)。服务器入口 `bash scripts/test_union_next.sh --device 0`，自动构建、门禁、初筛和独立50样本复测。新候选尚待CANN9.1/NPU验证。
 
 本分支新增 Turbo A/B/AB 的最小对照实验，说明与上机命令见 [分阶段查询与行 Scan](docs/Turbo_分阶段查询与行Scan实验.md)。尚未在开发机执行 CANN/NPU 验证。
 

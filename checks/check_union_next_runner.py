@@ -3,7 +3,7 @@
 from pathlib import Path
 import copy,json,sys,tempfile,unittest
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-from run_union_next_sweep import select_candidates,validate_confirmation,read_complete,REFS
+from run_union_next_sweep import select_candidates,validate_confirmation,read_complete,REFS,build_mode_for
 
 def report():
     r={'environment':{k:'same' for k in ('device','device_name','hostname','library_sha256','identity')},'status':'complete','runs':[]}
@@ -18,6 +18,18 @@ class Checks(unittest.TestCase):
         names,ranking=select_candidates(report(),1)
         self.assertEqual(names[:2],list(REFS));self.assertEqual(set(names[2:]),{'joint_union_a_512','joint_union_b_512'})
         self.assertEqual(len(ranking),3)
+    def test_ac256_independent_name_and_selection(self):
+        from joint_variants import VARIANTS,algorithm_mask,description
+        self.assertEqual(VARIANTS['joint_hw_ac_256'],122)
+        self.assertEqual(algorithm_mask(122),VARIANTS['joint_hw_ace'])
+        self.assertEqual(description('joint_hw_ac_256')['threads'],256)
+        self.assertEqual(build_mode_for((*REFS,'joint_hw_ac_256')),'--ac-threads-only')
+        self.assertEqual(build_mode_for((*REFS,'joint_union_base_512')),'--union-only')
+        self.assertFalse(description('joint_hw_ac_256')['single_sorted'])
+        r=report()
+        for run in r['runs']:run['stats']['joint_hw_ac_256']={'p50_us':0.5}
+        selected,_=select_candidates(r,1)
+        self.assertEqual(selected,[*REFS,'joint_hw_ac_256'])
     def test_confirmation_identity(self):
         a=report();b=copy.deepcopy(a);validate_confirmation(a,b)
         b['runs'][0]['workload']['logical_input_sha256']='wrong'
@@ -34,23 +46,24 @@ class Checks(unittest.TestCase):
             with self.assertRaises(RuntimeError):read_complete(root,expected_count=50)
             r['status']='running';f.write_text(json.dumps(r))
             with self.assertRaises(RuntimeError):read_complete(root)
-    def test_all_50_kernel_names_and_order(self):
+    def test_all_comparison_kernel_names_and_order(self):
         from joint_variants import UNION_NAMES
         from profile_joint_mtp import execution_order,read_kernels,duration_ratios
         import joint_plan_common as common
-        names=(*REFS,*UNION_NAMES)
+        names=(*REFS,*UNION_NAMES,"joint_hw_ac_256")
         order=[n for step in range(5) for n in execution_order(names,step)]
         with tempfile.TemporaryDirectory() as t:
             path=Path(t)/'kernel_details.csv'
             rows=['Name,Duration(us),Start Time(us)','TensorMove,1,0']
             rows += [f'{common.KERNELS[n]},1,{10+i*10}' for i,n in enumerate(order)]
             path.write_text('\n'.join(rows)+'\n')
-            self.assertEqual(len(read_kernels([path],names,5,order)),250)
+            self.assertEqual(len(read_kernels([path],names,5,order)),len(names)*5)
             with self.assertRaises(RuntimeError):read_kernels([path],names,5,list(reversed(order)))
             path.write_text('\n'.join(rows[:-1])+'\n')
             with self.assertRaises(RuntimeError):read_kernels([path],names,5,order)
         stats={n:{'p50_us':10} for n in names}
         self.assertEqual(duration_ratios(stats)['joint_union_abcd_256_over_joint_hw_ac_512_p50'],1.0)
+        self.assertEqual(duration_ratios(stats)['joint_hw_ac_256_over_joint_hw_ac_512_p50'],1.0)
     def test_old_and_new_script_entry_files_exist(self):
         for n in ('checks/check_union_next_npu.py','profile_joint_mtp.py','run_union_next_sweep.py'):self.assertTrue((ROOT/n).is_file())
         self.assertNotIn('check_sorted_hardware_npu.py',(ROOT/'scripts/test_sorted_hardware.sh').read_text())

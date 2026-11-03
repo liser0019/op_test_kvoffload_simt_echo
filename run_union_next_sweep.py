@@ -4,11 +4,16 @@ from pathlib import Path
 import argparse,json,math,os,subprocess,sys,time
 ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT));sys.dont_write_bytecode=True
-from joint_variants import UNION_NAMES as HW_NAMES
+from joint_variants import UNION_NAMES
+HW_NAMES=(*UNION_NAMES,"joint_hw_ac_256")
 from joint_variants import description
 import joint_plan_common as common
 from harness_io import preflight_args,write_json,record_failure
 REFS=('abcdf_pages','joint_hw_ac_512')
+
+
+def build_mode_for(names):
+    return "--ac-threads-only" if set(names)<=set((*REFS,"joint_hw_ac_256")) else "--union-only"
 
 
 def workload_key(run):
@@ -57,7 +62,7 @@ def validate_confirmation(screen,confirm):
 
 def summary_text(screen_path,confirm_path,screen,confirm,selected):
     lines=['# 归并 ABCD × 三档线程：独立复测结果','',
-        '下表仅使用复测样本；初筛用于入围，不能与复测样本混合统计。MTP0单独排名，其新候选保持private协议并执行单行有序规划。',
+        '下表仅使用复测样本；初筛用于入围，不能与复测样本混合统计。MTP0单独排名；union_*使用单行有序private路径，AC256/AC512仍使用原1024线程逐行路径。',
         '参考硬件版是已验证的joint_hw_ac_512；小于1表示候选更快。','',
         '| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 候选/ABCDF | 候选/参考硬件 | 共享/回退 | 单行有序适用组 |',
         '|---|---|---|---:|---:|---:|---|---:|']
@@ -68,7 +73,7 @@ def summary_text(screen_path,confirm_path,screen,confirm,selected):
     lines+=['','初筛：'+str(screen_path),'','复测：'+str(confirm_path),'','入围：'+', '.join(selected),
         '','所有候选以AC硬件归并为共同基础；A/B/C/D是本轮新因素，与上一轮同名字母不同。',
         'D只保证有效miss前缀，未使用尾部严格保持调用前值；不修改或削弱其余状态/输出/保护区检查。',
-        'MTP0新路径保留private状态协议；不满足单行严格递增等条件时走原1024线程回退。',
+        'MTP0的union_*新路径保留private协议；AC256/AC512的MTP0和所有逐行回退仍为原1024线程。',
         '','全部原始CSV路径、样本及源码/库身份分别保留在两份采集目录的data_index.json/capture_metadata.json。',
         '','每种输入单独观察P50、P95和回退；不将不同工况临时挑选出的赢家说成同一固定版本。未测Transfer/SFA。']
     return '\n'.join(lines)+'\n'
@@ -108,7 +113,8 @@ def main():
             print('首个异常:',first,'\n日志末尾:\n'+'\n'.join(lines[-25:]),flush=True)
             raise RuntimeError(f'{label} failed rc={result.returncode}; log={log}; first={first}')
     try:
-        if not a.skip_build:run(['bash','build_joint_plan.sh','--soc=ascend950','--union-only'],'build')
+        build_mode=build_mode_for(a.implementations)
+        if not a.skip_build:run(['bash','build_joint_plan.sh','--soc=ascend950',build_mode],'build')
         runtime=['--device',str(a.device),'--library',str(a.library.resolve()),'--temp-dir',str(a.temp_dir.resolve()),
                  '--min-output-free-bytes',str(a.min_output_free_bytes),'--min-temp-free-bytes',str(a.min_temp_free_bytes),
                  '--min-free-inodes',str(a.min_free_inodes)]

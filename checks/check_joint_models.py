@@ -303,16 +303,16 @@ class VariantChecks(unittest.TestCase):
             self.assertTrue(np.all(values < cases[2]["visible_seq_lens"][row]))
 
     def test_all_masks_unique_symbols_and_dispatch(self):
-        from joint_variants import MASKS
+        from joint_variants import MASKS, algorithm_mask
         from checks.generate_joint_variants import generate
-        self.assertEqual(set(MASKS.values()), set(range(1, 122)))
+        self.assertEqual(set(MASKS.values()), set(range(1, 123)))
         self.assertEqual(len(set(common.KERNELS.values())), len(common.IMPLEMENTATIONS))
         with tempfile.TemporaryDirectory() as tmp:
             generate(tmp)
             dispatcher = (Path(tmp) / "variant_dispatch.h").read_text()
             for letters, mask in MASKS.items():
                 source = (Path(tmp) / ("variant_" + letters + ".cpp")).read_text()
-                self.assertIn(f"#define JOINT_OPT_MASK {mask}", source)
+                self.assertIn(f"#define JOINT_OPT_MASK {algorithm_mask(mask)}", source)
                 self.assertIn(f"#define JointDirectBody JointDirectBody_{letters}", source)
                 self.assertIn(f"&launch_joint_plan_{letters}", dispatcher)
 

@@ -72,7 +72,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 121, "joint variant mask must be 1..121");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 122, "joint variant mask must be 1..122");
     TORCH_CHECK(JointVariantLaunch(variantMask) != nullptr, "joint variant not compiled in this build");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
@@ -111,27 +111,28 @@ class Prepared : public torch::CustomClassHolder {
     d.jointHashCapacity = attrs[4] ? HashSize(c) : 0U;
     const uint64_t jointElements = 2U * d.jointHashCapacity + c;
     d.scratchElements = d.workspaceRowElements > jointElements ? d.workspaceRowElements : jointElements;
-    if (variantMask == 16 && attrs[4]) {
+    const int64_t algorithmMask=JointVariantAlgorithmMask(variantMask);
+    if (algorithmMask == 16 && attrs[4]) {
       const uint64_t bitmapElements = (static_cast<uint64_t>(attrs[2]) + 31U) / 32U + 2U * c;
       d.scratchElements = std::max(d.workspaceRowElements, bitmapElements);
-    } else if (variantMask >= 17 && attrs[4]) {
+    } else if (algorithmMask >= 17 && attrs[4]) {
       const uint64_t turboElements = 2U * d.jointHashCapacity + static_cast<uint64_t>(c) +
                                      4U * static_cast<uint64_t>(t);
       d.scratchElements = std::max(d.workspaceRowElements, turboElements);
     }
-    if (variantMask >= 37 && attrs[4])
-      d.scratchElements = std::max(d.workspaceRowElements, (variantMask>=74?uint64_t{128}:uint64_t{64}) + ((4U*t+c+7U)&~uint64_t{7U}) + std::max(uint64_t{3}*c,uint64_t{64}));
+    if (algorithmMask >= 37 && attrs[4])
+      d.scratchElements = std::max(d.workspaceRowElements, (algorithmMask>=74?uint64_t{128}:uint64_t{64}) + ((4U*t+c+7U)&~uint64_t{7U}) + std::max(uint64_t{3}*c,uint64_t{64}));
     const uint64_t alignedBytes = (d.scratchElements * 4U + 31U) & ~uint64_t{31U};
     const bool ub = alignedBytes <= sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_BYTES;
     uint64_t stageBytes=0;
-    if(variantMask>=37) {
+    if(algorithmMask>=37) {
       const uint64_t chunk=(std::min(uint64_t{768}, std::max(uint64_t{64},uint64_t{3}*c)/16U)/4U)*4U;
-      stageBytes=((variantMask>=74?128U:64U)+16U*chunk)*4U;
+      stageBytes=((algorithmMask>=74?128U:64U)+16U*chunk)*4U;
     }
     d.localMemoryBytes = sparse_kv_plan_config::PLAN_SCAN_BYTES + (ub ? alignedBytes : stageBytes);
     TORCH_CHECK(d.scratchElements <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / rows),
                 "joint workspace size overflow");
-    const uint64_t requiredWorkspace = variantMask == 16 ?
+    const uint64_t requiredWorkspace = algorithmMask == 16 ?
         static_cast<uint64_t>(rows) * (d.scratchElements + static_cast<uint64_t>(attrs[2])) :
         (ub ? 1U : static_cast<uint64_t>(rows) * d.scratchElements);
     TORCH_CHECK(requiredWorkspace <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()), "bitmap workspace overflow");

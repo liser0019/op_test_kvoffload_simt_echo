@@ -4,7 +4,7 @@
 
 ## 实验目录与命名
 
-`joint_union_{组合}_{线程数}`，组合为 `base/a/b/ab/c/ac/bc/abc/d/ad/bd/abd/cd/acd/bcd/abcd`，线程数为 `1024/512/256`。共 48 个新候选，加两条参考共 50 路。新 `base` 没有本轮 ABCD，保留 AC 的硬件归并基础并增加单行有序能力、128-word 控制区；不是与历史 AC512 二进制相同的别名。
+`joint_union_{组合}_{线程数}`，组合为 `base/a/b/ab/c/ac/bc/abc/d/ad/bd/abd/cd/acd/bcd/abcd`，线程数为 `1024/512/256`。共48个组合候选，另加原AC的256线程对照及两条固定参考，默认51路。新 `base` 没有本轮 ABCD，保留 AC 的硬件归并基础并增加单行有序能力、128-word 控制区；不是与历史 AC512 二进制相同的别名。
 
 本轮 ABCD 与历史 `hw_ac_512` 的字母含义不同。
 
@@ -134,3 +134,21 @@ API核对参考：CANN9.1的 [寄存器Gather](https://www.hiascend.com/document
 CANN9.1 的 `Reg::ShiftLefts` 标量移位量要求为 `int16_t`，与向量元素为 `uint32_t` 是两个独立约束。原提交381a3a5两处使用了uint32_t标量；现已分别改成 `int16_t{1}`、`int16_t{16}`，位数和算法不变。CPU API模型新增编译期约束，回归检查确认int16_t可编译、旧uint32_t写法被拒绝。
 
 用户回传的服务器结果身份为“381a3a5＋两处ShiftLefts参数类型修正”，不能表述为原提交未经修改直接通过。这里仅固化明确的API修正；没有在开发机执行CANN9.1或NPU验证，也没有据此确认服务器完整源码及二进制与本次提交逐字相同。
+
+## 原 AC512 的256线程对照
+
+增加 `joint_hw_ac_256`。它使用原 `sorted_sweep_stage.h` / `sorted_sweep_controller.h`，与AC512相同的A/C优化及64-word控制区，不引入union_*的单行有序路径和本轮ABCD。联合阶段256线程，MTP0与所有private回退仍是1024线程。因此MTP0不是“256 vs 512线程”实验。
+
+旧五因素的 `joint_hw_ace` 已是A+C+E，其中E为256线程。本次新增明确命名的独立启动符号：公共ID122映射到原算法配置59，kernel名为 `sparse_kv_plan_joint_kernel_hw_ac_256`。生成器和Host tiling使用同一配置映射，库身份保留公共ID与实际算法配置。原AC512的计算主体未改动；不能将此候选称为新的算法优化。
+
+新入口纳入 `--union-only` 构建及新旧sweep目录；新一键入口默认也包含它。仅测试原AC的512/256对照（加ABCDF参考），使用全新结果目录：
+
+```bash
+bash scripts/test_union_next.sh --device 0 \
+  --implementations abcdf_pages joint_hw_ac_512 joint_hw_ac_256 \
+  --output /workspace/single_op_test/ac_512_vs_256_results_01
+```
+
+脚本重新构建、运行门禁，再对cold/full_cache_75pct的MTP0/1/3进行初筛和独立50样本复测。已有库若不包含AC256，不可使用 `--skip-build`。缺少新启动入口时Prepared检查会拒绝下发。此新增入口只做CPU/源码检查，CANN9.1与NPU性能待服务器验证。
+
+只选择ABCDF/AC512/AC256时，一键脚本自动使用 `--ac-threads-only` 精简构建，仅编译两份AC候选及必要基线/接入，不编译48个union组合。也可单独 `bash build_joint_plan.sh --soc=ascend950 --ac-threads-only`，随后以相同三路参数配合 `--skip-build` 采集。原 `--union-only` 也包含AC256，可继续跑完整矩阵。

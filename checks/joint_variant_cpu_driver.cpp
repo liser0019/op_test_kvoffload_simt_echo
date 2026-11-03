@@ -62,3 +62,9 @@ extern "C" __attribute__((visibility("default"))) void run_next_prefix(int32_t* 
   NextPrefixVf(packet,lanes,n,last);
 }
 #endif
+
+#if JOINT_OPT_MASK >= 39 && JOINT_OPT_MASK <= 73
+extern "C" __attribute__((visibility("default"))) void sorted_config(uint32_t* out){
+  out[0]=SORTED_THREADS;out[1]=PLAN_THREADS;out[2]=HW_BITS;
+}
+#endif

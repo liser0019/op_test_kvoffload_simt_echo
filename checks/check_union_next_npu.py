@@ -49,7 +49,7 @@ def gate(torch,names,repeats,failure_dir):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);common.add_runtime_arguments(p)
-    p.add_argument('--implementations',nargs='+',choices=('abcdf_pages','joint_hw_ac_512',*UNION_NAMES),default=['abcdf_pages','joint_hw_ac_512',*UNION_NAMES])
+    p.add_argument('--implementations',nargs='+',choices=('abcdf_pages','joint_hw_ac_512','joint_hw_ac_256',*UNION_NAMES),default=['abcdf_pages','joint_hw_ac_512','joint_hw_ac_256',*UNION_NAMES])
     p.add_argument('--regression-repeat',type=int,default=5);p.add_argument('--report',type=Path,required=True);a=p.parse_args()
     if a.regression_repeat<=0 or len(a.implementations)!=len(set(a.implementations)):p.error('positive repeat; no duplicate implementation')
     storage=preflight_args(a,a.report.parent);out={'status':'running','storage':storage}

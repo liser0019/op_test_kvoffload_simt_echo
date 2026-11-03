@@ -12,12 +12,13 @@ import tempfile
 import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from joint_variants import MASKS
+from joint_variants import MASKS, algorithm_mask
 from joint_plan_cases import make_case, initial_arrays, validate, layout, INPUTS, OUTPUTS, validate_abcdf
 from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
+    mask = algorithm_mask(mask)
     source = (ROOT / "csrc/joint_variants/kernel.cpp").read_text()
     source = source[:source.index("// Direct launch adaptation only:")]
     source = source.replace('../joint_plan/', '')

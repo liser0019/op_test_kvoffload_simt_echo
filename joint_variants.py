@@ -23,7 +23,7 @@ HW_OPTIONS={"a":"no empty refill / direct single queue", "b":"32-bin resident se
             "c":"group-sized map and adaptive/full packets", "d":"retain unconsumed UB heads",
             "e":"256-thread joint VFs; original private fallback"}
 HW_SWEEP={"hw_"+"".join(c for i,c in enumerate(HW_OPTIONS) if bits&(1<<i)):38+bits for bits in range(1,32)}
-HW_SWEEP.update(hw_abcd_512=70,hw_bcd_512=71,hw_ac_512=72,hw_c_512=73)
+HW_SWEEP.update(hw_abcd_512=70,hw_bcd_512=71,hw_ac_512=72,hw_c_512=73,hw_ac_256=122)
 MASKS.update(HW_SWEEP)
 UNION_OPTIONS = {"a": "SIMD adjacent flags + register inclusive prefix; SIMT scatter without Scan",
                  "b": "uint16 query-to-union map in UB, int32 GM fallback",
@@ -35,16 +35,21 @@ MASKS.update(UNION_SWEEP)
 UNION_NAMES=tuple("joint_"+n for n in UNION_SWEEP)
 def union_config(name):
     mask=VARIANTS.get(name,0)
-    if mask<74: return None
+    if not 74<=mask<=121: return None
     return {"bits":(mask-74)%16,"threads":(1024,512,256)[(mask-74)//16],"single_sorted":True,
             "descriptor_tail":"preserve" if (mask-74)&8 else "minus_one"}
 
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 122))
+TURBO_MASKS = tuple(range(17, 123))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
+
+
+def algorithm_mask(mask):
+    """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
+    return 59 if mask == 122 else mask
 
 
 def is_joint(name):
@@ -53,6 +58,13 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask == 122:
+        return {"mask":122,"algorithm_mask":59,"hardware_bits":21,"threads":256,
+                "structure":"explicit AC256 launch; existing ACE compute configuration",
+                "merge_engine":"hardware MrgSort","optimizations":[HW_OPTIONS[k] for k in ("a","c","e")],
+                "equivalent_configuration_of":"joint_hw_ace","baseline":"abcdf_pages",
+                "hardware_reference":"joint_hw_ac_512","private_fallback_threads":1024,
+                "single_sorted":False,"descriptor_tail":"minus_one"}
     if mask >= 74:
         c=union_config(name)
         return {"mask":mask,**c,"structure":"AC hardware foundation + new ABCD factorial",
