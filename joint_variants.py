@@ -32,6 +32,10 @@ UNION_OPTIONS = {"a": "SIMD adjacent flags + register inclusive prefix; SIMT sca
 UNION_SWEEP = {"union_" + ("".join(c for i,c in enumerate(UNION_OPTIONS) if bits & (1<<i)) or "base") + "_" + str(threads):
                74 + group*16 + bits for group,threads in enumerate((1024,512,256)) for bits in range(16)}
 MASKS.update(UNION_SWEEP)
+COLD_SWEEP={"union_cold_512":123,"hw_ac_cold_512":124}
+MASKS.update(COLD_SWEEP)
+COLD_NAMES=tuple("joint_"+n for n in COLD_SWEEP)
+COLD_COMPARE_NAMES=("abcdf_pages","joint_hw_ac_512","joint_hw_ac_256","joint_union_base_512",*COLD_NAMES)
 UNION_NAMES=tuple("joint_"+n for n in UNION_SWEEP)
 def union_config(name):
     mask=VARIANTS.get(name,0)
@@ -40,16 +44,16 @@ def union_config(name):
             "descriptor_tail":"preserve" if (mask-74)&8 else "minus_one"}
 
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
-SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES)
+SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 123))
+TURBO_MASKS = tuple(range(17, 125))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return 59 if mask == 122 else mask
+    return {122:59,123:90,124:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -58,6 +62,13 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask in (123,124):
+        parent="joint_union_base_512" if mask==123 else "joint_hw_ac_512"
+        return description(parent) | {"mask":mask,"algorithm_mask":algorithm_mask(mask),
+            "cold_finish":True,"parent":parent,"threads":512,
+            "reset_only":"request identity or mode mismatch; all-miss is NOT reset",
+            "descriptor_tail":"minus_one","private_fallback_threads":1024,
+            "single_sorted":mask==123,"mtp0_cold_finish":mask==123}
     if mask == 122:
         return {"mask":122,"algorithm_mask":59,"hardware_bits":21,"threads":256,
                 "structure":"explicit AC256 launch; existing ACE compute configuration",

@@ -12,12 +12,13 @@ import tempfile
 import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from joint_variants import MASKS, algorithm_mask
+from joint_variants import MASKS, algorithm_mask, COLD_SWEEP
 from joint_plan_cases import make_case, initial_arrays, validate, layout, INPUTS, OUTPUTS, validate_abcdf
 from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
+    cold = mask in COLD_SWEEP.values()
     mask = algorithm_mask(mask)
     source = (ROOT / "csrc/joint_variants/kernel.cpp").read_text()
     source = source[:source.index("// Direct launch adaptation only:")]
@@ -28,7 +29,7 @@ def build(directory, mask, model_threads=64):
     config, count = re.subn(r'PLAN_THREADS = 1024U', f'PLAN_THREADS = {model_threads}U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -47,7 +48,7 @@ def build(directory, mask, model_threads=64):
     library = directory / 'kernel.so'
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
-                    '-DJOINT_OPT_MASK=' + str(mask), '-I' + str(directory),
+                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), '-I' + str(directory),
                     '-I' + str(ROOT / 'checks/simt_variants'),
                     str(ROOT / 'checks/joint_variant_cpu_driver.cpp'), '-o', str(library)], check=True)
     return library

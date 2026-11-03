@@ -159,11 +159,28 @@ def expected_fixed_helper(original):
         "PlanJointUnion(a, first, end, keys, slots, partition, scan, thread);",
         "PlanJointUnion(a, first, end, keys, slots, partition, scan, modeOutput, thread);")
 
+def expected_cold_stage(text,single):
+    lines=[line for line in text.splitlines(True) if 'const int64_t reqid=a.reqIds[req];const bool reset=' in line]
+    if len(lines)!=1:raise ValueError('Cold finish reset insertion anchor changed')
+    hook="""    if (reset) {
+      // Uniform reset: no thread may publish mode/ID until all have captured it.
+      asc_syncthreads();
+      FinishColdSorted<SORTED_THREADS,SINGLE>(a,first,end,map,unique,ctx,t);
+      return;
+    }
+""".replace('SINGLE','true' if single else 'false')
+    return text.replace(lines[0],lines[0]+hook,1)
+
+
 def identity():
     manifest = json.loads((ROOT / "joint_plan_manifest.json").read_text())
     for path, expected in manifest["file_sha256"].items():
         if hashlib.sha256((ROOT / path).read_bytes()).hexdigest() != expected:
             raise ValueError("Joint Plan source fingerprint changed: " + path)
+    for parent,cold,single in [('union_next_stage.h','cold_union_stage.h',True),('sorted_sweep_stage.h','cold_ac_stage.h',False)]:
+        base=ROOT/'csrc/joint_variants'
+        if expected_cold_stage((base/parent).read_text(),single)!=(base/cold).read_text():
+            raise ValueError('Cold stage changed beyond reset-only hook: '+cold)
     original = (ROOT / "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp").read_text()
     direct = (ROOT / "csrc/joint_plan/kernel.cpp").read_text()
     if expected_fixed_region(original) != compute_region(direct):

@@ -68,3 +68,7 @@ extern "C" __attribute__((visibility("default"))) void sorted_config(uint32_t* o
   out[0]=SORTED_THREADS;out[1]=PLAN_THREADS;out[2]=HW_BITS;
 }
 #endif
+
+#ifdef JOINT_COLD_CPU_MODEL
+extern "C" __attribute__((visibility("default"))) uint32_t cold_calls(){return ColdCpuCalls;}
+#endif

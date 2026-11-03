@@ -2,9 +2,10 @@
 """Server-only new ABCD/thread/single-sorted gate; strict old and new protocol checks."""
 from pathlib import Path
 import argparse, sys
+import numpy as np
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT));sys.dont_write_bytecode=True
 import joint_plan_common as common
-from joint_variants import UNION_NAMES
+from joint_variants import UNION_NAMES,COLD_NAMES
 from joint_plan_cases import make_case,sort_topk
 from checks.check_joint_plan import continuous_gate,context_gate,input_write_regression
 from harness_io import preflight_args,write_json,record_failure
@@ -34,6 +35,10 @@ def gate(torch,names,repeats,failure_dir):
         c['topk_indices'][0,:4]=[-1,262144,c['context']+3,5]
         if duplicate:c['topk_indices'][1,1]=c['topk_indices'][1,0]
         cases.append((f'single_sorted_invalid_duplicate/{duplicate}',c))
+    if any(n in COLD_NAMES for n in names):
+        c=make_case(257,8,16,262144,1,'full_cache_75pct','shared',block_size=8)
+        c['topk_indices'][:]=np.arange(8)+100000;c['last_req_ids'][::4]=-1
+        cases.append(('many_groups_mixed_cold_warm',c))
     for label,raw in cases:
         c=sort_topk(raw);inputs=common.upload_inputs(torch,c);record={'case':label,'implementations':[]}
         for name in names:
@@ -49,7 +54,7 @@ def gate(torch,names,repeats,failure_dir):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);common.add_runtime_arguments(p)
-    p.add_argument('--implementations',nargs='+',choices=('abcdf_pages','joint_hw_ac_512','joint_hw_ac_256',*UNION_NAMES),default=['abcdf_pages','joint_hw_ac_512','joint_hw_ac_256',*UNION_NAMES])
+    p.add_argument('--implementations',nargs='+',choices=('abcdf_pages','joint_hw_ac_512','joint_hw_ac_256',*UNION_NAMES,*COLD_NAMES),default=['abcdf_pages','joint_hw_ac_512','joint_hw_ac_256',*UNION_NAMES])
     p.add_argument('--regression-repeat',type=int,default=5);p.add_argument('--report',type=Path,required=True);a=p.parse_args()
     if a.regression_repeat<=0 or len(a.implementations)!=len(set(a.implementations)):p.error('positive repeat; no duplicate implementation')
     storage=preflight_args(a,a.report.parent);out={'status':'running','storage':storage}

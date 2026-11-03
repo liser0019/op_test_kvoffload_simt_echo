@@ -9,6 +9,7 @@
 #include <cmath>
 #include <type_traits>
 #include "cpu_runtime.h"
+inline uint32_t ColdCpuCalls=0;
 inline uint32_t SortedCpuBlock=0,SortedCpuBlocks=1;
 using event_t=uint32_t;
 struct dim3 { uint32_t x; explicit dim3(uint32_t n):x(n){} };

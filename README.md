@@ -1,3 +1,7 @@
+## 本轮：冷启动收尾六路固定对照
+
+新增 `joint_union_cold_512`、`joint_hw_ac_cold_512`，与ABCDF、AC512、AC256、union_base_512同场测试。入口 `bash scripts/test_cold_finish.sh --device 0`：精简构建、严格门禁、冷/热×MTP0/1/3全部六路正式50样本，不做初筛淘汰。详见[中文说明](docs/冷启动收尾六路对照.md)。尚待CANN/NPU验证。
+
 ## 本轮：硬件归并新 ABCD × 1024/512/256
 
 新增48个组合候选及原AC的256线程对照，以带页表ABCDF和已验证AC512为固定参考；增加MTP0单行有序private路径。详见 [中文教程](docs/硬件归并_ABCD与线程对照.md)。服务器入口 `bash scripts/test_union_next.sh --device 0`，自动构建、门禁、初筛和独立50样本复测。新候选尚待CANN9.1/NPU验证。

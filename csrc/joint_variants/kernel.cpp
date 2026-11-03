@@ -618,12 +618,23 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
 #endif
 }
 
+#ifdef JOINT_COLD_FINISH
+#include "cold_finish.h"
+#endif
 #if JOINT_OPT_MASK >= 74
+#ifdef JOINT_COLD_FINISH
+#include "cold_union_stage.h"
+#else
 #include "union_next_stage.h"
+#endif
 #include "union_next_simd.h"
 #include "union_next_controller.h"
 #elif JOINT_OPT_MASK >= 39
+#ifdef JOINT_COLD_FINISH
+#include "cold_ac_stage.h"
+#else
 #include "sorted_sweep_stage.h"
+#endif
 #include "sorted_sweep_controller.h"
 #elif JOINT_OPT_MASK >= 37
 #include "sorted_stage.h"
