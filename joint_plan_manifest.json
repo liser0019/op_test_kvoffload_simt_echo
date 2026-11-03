@@ -234,7 +234,7 @@
     "checks/check_merge_abcd_npu.py": "fcc06c2e1695b26df37ffd9240df1fdd31825d34db36df083e259bf79c798fb7",
     "checks/check_merge_abcd.py": "e9010fcf1a465814a3f2f6b60888d2e10e215cfd5b92944d8b520fa8520a7c48",
     "checks/check_merge_catalog.py": "7be08f376bf30c7f3c495cda70ff93b009f2c8cb3813e439c8ff7f385105e9ff",
-    "checks/simt_variants/sorted_cann_cpu.h": "deac7d028983a34701e71c990b8f603dfd5a194ea2bd05cf3c3a66732549a91f",
+    "checks/simt_variants/sorted_cann_cpu.h": "fdcc7a41c6282904d606846e802b8daa4c522019a7e33354a3492f780db169ba",
     "docs/无Hash与硬件归并实验.md": "2c4c346daf1fc6c460a1bb4d245c9e32f4d19b024f98a8f08f0612bdc2d2583f",
     "csrc/joint_variants/sorted_stage.h": "4211576da32eacd78af61506a79aa76c940348ac5d4bf5c1713486480913fac6",
     "scripts/test_sorted_hardware.sh": "33e6bd4f69355a3a99b264cd1b15cc3ec0e86dff9760e6d7083c28df0b802d73",
@@ -249,13 +249,14 @@
     "scripts/test_hardware_sweep.sh": "c389e3cc85ab7b9ac1e27f14156b68b9bf6c3d12b737ec9f8250ceb5ac09764f",
     "csrc/joint_variants/union_next_stage.h": "6386b024369eef74dbadd8493552e9ca36c51a55ab6a67fe4881f4d77e328129",
     "csrc/joint_variants/union_next_controller.h": "31d4673df902f361d64cbc3e65c79c10d9a9c10117963e707ddd994827f72477",
-    "csrc/joint_variants/union_next_simd.h": "dbd928b7ba002eef746e02845faa76c19592cd22d28b59790bc432b693716a11",
+    "csrc/joint_variants/union_next_simd.h": "8e3a435a69f6867c755676ab3d8d3eb1a513c71dd989470c4356f46fbd5e63a5",
     "checks/check_union_next.py": "e5348e9c4f9588899937b5be7f8cb9c05126dfebc497cea252643a954c9a5fd0",
     "checks/check_union_next_npu.py": "44b71e54174715fee86d88a3a990c15fdac557fa9e5a615a3fe502e8fbe35d57",
     "checks/check_union_next_runner.py": "932a016ee6d11884246e07ced631b11b75101f665395125ed6b31a30b8a0829c",
     "run_union_next_sweep.py": "0e98c69997ce98516817b75a404989a53fd4808bb0854f8d8cd909e067c77e12",
     "scripts/test_union_next.sh": "00611d62b934b55a67899dbdb8823707a24753079642a54c62406665af5c8021",
-    "docs/硬件归并_ABCD与线程对照.md": "d5978c44740a2cd6a4490c0776f919ee26a0d3d3e8f9ec778d9e5d6f5a94cdca"
+    "docs/硬件归并_ABCD与线程对照.md": "1e5e6550928581b9fdb2d4de35baaa4e29f95ff0b43b1bbee8c0388f1d4c403c",
+    "checks/check_simd_api_contract.py": "1f70082060177968d951b1cb2e134d8b2cb9d0b5c5087db03eef77d78d9d34af"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -1307,6 +1308,7 @@
     "input_contract": "same sorted causal TopK; fixed requests; draft overlap40; no precomputed hit metadata",
     "hardware_validation": "not_run; CANN9.1/NPU pending",
     "tail_contract": "D preserves unused descriptor tail on successful sorted paths; valid prefix strictly checked; fallback unchanged",
-    "mtp0": "single sorted private protocol; duplicates and unsupported inputs fall back to original 1024-thread private"
+    "mtp0": "single sorted private protocol; duplicates and unsupported inputs fall back to original 1024-thread private",
+    "shift_scalar_fix": "ShiftLefts int16_t{1}/int16_t{16}; scalar values and algorithm unchanged; CPU type constraint added"
   }
 }

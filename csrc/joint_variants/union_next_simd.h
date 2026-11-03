@@ -19,7 +19,7 @@ __simd_vf__ inline void NextPrefixVf(__ubuf__ int32_t* packet,__ubuf__ uint32_t*
   for(uint32_t base=0;base<n;base+=64U){
     uint32_t remaining=n-base;valid=Reg::UpdateMask<uint32_t>(remaining);
     const uint32_t count=n-base<64U?n-base:64U;
-    Reg::Adds(even,lane,base,full);Reg::ShiftLefts(even,even,uint32_t{1},full);
+    Reg::Adds(even,lane,base,full);Reg::ShiftLefts(even,even,int16_t{1},full);
     Reg::Adds(odd,even,uint32_t{1},full);
     Reg::Duplicate(score,0.0f);
     Reg::Gather<float,float,uint32_t>(score,reinterpret_cast<__ubuf__ float*>(packet),even,valid);
@@ -41,7 +41,7 @@ __simd_vf__ inline void NextPrefixVf(__ubuf__ int32_t* packet,__ubuf__ uint32_t*
     Reg::Duplicate(lastIndex,count-1U);Reg::Gather<float,uint32_t>(lastScore,score,lastIndex);
     Reg::Duplicate(payload,uint32_t{0});
     Reg::Gather<uint32_t,uint32_t,uint32_t>(payload,reinterpret_cast<__ubuf__ uint32_t*>(packet),odd,valid);
-    Reg::ShiftLefts(packed,prefix,uint32_t{16},full);Reg::Or(packed,packed,payload,full);
+    Reg::ShiftLefts(packed,prefix,int16_t{16},full);Reg::Or(packed,packed,payload,full);
     Reg::Scatter<uint32_t,uint32_t>(reinterpret_cast<__ubuf__ uint32_t*>(packet),packed,odd,valid);
   }
 }

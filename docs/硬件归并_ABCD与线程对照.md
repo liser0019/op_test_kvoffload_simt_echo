@@ -128,3 +128,9 @@ bash scripts/test_union_next.sh --device 0 --skip-build \
 7. `run_union_next_sweep.py` / `profile_joint_mtp.py`：独立初筛/复测和原始CSV统计。
 
 API核对参考：CANN9.1的 [寄存器Gather](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/API/ascendcopapi/docs/en/api/SIMD-API/basic_api/reg_vector_compute/scatter_operations/Gather.md)、[UB Gather](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/API/ascendcopapi/docs/en/api/SIMD-API/basic_api/reg_vector_compute/reg_data_load/Gather_discrete.md)、[Scatter](https://www.hiascend.com/document/detail/en/CANNCommunityEdition/910/API/ascendcopapi/docs/en/api/SIMD-API/basic_api/reg_vector_compute/reg_data_store/Scatter_discrete.md)。本机同时阅读了本地官方asc-devkit声明与真实RegBase样例；API签名审阅不等同于9.1设备编译通过。
+
+## ShiftLefts 参数类型修正
+
+CANN9.1 的 `Reg::ShiftLefts` 标量移位量要求为 `int16_t`，与向量元素为 `uint32_t` 是两个独立约束。原提交381a3a5两处使用了uint32_t标量；现已分别改成 `int16_t{1}`、`int16_t{16}`，位数和算法不变。CPU API模型新增编译期约束，回归检查确认int16_t可编译、旧uint32_t写法被拒绝。
+
+用户回传的服务器结果身份为“381a3a5＋两处ShiftLefts参数类型修正”，不能表述为原提交未经修改直接通过。这里仅固化明确的API修正；没有在开发机执行CANN9.1或NPU验证，也没有据此确认服务器完整源码及二进制与本次提交逐字相同。
