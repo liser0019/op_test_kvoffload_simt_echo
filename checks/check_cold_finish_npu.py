@@ -5,7 +5,7 @@ import argparse,sys
 import numpy as np
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT));sys.dont_write_bytecode=True
 import joint_plan_common as common
-from joint_variants import COLD_COMPARE_NAMES
+from joint_variants import COLD_COMPARE_NAMES,INTEGRATED_COMPARE_NAMES
 from joint_plan_cases import make_case,sort_topk
 from checks.check_union_next_npu import gate as common_gate
 from harness_io import preflight_args,write_json,record_failure
@@ -45,7 +45,7 @@ def transition_gate(torch,names,failure_dir):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);common.add_runtime_arguments(p)
-    p.add_argument('--implementations',nargs='+',choices=COLD_COMPARE_NAMES,default=list(COLD_COMPARE_NAMES))
+    p.add_argument('--implementations',nargs='+',choices=tuple(dict.fromkeys((*COLD_COMPARE_NAMES,*INTEGRATED_COMPARE_NAMES))),default=list(COLD_COMPARE_NAMES))
     p.add_argument('--regression-repeat',type=int,default=5);p.add_argument('--report',type=Path,required=True);a=p.parse_args()
     if a.regression_repeat<=0 or len(set(a.implementations))!=len(a.implementations):p.error('positive repeats; distinct implementations')
     storage=preflight_args(a,a.report.parent);out={'status':'running','storage':storage}

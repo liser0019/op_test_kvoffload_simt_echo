@@ -7,6 +7,7 @@ import os
 import platform
 from pathlib import Path
 import numpy as np
+from joint_variants import supports_single_sorted
 from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
@@ -79,9 +80,10 @@ def prepare(torch, case, name, inputs=None):
         raise ValueError("Unknown implementation: " + name)
     if name in MERGE_NAMES:
         require_sorted_topk(case)
-    enabled = is_joint(name) and case["mtp"] > 0
+    # Integrated entry groups actual tokenToReq runs even if a fixture calls it MTP0.
+    enabled = is_joint(name) and (case["mtp"] > 0 or name == "joint_integrated_512")
     union_next = name.startswith("joint_union_")
-    controller_enabled = enabled or union_next
+    controller_enabled = enabled or supports_single_sorted(name)
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
                   name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next)
@@ -135,7 +137,7 @@ def prepare(torch, case, name, inputs=None):
     if name in VARIANTS and native.get("variant_mask") != VARIANTS[name]:
         raise AssertionError("Prepared variant mask mismatch")
     native["logical_joint_enabled"] = bool(enabled)
-    native["single_sorted_requested"] = union_next and case["mtp"] == 0
+    native["single_sorted_requested"] = supports_single_sorted(name) and case["mtp"] == 0
     if name in PAGED_NAMES:
         native["interface"] = "independent ABCDF with source-page validation, 15 tensors + 5 attributes"
         native["page_table_sha256"] = hashlib.sha256(table.tobytes()).hexdigest()
@@ -199,7 +201,7 @@ def check(case, bundle, before=None):
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
     if bundle["name"] in SORTED_NAMES: max_queries=4*case["topk"] if bundle["joint_enabled"] else None
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=bundle["name"].startswith("joint_union_"))
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=supports_single_sorted(bundle["name"]))
 
 
 def dump_failure(case, bundle, destination):

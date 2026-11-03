@@ -172,6 +172,19 @@ def expected_cold_stage(text,single):
     return text.replace(lines[0],lines[0]+hook,1)
 
 
+def expected_integrated_stage(text):
+    text=replace_once(text,"rows<2U||rows>4U","rows<1U||rows>4U")
+    text=replace_once(text,"if(ctx[0])for(uint32_t i=t;i<q;i+=SORTED_THREADS)map[i]=-1;","""if(ctx[0])for(uint32_t i=t;i<q;i+=SORTED_THREADS){
+      // Independent semantics count duplicate query misses separately. Fall back;
+      // never silently share their slot through the single-row unique list.
+      if(rows==1U && i && a.topkIndices[qb+i]==a.topkIndices[qb+i-1U])asc_atomic_min(ctx,0);
+      map[i]=-1;
+    }""")
+    text=replace_once(text,"a.rowModes[first]!=ROW_JOINT","a.rowModes[first]!=(rows==1U?ROW_PRIVATE:ROW_JOINT)")
+    text=replace_once(text,"FinishColdSorted<SORTED_THREADS,false>","FinishColdSorted<SORTED_THREADS,true>")
+    return replace_once(text,"a.rowModes[row]=r==0U?ROW_JOINT:ROW_FOLLOWER;", "a.rowModes[row]=rows==1U?ROW_PRIVATE:(r==0U?ROW_JOINT:ROW_FOLLOWER);")
+
+
 def identity():
     manifest = json.loads((ROOT / "joint_plan_manifest.json").read_text())
     for path, expected in manifest["file_sha256"].items():
@@ -181,6 +194,9 @@ def identity():
         base=ROOT/'csrc/joint_variants'
         if expected_cold_stage((base/parent).read_text(),single)!=(base/cold).read_text():
             raise ValueError('Cold stage changed beyond reset-only hook: '+cold)
+    base=ROOT/'csrc/joint_variants'
+    if expected_integrated_stage((base/'cold_ac_stage.h').read_text())!=(base/'integrated_stage.h').read_text():
+        raise ValueError('Integrated stage differs beyond single-row private semantics')
     original = (ROOT / "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp").read_text()
     direct = (ROOT / "csrc/joint_plan/kernel.cpp").read_text()
     if expected_fixed_region(original) != compute_region(direct):

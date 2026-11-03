@@ -18,7 +18,8 @@ from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
-    cold = mask in COLD_SWEEP.values()
+    integrated = mask==125
+    cold = mask in COLD_SWEEP.values() or integrated
     mask = algorithm_mask(mask)
     source = (ROOT / "csrc/joint_variants/kernel.cpp").read_text()
     source = source[:source.index("// Direct launch adaptation only:")]
@@ -29,7 +30,7 @@ def build(directory, mask, model_threads=64):
     config, count = re.subn(r'PLAN_THREADS = 1024U', f'PLAN_THREADS = {model_threads}U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h','integrated_stage.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -48,14 +49,14 @@ def build(directory, mask, model_threads=64):
     library = directory / 'kernel.so'
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
-                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), '-I' + str(directory),
+                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), '-I' + str(directory),
                     '-I' + str(ROOT / 'checks/simt_variants'),
                     str(ROOT / 'checks/joint_variant_cpu_driver.cpp'), '-o', str(library)], check=True)
     return library
 
 
-def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False):
-    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next, case['max_token'], bitmap, turbo, sorted_union, union_next)
+def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False, single_sorted=False):
+    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next or single_sorted, case['max_token'], bitmap, turbo, sorted_union, union_next)
     scratch = max(info['scratch_elements'], 112 * 1024 // 4 + 1) if force_gm else info['scratch_elements']
     max_queries = (scratch - 2 * info['joint_hash_capacity'] - case['capacity']
                    if turbo and enabled else None)
@@ -93,7 +94,7 @@ def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=F
     if abcdf:
         validate_abcdf(case, expected, arrays)
     else:
-        validate(case, expected, arrays, enabled, max_queries, merge=merge, float_keys=sorted_union, preserve_tail=preserve_tail, single_sorted=union_next)
+        validate(case, expected, arrays, enabled, max_queries, merge=merge, float_keys=sorted_union, preserve_tail=preserve_tail, single_sorted=union_next or single_sorted)
     return {key: arrays[key].copy() for key in expected}
 
 
