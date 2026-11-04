@@ -11,9 +11,11 @@ from checks.check_joint_plan import context_gate
 from harness_io import preflight_args,write_json,record_failure,diagnostic_log,capture_error
 from fixed_plan_check import exact_workload_key
 from profile_joint_mtp import capture,mtp_comparison
+from joint_variants import MTP7_PACK_NAMES
 ROOT=Path(__file__).resolve().parent
 NAMES=('abcdf_pages','joint_hot_bd_512','joint_hot_bd8_512')
 FIX_NAMES=('abcdf_pages','joint_hot_bd8_512','joint_mtp7_parallel_512','joint_mtp7_rank_512')
+PACK_NAMES=(*FIX_NAMES,*MTP7_PACK_NAMES)
 
 
 def workload_cases(a):
@@ -36,7 +38,7 @@ def gate(torch,a,workloads,environment,destination):
             finally:common.close(b)
         print('专项门禁:',label,'通过',flush=True)
     fixed('known_input_write',sort_topk(make_case(32,2048,4096,262144,1,'full_cache_75pct','shared')),a.regression_repeat)
-    for label,c in cases(include_extreme=a.suite=='mtp7_fix'):fixed(label,c,1)
+    for label,c in cases(include_extreme=a.suite in ('mtp7_fix','mtp7_pack')):fixed(label,c,1)
     continuous=[]
     for n in a.implementations:
         start=next(transitions())[1];b=common.prepare(torch,start,n)
@@ -61,16 +63,20 @@ def gate(torch,a,workloads,environment,destination):
 def report_text(report):
     reference='joint_hot_bd_512' if 'joint_hot_bd_512' in report['implementations'] else 'joint_hot_bd8_512'
     reference_label='旧BD' if reference=='joint_hot_bd_512' else '上轮BD8'
+    expanded=all(n in report['implementations'] for n in MTP7_PACK_NAMES)
+    extra_header=' 实现/A | 实现/B |' if expanded else ''
+    extra_separator='---:|---:|' if expanded else ''
     lines=['# MTP0/1/3/7 Plan对照','',
       '仅设备目标kernel Duration，单位μs；不含恢复、CPU参考、校验、Transfer/SFA。固定地址预热。',
-      ('旧BD在MTP7是逐行回退参考。' if reference=='joint_hot_bd_512' else '上轮BD8与A/B两路候选均使用相同UB布局。')+'联合实现需结合共享/回退计数判断实际路径。比值为当前实现P50/参考，小于1更快。','',
-      f'| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 实现/ABCDF | 实现/{reference_label} | 共享/回退 | 实际descriptor数 |',
-      '|---|---|---|---:|---:|---:|---|---:|']
+      ('旧BD在MTP7是逐行回退参考。' if reference=='joint_hot_bd_512' else '上轮BD8与本轮联合候选使用相同生产动态UB预算。')+'联合实现需结合共享/回退计数判断实际路径。比值为当前实现P50/参考，小于1更快。','',
+      f'| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 实现/ABCDF | 实现/{reference_label} |'+extra_header+' 共享/回退 | 实际descriptor数 |',
+      '|---|---|---|---:|---:|---:|'+extra_separator+'---|---:|']
     for r in report['runs']:
         w=r['workload'];stats=r['stats']
         for n,s in stats.items():
             c=s['correctness']
-            lines.append(f"| {w['scenario']}/MTP{w['mtp']} | {n} | {s['p50_us']:.3f}/{s['p95_us']:.3f} | {s['count']} | {s['p50_us']/stats['abcdf_pages']['p50_us']:.3f} | {s['p50_us']/stats[reference]['p50_us']:.3f} | {c.get('joint_groups',0)}/{c.get('overflow_groups',0)} | {c['total_transfer_descriptors']} |")
+            extra=(f" {s['p50_us']/stats['joint_mtp7_parallel_512']['p50_us']:.3f} | {s['p50_us']/stats['joint_mtp7_rank_512']['p50_us']:.3f} |" if expanded else '')
+            lines.append(f"| {w['scenario']}/MTP{w['mtp']} | {n} | {s['p50_us']:.3f}/{s['p95_us']:.3f} | {s['count']} | {s['p50_us']/stats['abcdf_pages']['p50_us']:.3f} | {s['p50_us']/stats[reference]['p50_us']:.3f} |"+extra+f" {c.get('joint_groups',0)}/{c.get('overflow_groups',0)} | {c['total_transfer_descriptors']} |")
     lines+=['','## 各实现相对自身MTP0','',
         '| 工况 | 实现 | MTP | 实际请求/行 | 自身MTP0请求/行 | P50比值 |',
         '|---|---|---:|---|---|---:|']
@@ -83,7 +89,7 @@ def report_text(report):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);common.add_runtime_arguments(p);p.set_defaults(device=0,temp_dir=None)
-    p.add_argument('--suite',choices=('mtp8','mtp7_fix'),default='mtp8')
+    p.add_argument('--suite',choices=('mtp8','mtp7_fix','mtp7_pack'),default='mtp8')
     p.add_argument('--output',type=Path,required=True);p.add_argument('--skip-build',action='store_true')
     p.add_argument('--describe-only',action='store_true');p.add_argument('--formal',action='store_true')
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7])
@@ -96,8 +102,8 @@ def main():
     a.repeat=(50 if a.formal else 5) if a.repeat is None else a.repeat
     if a.warmup<0 or min(a.repeat,a.regression_repeat,a.requests)<=0 or 0 not in a.mtp:p.error('positive counts, warmup>=0, MTP list must include0')
     if len(set(a.mtp))!=len(a.mtp) or len(set(a.scenarios))!=len(a.scenarios):p.error('duplicate scenarios/MTP')
-    a.implementations=FIX_NAMES if a.suite=='mtp7_fix' else NAMES
-    a.build_flag='--mtp7-fix-only' if a.suite=='mtp7_fix' else '--mtp8-only'
+    a.implementations=PACK_NAMES if a.suite=='mtp7_pack' else FIX_NAMES if a.suite=='mtp7_fix' else NAMES
+    a.build_flag='--mtp7-pack-only' if a.suite=='mtp7_pack' else '--mtp7-fix-only' if a.suite=='mtp7_fix' else '--mtp8-only'
     workloads=workload_cases(a)
     if a.describe_only:
         print(json.dumps({'implementations':a.implementations,'mtp':a.mtp,'workloads':[describe(c) for c in workloads],
@@ -141,12 +147,12 @@ def main():
         report['wall_seconds']=state['wall_seconds'];report['status']='complete'
         write_json(metadata,report)
         write_json(a.output/'data_index.json',{'runs':[{'workload':r['workload'],'raw_csv':r['raw_csv'],'target_samples':r['target_samples']} for r in report['runs']]})
-        text=report_text(report)+'\n## 本轮说明\n\n'+('旧BD在MTP7只作逐行回退对照。\n' if a.suite=='mtp8' else 'A=512线程并行消费统计；B=并行rank归并+融合消费统计。与上轮BD8同UB/同输入，新增候选的NPU性能待本轮实测。\n')+'所有联合实现都需查看共享/回退数量，不能把容量溢出回退当成联合执行。\n'
+        text=report_text(report)+'\n## 本轮说明\n\n'+('旧BD在MTP7只作逐行回退对照。\n' if a.suite=='mtp8' else 'A=512线程并行消费统计；B=并行rank归并+融合消费统计；reuse=缓冲复用；tile=每线程分段归并。与上轮BD8同UB预算/同输入；性能结论仅依据本轮CSV。兼容回退未改。\n')+'所有联合实现都需查看共享/回退数量，不能把容量溢出回退当成联合执行。\n'
         text+='\n阶段墙钟秒数：'+json.dumps(state['wall_seconds'],ensure_ascii=False)+'\n'
         text+='\n每工况的恢复、校验、首次参考认证、缓存命中、采集循环及profiler导出解析耗时见metadata；这些不是设备kernel耗时。\n'
         (a.output/'report.md').write_text(text)
         state['status']='complete';write_json(status,state);write_json(a.output/'COMPLETE.json',{'status':'complete','metadata':str(metadata)})
-        print(('===== MTP7_FIX_ALL_STAGES_PASSED =====' if a.suite=='mtp7_fix' else '===== MTP8_ALL_STAGES_PASSED =====')+'\n报告:',a.output/'report.md',flush=True)
+        print(('===== MTP7_SWEEP_ALL_STAGES_PASSED =====' if a.suite=='mtp7_pack' else '===== MTP7_FIX_ALL_STAGES_PASSED =====' if a.suite=='mtp7_fix' else '===== MTP8_ALL_STAGES_PASSED =====')+'\n报告:',a.output/'report.md',flush=True)
       except BaseException as exc:
         record_failure(status,state,exc)
         print(capture_error(a.output,log,exc),file=sys.stderr,flush=True)

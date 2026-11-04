@@ -16,6 +16,7 @@ JOINT_EXEC_ONLY=OFF
 JOINT_HOT_ONLY=OFF
 JOINT_MTP8_ONLY=OFF
 JOINT_MTP7_FIX_ONLY=OFF
+JOINT_MTP7_PACK_ONLY=OFF
 for arg in "$@"; do
   case "$arg" in
     --soc=ascend950) ;;
@@ -28,13 +29,14 @@ for arg in "$@"; do
     --integrated-only) JOINT_INTEGRATED_ONLY=ON ;;
     --refine-only) JOINT_REFINE_ONLY=ON ;;
     --exec-only) JOINT_EXEC_ONLY=ON ;;
+    --mtp7-pack-only) JOINT_MTP7_PACK_ONLY=ON ;;
     --mtp7-fix-only) JOINT_MTP7_FIX_ONLY=ON ;;
     --mtp8-only) JOINT_MTP8_ONLY=ON ;;
     --hot-only) JOINT_HOT_ONLY=ON ;;
     --debug-info) JOINT_DEBUG=ON ;;
     --resource-usage) JOINT_RESOURCES=ON ;;
     --help|-h)
-      echo "用法: PYTHON=python3 JOBS=3 bash build_joint_plan.sh [--soc=ascend950] [--debug-info] [--resource-usage] [--merge-only] [--sorted-only] [--sweep-only] [--union-only] [--ac-threads-only] [--cold-compare-only] [--integrated-only] [--refine-only] [--exec-only] [--hot-only] [--mtp8-only] [--mtp7-fix-only]"
+      echo "用法: PYTHON=python3 JOBS=3 bash build_joint_plan.sh [--soc=ascend950] [--debug-info] [--resource-usage] [--merge-only] [--sorted-only] [--sweep-only] [--union-only] [--ac-threads-only] [--cold-compare-only] [--integrated-only] [--refine-only] [--exec-only] [--hot-only] [--mtp8-only] [--mtp7-fix-only] [--mtp7-pack-only]"
       exit 0 ;;
     *) echo "未知参数: $arg" >&2; exit 2 ;;
   esac
@@ -45,14 +47,16 @@ JOINT_PYTHON="$(command -v -- "${PYTHON:-python3}")"
 JOINT_ARGS=(-S "$JOINT_ROOT/joint_plan" -B "$JOINT_BUILD_DIR"
   -DCMAKE_BUILD_TYPE=Release -DNPU_ARCH=ascend950
   -DPython3_EXECUTABLE="$JOINT_PYTHON" -DJOINT_DEBUG_INFO="$JOINT_DEBUG"
-  -DJOINT_RESOURCE_USAGE="$JOINT_RESOURCES" -DJOINT_MERGE_ONLY="$JOINT_MERGE_ONLY" -DJOINT_SORTED_ONLY="$JOINT_SORTED_ONLY" -DJOINT_SWEEP_ONLY="$JOINT_SWEEP_ONLY" -DJOINT_UNION_ONLY="$JOINT_UNION_ONLY" -DJOINT_AC_THREADS_ONLY="$JOINT_AC_THREADS_ONLY" -DJOINT_COLD_COMPARE_ONLY="$JOINT_COLD_COMPARE_ONLY" -DJOINT_INTEGRATED_ONLY="$JOINT_INTEGRATED_ONLY" -DJOINT_REFINE_ONLY="$JOINT_REFINE_ONLY" -DJOINT_EXEC_ONLY="$JOINT_EXEC_ONLY" -DJOINT_HOT_ONLY="$JOINT_HOT_ONLY" -DJOINT_MTP8_ONLY="$JOINT_MTP8_ONLY" -DJOINT_MTP7_FIX_ONLY="$JOINT_MTP7_FIX_ONLY")
+  -DJOINT_RESOURCE_USAGE="$JOINT_RESOURCES" -DJOINT_MERGE_ONLY="$JOINT_MERGE_ONLY" -DJOINT_SORTED_ONLY="$JOINT_SORTED_ONLY" -DJOINT_SWEEP_ONLY="$JOINT_SWEEP_ONLY" -DJOINT_UNION_ONLY="$JOINT_UNION_ONLY" -DJOINT_AC_THREADS_ONLY="$JOINT_AC_THREADS_ONLY" -DJOINT_COLD_COMPARE_ONLY="$JOINT_COLD_COMPARE_ONLY" -DJOINT_INTEGRATED_ONLY="$JOINT_INTEGRATED_ONLY" -DJOINT_REFINE_ONLY="$JOINT_REFINE_ONLY" -DJOINT_EXEC_ONLY="$JOINT_EXEC_ONLY" -DJOINT_HOT_ONLY="$JOINT_HOT_ONLY" -DJOINT_MTP8_ONLY="$JOINT_MTP8_ONLY" -DJOINT_MTP7_FIX_ONLY="$JOINT_MTP7_FIX_ONLY" -DJOINT_MTP7_PACK_ONLY="$JOINT_MTP7_PACK_ONLY")
 for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
   if [[ -n "${!name:-}" ]]; then JOINT_ARGS+=("-D$name=${!name}"); fi
 done
 cmake "${JOINT_ARGS[@]}"
 cmake --build "$JOINT_BUILD_DIR" --target mtp_joint_plan_ops --parallel "${JOBS:-3}"
 echo "产物: $JOINT_BUILD_DIR/libmtp_joint_plan_ops.so"
-if [[ "$JOINT_MTP7_FIX_ONLY" == ON ]]; then
+if [[ "$JOINT_MTP7_PACK_ONLY" == ON ]]; then
+  echo "下一步: bash scripts/test_mtp7_sweep.sh --skip-build --device 0 --output /workspace/mtp7_sweep_results"
+elif [[ "$JOINT_MTP7_FIX_ONLY" == ON ]]; then
   echo "下一步: bash scripts/test_mtp7_fix.sh --skip-build --device 0 --output /workspace/mtp7_fix_results"
 elif [[ "$JOINT_MTP8_ONLY" == ON ]]; then
   echo "下一步: bash scripts/test_mtp8.sh --skip-build --device 0 --output /workspace/mtp8_results"

@@ -4,6 +4,12 @@
 #ifndef JOINT_MTP7_OPT
 #define JOINT_MTP7_OPT 0
 #endif
+#ifndef JOINT_MTP7_REUSE
+#define JOINT_MTP7_REUSE 0
+#endif
+#ifndef JOINT_MTP7_TILE
+#define JOINT_MTP7_TILE 0
+#endif
 static_assert(JOINT_MTP7_OPT>=0 && JOINT_MTP7_OPT<=2,"MTP7 candidate selector");
 constexpr uint64_t EIGHT_UB_WORDS=192U*1024U/4U;
 constexpr uint32_t EIGHT_CTX=128U;
@@ -24,6 +30,9 @@ constexpr uint32_t HW_BITS = JOINT_OPT_MASK <= 69 ? JOINT_OPT_MASK-38U :
     JOINT_OPT_MASK==70 ? 15U : JOINT_OPT_MASK==71 ? 14U : JOINT_OPT_MASK==72 ? 5U : 4U;
 constexpr bool HW_A=(HW_BITS&1U)!=0, HW_B=(HW_BITS&2U)!=0;
 constexpr bool HW_C=(HW_BITS&4U)!=0, HW_D=(HW_BITS&8U)!=0;
+#if JOINT_MTP7_REUSE
+static_assert(!HW_D,"reused input cannot retain old packet tails");
+#endif
 constexpr uint32_t HW_DIV = JOINT_OPT_MASK>=70 ? 2U : (HW_BITS&16U)!=0 ? 4U : 1U;
 constexpr uint32_t SORTED_THREADS = PLAN_THREADS/HW_DIV >= PLAN_WARP_SIZE ? PLAN_THREADS/HW_DIV : PLAN_WARP_SIZE;
 constexpr uint32_t SORTED_WARPS = SORTED_THREADS/PLAN_WARP_SIZE;
@@ -156,8 +165,18 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
       uint32_t active=0;
       for(uint32_t r=0;r<rows;++r)if(ctx[48+r]<ctx[56+r])ctx[64+active++]=r;
       uint32_t chunk=oldChunk;
+#if JOINT_MTP7_REUSE
+      if(rows>4U){
+        // Same total allocation. Release first-half inputs after its merge;
+        // work now needs40*chunk int32s rather than48*chunk.
+        const uint64_t work=a.scratchElements-EIGHT_CTX-((mapRows*topk+capacity+7U)&~uint64_t{7U});
+        chunk=static_cast<uint32_t>(work/40U)&~3U;if(chunk>612U)chunk=612U;
+        ctx[30]=24U*chunk;
+      }else if(HW_C&&active){chunk=(static_cast<uint32_t>(ctx[30])/(2U*active))&~3U;if(chunk>4092U)chunk=4092U;}
+#else
       if(HW_C&&active){chunk=(static_cast<uint32_t>(ctx[30])/(2U*active))&~3U;if(chunk>4092U)chunk=4092U; if(rows>4U && chunk>512U)chunk=512U;}
       if(rows>4U)ctx[30]=32U*chunk; // input8, intermediate8, final8 records per chunk
+#endif
       ctx[3]=chunk;ctx[28]=active;ctx[7]=0;
       uint32_t total=0;
       for(uint32_t k=0;k<active;++k){uint32_t r=ctx[64+k],n=ctx[56+r]-ctx[48+r];
@@ -639,13 +658,32 @@ __simt_callee__ __aicore__ inline uint32_t EightScoreBound(
   }
   return lo;
 }
+#if JOINT_MTP7_TILE
+__simt_callee__ __aicore__ inline uint32_t EightDiagonal(
+    __ubuf__ int32_t* a,__ubuf__ int32_t* b,uint32_t na,uint32_t nb,uint32_t k){
+  auto* x=reinterpret_cast<__ubuf__ float*>(a);auto* y=reinterpret_cast<__ubuf__ float*>(b);
+  uint32_t lo=k>nb?k-nb:0U,hi=k<na?k:na;
+  while(lo<=hi){
+    const uint32_t i=lo+((hi-lo)>>1U),j=k-i;
+    if(i>0U&&j<nb&&x[2U*(i-1U)]<y[2U*j]){hi=i-1U;continue;}
+    if(j>0U&&i<na&&y[2U*(j-1U)]<=x[2U*i]){lo=i+1U;continue;}
+    return i;
+  }
+  return lo;
+}
+#endif
 // B：两段安全前缀并行rank-scatter归并，同时统计原始行消费量。
 // No final MrgSort or separate progress VF. All persistent writes remain downstream.
 __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf(
     __ubuf__ int32_t* packet,__ubuf__ int32_t* ctx,uint32_t chunk,uint32_t topk){
   const uint32_t t=threadIdx.x;
+#if JOINT_MTP7_REUSE
+  auto* a=packet+16U*chunk;auto* b=packet;auto* out=packet+24U*chunk;
+  auto* partials=packet+8U*chunk; // dead second-half input, disjoint from both live mids
+#else
   auto* a=packet+16U*chunk;auto* b=packet+24U*chunk;auto* out=packet+32U*chunk;
   auto* partials=packet;
+#endif
   if(t==0U){
     uint32_t na=ctx[104],nb=ctx[105];const uint32_t complete=ctx[106];
     float cut=-16777216.0f;
@@ -659,6 +697,24 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf
   asc_syncthreads();
   const uint32_t na=ctx[107],nb=ctx[108],n=na+nb;
   uint32_t bins[8]={0,0,0,0,0,0,0,0};
+#if JOINT_MTP7_TILE
+  // Every thread owns small output tiles, never an entire queue. All ranks
+  // follow stable A-before-B ties, including across8-output tile boundaries.
+  for(uint32_t base=t*8U;base<n;base+=SORTED_THREADS*8U){
+    uint32_t ia=EightDiagonal(a,b,na,nb,base),ib=base-ia;
+    const uint32_t limit=n-base<8U?n:base+8U;
+    for(uint32_t dst=base;dst<limit;++dst){
+      const bool first=ia<na&&(ib>=nb||reinterpret_cast<__ubuf__ float*>(a)[2U*ia]>=reinterpret_cast<__ubuf__ float*>(b)[2U*ib]);
+      auto* src=first?a:b;const uint32_t index=first?ia++:ib++;
+      out[2U*dst]=src[2U*index];out[2U*dst+1U]=src[2U*index+1U];
+      const uint32_t qid=static_cast<uint32_t>(src[2U*index+1U]);
+      const uint32_t row=topk==2048U?qid>>11U:qid/topk;
+      if(row>=8U)asc_atomic_min(ctx,0);
+#pragma unroll
+      for(uint32_t r=0;r<8U;++r)bins[r]+=row==r?1U:0U;
+    }
+  }
+#else
   for(uint32_t i=t;i<n;i+=SORTED_THREADS){
     const bool first=i<na;const uint32_t j=first?i:i-na;
     auto* src=first?a:b;auto* other=first?b:a;
@@ -672,6 +728,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf
 #pragma unroll
     for(uint32_t r=0;r<8U;++r)bins[r]+=row==r?1U:0U; // constant-index registers, no dynamic private-array access
   }
+#endif
 
   // Dead original packet input is now the warp partial-count workspace.
   // Each record is loaded once, bins are thread-private; no per-record atomics.
@@ -750,7 +807,11 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
               lens[k]=static_cast<uint16_t>(ctx[72+begin+k]);
               if(ctx[72+begin+k]!=ctx[56+ctx[64+begin+k]]-ctx[48+ctx[64+begin+k]])allComplete[half]=false;
             }
+#if JOINT_MTP7_REUSE
+            const uint32_t mid=half==0U?16U*chunk:0U;
+#else
             const uint32_t mid=16U*chunk+half*8U*chunk;
+#endif
             if(count==1U){
               asc_vf_call<EightCopyVf>(dim3(SORTED_THREADS),packet+mid,packet+2U*begin*chunk,2U*lens[0]);
               lengths[half]=lens[0];
@@ -783,8 +844,13 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
           uint32_t used[4]={0,0,0,0};
           if(!lengths[0]||!lengths[1])ctx[0]=0;
           if(ctx[0]){
+#if JOINT_MTP7_REUSE
+            AscendC::MrgSortSrcList<float> lists{floats[inputOffset+16U*chunk],floats[inputOffset],floats[inputOffset+16U*chunk],floats[inputOffset+16U*chunk]};
+            auto dst=floats[inputOffset+24U*chunk];
+#else
             AscendC::MrgSortSrcList<float> lists{floats[inputOffset+16U*chunk],floats[inputOffset+24U*chunk],floats[inputOffset+16U*chunk],floats[inputOffset+16U*chunk]};
             auto dst=floats[inputOffset+32U*chunk];
+#endif
             if(allComplete[0]&&allComplete[1]){
               AscendC::MrgSort<float,false>(dst,lists,lens,used,3,1);used[0]=lens[0];used[1]=lens[1];
             }else AscendC::MrgSort<float,true>(dst,lists,lens,used,3,1);
@@ -794,7 +860,11 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
               ctx[4]=used[0]+used[1];
               SortedScalarToVector(pipe);
 #if JOINT_MTP7_OPT >= 1
+#if JOINT_MTP7_REUSE
+              asc_vf_call<EightParallelProgressVf>(dim3(SORTED_THREADS),packet+24U*chunk,ctx,static_cast<uint32_t>(ctx[4]),static_cast<uint32_t>(d.topk));
+#else
               asc_vf_call<EightParallelProgressVf>(dim3(SORTED_THREADS),packet+32U*chunk,ctx,static_cast<uint32_t>(ctx[4]),static_cast<uint32_t>(d.topk));
+#endif
 #else
               asc_vf_call<EightProgressVf>(dim3(SORTED_THREADS),packet+32U*chunk,ctx,static_cast<uint32_t>(ctx[4]),static_cast<uint32_t>(d.topk));
 #endif

@@ -12,13 +12,13 @@ import tempfile
 import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from joint_variants import MASKS, algorithm_mask, COLD_SWEEP
+from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,mtp7_config
 from joint_plan_cases import make_case, initial_arrays, validate, layout, INPUTS, OUTPUTS, validate_abcdf
 from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
-    hot=mask if 159<=mask<=195 else None
+    hot=mask if 159<=mask<=199 else None
     execution=mask-143 if 143<=mask<=158 else None
     refine=11 if hot is not None or execution is not None else mask-127 if 127<=mask<=142 else None
     bounds = mask==126
@@ -53,7 +53,7 @@ def build(directory, mask, model_threads=64):
     library = directory / 'kernel.so'
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
-                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), *(['-DJOINT_HOT=1','-DJOINT_HOT_BITS='+str(10 if 193<=hot<=195 else hot-159 if hot<=190 else 0),'-DJOINT_HOT_PART_ONLY='+str(int(hot==191)),'-DJOINT_HOT_MISS_ONLY='+str(int(hot==192))] if hot is not None else []), *(['-DJOINT_MTP8=1','-DJOINT_MTP7_OPT='+str(hot-193)] if hot is not None and 193<=hot<=195 else []), '-I' + str(directory),
+                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), *(['-DJOINT_HOT=1','-DJOINT_HOT_BITS='+str(10 if 193<=hot<=199 else hot-159 if hot<=190 else 0),'-DJOINT_HOT_PART_ONLY='+str(int(hot==191)),'-DJOINT_HOT_MISS_ONLY='+str(int(hot==192))] if hot is not None else []), *(['-DJOINT_MTP8=1','-DJOINT_MTP7_OPT='+str(mtp7_config(hot)['opt']),'-DJOINT_MTP7_REUSE='+str(int(mtp7_config(hot)['reuse'])),'-DJOINT_MTP7_TILE='+str(int(mtp7_config(hot)['tile']))] if hot is not None and 193<=hot<=199 else []), '-I' + str(directory),
                     '-I' + str(ROOT / 'checks/simt_variants'),
                     str(ROOT / 'checks/joint_variant_cpu_driver.cpp'), '-o', str(library)], check=True)
     return library
