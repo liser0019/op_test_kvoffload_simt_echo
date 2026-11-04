@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,REFINE_SWEEP,EXEC_SWEEP,HOT_SWEEP
 
 
-def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False,hot_only=False,mtp8_only=False):
+def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False,hot_only=False,mtp8_only=False,mtp7_fix_only=False):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     launch = (ROOT / "csrc/joint_plan/launch.h").read_text()
@@ -17,6 +17,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
                "sparse_kv_plan_private_kernel")
     declarations, entries = [], ["nullptr"] * (max(MASKS.values()) + 1)
     for letters, mask in MASKS.items():
+        if mtp7_fix_only and letters not in ("hot_bd8_512","mtp7_parallel_512","mtp7_rank_512"):continue
         if mtp8_only and letters not in ("hot_bd_512","hot_bd8_512"):continue
         if hot_only and letters not in ("integrated_bounds_512","refine_abd_512","refine_bd_512") and letters not in HOT_SWEEP:continue
         if exec_only and letters not in ("integrated_bounds_512","refine_abd_512","refine_bd_512") and letters not in EXEC_SWEEP:continue
@@ -39,8 +40,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
         if 127<=mask<=142:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS {mask-127}\n"
         if 143<=mask<=158:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_EXEC 1\n#define JOINT_EXEC_BITS {mask-143}\n"
         if mask>=159:
-            bits=10 if mask==193 else mask-159 if mask<=190 else 0
-            if mask==193:text += "#define JOINT_MTP8 1\n"
+            bits=10 if 193<=mask<=195 else mask-159 if mask<=190 else 0
+            if 193<=mask<=195:text += f"#define JOINT_MTP8 1\n#define JOINT_MTP7_OPT {mask-193}\n"
             text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_HOT 1\n#define JOINT_HOT_BITS {bits}\n#define JOINT_HOT_PART_ONLY {int(mask==191)}\n#define JOINT_HOT_MISS_ONLY {int(mask==192)}\n"
         text += "".join(f"#define {name} {new}\n" for name, new in replacements.items())
         text += '#include "' + str(ROOT / "csrc/joint_variants/kernel.cpp") + '"\n'
@@ -53,8 +54,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
     text += "inline decltype(&launch_joint_plan) JointVariantLaunch(int64_t mask) {\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {" + ", ".join(entries) + "};\n"
-    text += "  return mask > 0 && mask <= 193 ? launches[mask] : nullptr;\n}\n"
-    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 193)) ? 72 : mask; }\n'
+    text += "  return mask > 0 && mask <= 195 ? launches[mask] : nullptr;\n}\n"
+    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 195)) ? 72 : mask; }\n'
     text += signature + " {\n  auto launch = JointVariantLaunch(mask);\n"
     text += "  if (!launch) throw std::invalid_argument(\"joint mask not built\");\n"
     text += "  launch(" + args + ");\n}\n"
@@ -75,5 +76,6 @@ if __name__ == "__main__":
     parser.add_argument("--exec-only",action="store_true")
     parser.add_argument("--hot-only",action="store_true")
     parser.add_argument("--mtp8-only",action="store_true")
+    parser.add_argument("--mtp7-fix-only",action="store_true")
     args = parser.parse_args()
-    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only,args.exec_only,args.hot_only,args.mtp8_only)
+    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only,args.exec_only,args.hot_only,args.mtp8_only,args.mtp7_fix_only)

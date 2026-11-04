@@ -8,7 +8,7 @@ import platform
 import time
 from pathlib import Path
 import numpy as np
-from joint_variants import supports_single_sorted,INTEGRATED_NAMES
+from joint_variants import supports_eight_rows,supports_single_sorted,INTEGRATED_NAMES
 from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
@@ -87,7 +87,7 @@ def prepare(torch, case, name, inputs=None):
     controller_enabled = enabled or supports_single_sorted(name)
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
-                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")),mtp8=name=="joint_hot_bd8_512")
+                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")),mtp8=supports_eight_rows(name))
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name in INDEPENDENT:
         host = {key: case[key].copy() for key in ABCDF_STATE}
@@ -96,7 +96,7 @@ def prepare(torch, case, name, inputs=None):
     else:
         max_queries = (info["scratch_elements"] - 2 * info["joint_hash_capacity"] - case["capacity"]
                        if is_turbo and enabled else None)
-        if name in SORTED_NAMES: max_queries=(8 if name=="joint_hot_bd8_512" else 4)*case["topk"] if enabled else None
+        if name in SORTED_NAMES: max_queries=(8 if supports_eight_rows(name) else 4)*case["topk"] if enabled else None
         host = initial_arrays(case, enabled, max_queries)
     host["workspace"] = np.full(info["workspace_elements"], np.iinfo(np.int32).max, np.int32)
     tensors, buffers, initial = {}, {}, {}
@@ -205,8 +205,8 @@ def _check_uncached(case, bundle, before=None):
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
-    if bundle["name"] in SORTED_NAMES: max_queries=(8 if bundle["name"]=="joint_hot_bd8_512" else 4)*case["topk"] if bundle["joint_enabled"] else None
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=supports_single_sorted(bundle["name"]),max_group_rows=8 if bundle["name"]=="joint_hot_bd8_512" else 4)
+    if bundle["name"] in SORTED_NAMES: max_queries=(8 if supports_eight_rows(bundle["name"]) else 4)*case["topk"] if bundle["joint_enabled"] else None
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=supports_single_sorted(bundle["name"]),max_group_rows=8 if supports_eight_rows(bundle["name"]) else 4)
 
 
 def _check_readback(case,bundle,values):

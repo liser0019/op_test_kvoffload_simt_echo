@@ -165,3 +165,22 @@ extern "C" __attribute__((visibility("default"))) void run_hot_compact(int32_t* 
   AscendC::Reg::HotDataLo=0;
 }
 #endif
+
+#if defined(JOINT_MTP8) && JOINT_MTP7_OPT>=1
+extern "C" __attribute__((visibility("default"))) void run_eight_progress(int32_t* packet,int32_t* ctx,uint32_t n,uint32_t topk){
+  if(!SortedWorkers||SortedWorkerCount!=SORTED_THREADS){SortedWorkers.reset();SortedWorkers=std::make_unique<CpuWorkers>(SORTED_THREADS);SortedWorkerCount=SORTED_THREADS;}
+  auto* records=packet+static_cast<uint32_t>(ctx[30]);
+  SortedWorkers->Run([&]{EightParallelProgressVf(records,ctx,n,topk);});
+}
+#endif
+#if defined(JOINT_MTP8) && JOINT_MTP7_OPT==2
+extern "C" __attribute__((visibility("default"))) void run_eight_rank(int32_t* packet,int32_t* ctx,uint32_t chunk,uint32_t topk){
+  if(!SortedWorkers||SortedWorkerCount!=SORTED_THREADS){SortedWorkers.reset();SortedWorkers=std::make_unique<CpuWorkers>(SORTED_THREADS);SortedWorkerCount=SORTED_THREADS;}
+  SortedWorkers->Run([&]{EightRankMergeVf(packet,ctx,chunk,topk);});
+}
+#endif
+
+#ifdef JOINT_MTP8
+extern "C" __attribute__((visibility("default"))) uint64_t eight_cpu_merge_calls(){return AscendC::EightCpuMergeCalls;}
+extern "C" __attribute__((visibility("default"))) void eight_cpu_reset_merge_calls(){AscendC::EightCpuMergeCalls=0;}
+#endif

@@ -3,7 +3,7 @@ import numpy as np
 from joint_plan_cases import make_case,sort_topk
 
 
-def cases():
+def cases(include_extreme=False):
     for topk,cap in ((7,16),(63,128),(65,256),(513,4096),(2048,4096)):
         for scenario in ('cold_reset','full_cache_75pct'):
             c=make_case(1,topk,cap,262144,7,scenario,'shared',block_size=8 if topk!=2048 else 64)
@@ -32,6 +32,11 @@ def cases():
     c=make_case(1,2048,4096,262144,7,'cold_reset','shared')
     for r in range(8):c['topk_indices'][r]=np.arange(2048)//3+100000+(r%2)*100
     yield 'production/repeated_packet_seams',sort_topk(c)
+
+    if include_extreme:
+        c=make_case(1,2048,4096,262144,7,'cold_reset','shared')
+        c['topk_indices'][:]=100000
+        yield 'production/all_equal_across_unknown_tails',sort_topk(c)
 
 
 def transitions():

@@ -43,8 +43,14 @@ template <TPosition P>class TBuf {
   ~TBuf(){for(int i=0;i<16;++i){assert(backing[i]==0x1234567);assert(backing[backing.size()-1-i]==0x1234567);}}
 };
 template<typename T>struct MrgSortSrcList {LocalTensor<T> src1,src2,src3,src4;};
+#ifdef JOINT_MTP8
+inline uint64_t EightCpuMergeCalls=0; // CPU-only work-count observer, absent from device sources
+#endif
 template<typename T,bool Exhaust>void MrgSort(LocalTensor<T> dst,const MrgSortSrcList<T>&l,
     const uint16_t lengths[4],uint32_t used[4],uint16_t valid,int repeats){
+  #ifdef JOINT_MTP8
+  ++EightCpuMergeCalls;
+  #endif
   assert(repeats==1);LocalTensor<T>s[4]={l.src1,l.src2,l.src3,l.src4};
   uint32_t n=valid==3?2:valid==7?3:valid==15?4:0;assert(n>=2);
   for(uint32_t k=0;k<n;++k){used[k]=0;assert(lengths[k]>0&&s[k].n>=2U*lengths[k]);}

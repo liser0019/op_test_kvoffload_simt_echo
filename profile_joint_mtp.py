@@ -80,6 +80,7 @@ def duration_ratios(stats):
     pairs += [(n, base) for n in common.MERGE_NAMES for base in ("abcdf_pages", "joint_merge", "joint_merge_bd", "joint_sorted_mrgsort", "private_turbo") if n != base]
     pairs += [(n,"joint_hw_ac_512") for n in stats if n.startswith("joint_union_") or n=="joint_hw_ac_256"]
     pairs += [("joint_hot_bd8_512","joint_hot_bd_512")]
+    pairs += [(n,"joint_hot_bd8_512") for n in stats if n.startswith("joint_mtp7_")]
     pairs += [(n,r) for n in stats if n.startswith("joint_hot_") for r in ("joint_refine_abd_512","joint_refine_bd_512","joint_hot_base_512") if n!=r]
     pairs += [(n,r) for n in stats if n.startswith("joint_exec_") for r in ("joint_refine_abd_512","joint_refine_bd_512","joint_exec_base_512") if n!=r]
     pairs += [(n,r) for n in stats if n.startswith("joint_refine_") for r in ("joint_integrated_bounds_512","joint_refine_base_512") if n!=r]

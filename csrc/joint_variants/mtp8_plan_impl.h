@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // 新BD的8行候选：512线程，四路分组→两路前缀归并；冻结BD源码不改。
 #pragma once
+#ifndef JOINT_MTP7_OPT
+#define JOINT_MTP7_OPT 0
+#endif
+static_assert(JOINT_MTP7_OPT>=0 && JOINT_MTP7_OPT<=2,"MTP7 candidate selector");
 constexpr uint64_t EIGHT_UB_WORDS=192U*1024U/4U;
 constexpr uint32_t EIGHT_CTX=128U;
 static_assert(192U*1024U+288U+8U*1024U+32U*1024U<=256U*1024U,"reserve compiler area and minimum DCache");
@@ -591,6 +595,103 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightProgressVf(
   asc_syncthreads();
 }
 
+#if JOINT_MTP7_OPT >= 1
+// A：512线程只遍历自己负责的记录；8个局部计数按常量下标展开，再按warp汇总。
+__simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightParallelProgressVf(
+    __ubuf__ int32_t* records,__ubuf__ int32_t* ctx,uint32_t n,uint32_t topk){
+  const uint32_t t=threadIdx.x;
+  auto* partials=records-static_cast<uint32_t>(ctx[30]);
+  uint32_t bins[8]={0,0,0,0,0,0,0,0};
+  for(uint32_t i=t;i<n;i+=SORTED_THREADS){
+    const uint32_t qid=static_cast<uint32_t>(records[2U*i+1U]);
+    const uint32_t row=topk==2048U?qid>>11U:qid/topk;
+    if(row>=8U)asc_atomic_min(ctx,0);
+#pragma unroll
+    for(uint32_t r=0;r<8U;++r)bins[r]+=row==r?1U:0U; // constant-index registers, no dynamic private-array access
+  }
+
+  // Dead original packet input is now the warp partial-count workspace.
+  // Each record is loaded once, bins are thread-private; no per-record atomics.
+  const uint32_t lane=t&31U,warp=t/32U;
+#pragma unroll
+  for(uint32_t r=0;r<8U;++r){
+    uint32_t v=bins[r];
+#pragma unroll
+    for(uint32_t delta=16U;delta;delta>>=1U)v+=static_cast<uint32_t>(asc_shfl(static_cast<int32_t>(v),lane^delta,32));
+    if(lane==0U)partials[warp*8U+r]=static_cast<int32_t>(v);
+  }
+  asc_syncthreads();
+  if(t<8U){uint32_t total=0;
+    for(uint32_t w=0;w<SORTED_WARPS;++w)total+=static_cast<uint32_t>(partials[w*8U+t]);
+    ctx[48U+t]+=total;
+  }
+  asc_syncthreads();
+}
+#endif
+
+#if JOINT_MTP7_OPT == 2
+// Sorted score is -token. Inclusive=true counts score>=key; otherwise score>key.
+__simt_callee__ __aicore__ inline uint32_t EightScoreBound(
+    __ubuf__ int32_t* records,uint32_t n,float key,bool inclusive){
+  auto* score=reinterpret_cast<__ubuf__ float*>(records);uint32_t lo=0,hi=n;
+  while(lo<hi){const uint32_t mid=lo+((hi-lo)>>1U);const float value=score[2U*mid];
+    if(value>key||(inclusive&&value==key))lo=mid+1U;else hi=mid;
+  }
+  return lo;
+}
+// B：两段安全前缀并行rank-scatter归并，同时统计原始行消费量。
+// No final MrgSort or separate progress VF. All persistent writes remain downstream.
+__simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf(
+    __ubuf__ int32_t* packet,__ubuf__ int32_t* ctx,uint32_t chunk,uint32_t topk){
+  const uint32_t t=threadIdx.x;
+  auto* a=packet+16U*chunk;auto* b=packet+24U*chunk;auto* out=packet+32U*chunk;
+  auto* partials=packet;
+  if(t==0U){
+    uint32_t na=ctx[104],nb=ctx[105];const uint32_t complete=ctx[106];
+    float cut=-16777216.0f;
+    if(!(complete&1U))cut=reinterpret_cast<__ubuf__ float*>(a)[2U*(na-1U)];
+    if(!(complete&2U)){float v=reinterpret_cast<__ubuf__ float*>(b)[2U*(nb-1U)];if(v>cut)cut=v;}
+    // Retain all known records equal to cut. Unseen records are <=cut (score),
+    // so future equal tokens remain legal and are deduplicated by the carried lastToken.
+    ctx[107]=EightScoreBound(a,na,cut,true);ctx[108]=EightScoreBound(b,nb,cut,true);
+    ctx[4]=ctx[107]+ctx[108];if(ctx[4]==0)ctx[0]=0;
+  }
+  asc_syncthreads();
+  const uint32_t na=ctx[107],nb=ctx[108],n=na+nb;
+  uint32_t bins[8]={0,0,0,0,0,0,0,0};
+  for(uint32_t i=t;i<n;i+=SORTED_THREADS){
+    const bool first=i<na;const uint32_t j=first?i:i-na;
+    auto* src=first?a:b;auto* other=first?b:a;
+    const float key=reinterpret_cast<__ubuf__ float*>(src)[2U*j];
+    // Equal keys from a precede equal keys from b: ranks are unique, no atomics.
+    const uint32_t rank=j+EightScoreBound(other,first?nb:na,key,!first);
+    out[2U*rank]=src[2U*j];out[2U*rank+1U]=src[2U*j+1U];
+    const uint32_t qid=static_cast<uint32_t>(src[2U*j+1U]);
+    const uint32_t row=topk==2048U?qid>>11U:qid/topk;
+    if(row>=8U)asc_atomic_min(ctx,0);
+#pragma unroll
+    for(uint32_t r=0;r<8U;++r)bins[r]+=row==r?1U:0U; // constant-index registers, no dynamic private-array access
+  }
+
+  // Dead original packet input is now the warp partial-count workspace.
+  // Each record is loaded once, bins are thread-private; no per-record atomics.
+  const uint32_t lane=t&31U,warp=t/32U;
+#pragma unroll
+  for(uint32_t r=0;r<8U;++r){
+    uint32_t v=bins[r];
+#pragma unroll
+    for(uint32_t delta=16U;delta;delta>>=1U)v+=static_cast<uint32_t>(asc_shfl(static_cast<int32_t>(v),lane^delta,32));
+    if(lane==0U)partials[warp*8U+r]=static_cast<int32_t>(v);
+  }
+  asc_syncthreads();
+  if(t<8U){uint32_t total=0;
+    for(uint32_t w=0;w<SORTED_WARPS;++w)total+=static_cast<uint32_t>(partials[w*8U+t]);
+    ctx[48U+t]+=total;
+  }
+  asc_syncthreads();
+}
+#endif
+
 template <bool AllowJoint>
 __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
     GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
@@ -668,6 +769,16 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
               }
             }
           }
+#if JOINT_MTP7_OPT == 2
+          if(!lengths[0]||!lengths[1])ctx[0]=0;
+          if(ctx[0]){
+            ctx[104]=lengths[0];ctx[105]=lengths[1];
+            ctx[106]=(allComplete[0]?1U:0U)|(allComplete[1]?2U:0U);
+            SortedScalarToVector(pipe);
+            asc_vf_call<EightRankMergeVf>(dim3(SORTED_THREADS),packet,ctx,chunk,static_cast<uint32_t>(d.topk));
+            SortedVectorToScalar(pipe);
+          }
+#else
           uint16_t lens[4]={static_cast<uint16_t>(lengths[0]),static_cast<uint16_t>(lengths[1]),0,0};
           uint32_t used[4]={0,0,0,0};
           if(!lengths[0]||!lengths[1])ctx[0]=0;
@@ -682,10 +793,15 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
             else{
               ctx[4]=used[0]+used[1];
               SortedScalarToVector(pipe);
+#if JOINT_MTP7_OPT >= 1
+              asc_vf_call<EightParallelProgressVf>(dim3(SORTED_THREADS),packet+32U*chunk,ctx,static_cast<uint32_t>(ctx[4]),static_cast<uint32_t>(d.topk));
+#else
               asc_vf_call<EightProgressVf>(dim3(SORTED_THREADS),packet+32U*chunk,ctx,static_cast<uint32_t>(ctx[4]),static_cast<uint32_t>(d.topk));
+#endif
               SortedVectorToScalar(pipe);
             }
           }
+#endif
           SortedScalarToVector(pipe);
         }else
         if(HW_A&&ctx[28]==1){

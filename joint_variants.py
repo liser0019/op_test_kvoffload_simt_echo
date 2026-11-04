@@ -64,6 +64,9 @@ HOT_SWEEP.update(hot_part_512=191,hot_miss_512=192)
 MASKS.update(HOT_SWEEP)
 MASKS["hot_bd8_512"]=193
 MTP8_NAME="joint_hot_bd8_512"
+MASKS.update(mtp7_parallel_512=194,mtp7_rank_512=195)
+MTP7_FIX_NAMES=("joint_mtp7_parallel_512","joint_mtp7_rank_512")
+def supports_eight_rows(name):return name==MTP8_NAME or name in MTP7_FIX_NAMES
 HOT_NAMES=tuple("joint_"+n for n in HOT_SWEEP)
 HOT_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_abd_512","joint_refine_bd_512","joint_hot_base_512")
 def hot_config(name):
@@ -72,7 +75,7 @@ def hot_config(name):
     bits=value-159 if value<=190 else 0
     return {"bits":bits,"filter":bool(bits&1),"partition":bool(bits&2) or value==191,
             "miss":bool(bits&2) or value==192,"packet":bool(bits&4),"reuse":bool(bits&8),"fixed":bool(bits&16)}
-INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES,MTP8_NAME)
+INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES,MTP8_NAME,*MTP7_FIX_NAMES)
 INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",INTEGRATED_NAME,BOUNDS_NAME)
 def supports_single_sorted(name):
     return name.startswith("joint_union_") or name in INTEGRATED_NAMES
@@ -89,14 +92,14 @@ def union_config(name):
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 194))
+TURBO_MASKS = tuple(range(17, 196))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return 72 if 127<=mask<=193 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
+    return 72 if 127<=mask<=195 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -105,6 +108,8 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask in (194,195):
+        return description(MTP8_NAME) | {"mask":mask,"parent":MTP8_NAME,"optimization":"parallel source histogram" if mask==194 else "parallel rank merge + fused source histogram","dynamic_ub_change":False}
     if mask==193:
         return description("joint_hot_bd_512") | {"mask":193,"max_group_rows":8,"control_words":128,"UB_limit_bytes":192*1024,"merge":"4+4 then2; only final prefix advances sources","parent":"joint_hot_bd_512","packet_contract":"up to8 sources, three UB packet regions; per-source512 records","GM_contract":"UB-only, reject shapes exceeding192KiB"}
     if 159<=mask<=192:
