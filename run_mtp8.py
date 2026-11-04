@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""三路MTP0/1/3/7短流程：构建→一次专项门禁→一次profiling，无初筛/复测叠加。"""
+from pathlib import Path
+from types import SimpleNamespace
+import argparse,json,os,subprocess,sys,time
+import numpy as np
+import joint_plan_common as common
+from joint_plan_cases import make_case,sort_topk,describe
+from checks.mtp8_cases import cases,transitions
+from checks.check_joint_plan import context_gate
+from harness_io import preflight_args,write_json,record_failure,diagnostic_log,capture_error
+from fixed_plan_check import exact_workload_key
+from profile_joint_mtp import capture,mtp_comparison
+ROOT=Path(__file__).resolve().parent
+NAMES=('abcdf_pages','joint_hot_bd_512','joint_hot_bd8_512')
+
+
+def workload_cases(a):
+    return [sort_topk(make_case(a.requests,a.topk,a.capacity,a.max_token,m,s,'overlap40',2026,64))
+            for s in a.scenarios for m in a.mtp]
+
+
+def gate(torch,a,workloads,environment,destination):
+    records=[];evidence={n:{} for n in NAMES};regression={}
+    failed=destination/'failure_state'
+    def fixed(label,c,repeats):
+        inputs=common.upload_inputs(torch,c)
+        for n in NAMES:
+            b=common.prepare(torch,c,n,inputs);b['fast_fixed_check']=True
+            try:
+                r=common.audit(torch,c,b,repeats,failed)
+                records.append({'case':label,'implementation':n,'audit':r,'layout':b['layout'],'check_cost':b.get('check_timing')})
+                evidence[n][exact_workload_key(c)]='passed'
+                if label=='known_input_write':regression[n]=r
+            finally:common.close(b)
+        print('专项门禁:',label,'通过',flush=True)
+    fixed('known_input_write',sort_topk(make_case(32,2048,4096,262144,1,'full_cache_75pct','shared')),a.regression_repeat)
+    for label,c in cases():fixed(label,c,1)
+    continuous=[]
+    for n in NAMES:
+        start=next(transitions())[1];b=common.prepare(torch,start,n)
+        try:
+            for label,c in transitions():
+                common.update_inputs(torch,b,c);common.poison(b);torch.npu.synchronize()
+                before=common.snapshot(b);b['phase']=label
+                try:
+                    common.invoke(b);torch.npu.synchronize();r=common.check(c,b,before)
+                except BaseException:common.dump_failure(c,b,failed);raise
+                continuous.append({'case':label,'implementation':n,'audit':r})
+        finally:common.close(b)
+    for c in workloads:fixed(f"performance/{c['scenario']}/mtp{c['mtp']}",c,a.regression_repeat)
+    result={'status':'passed','environment':environment,'gate':{'status':'passed','implementations':list(NAMES),
+        'validation_scope':'mtp8_v1: exact8 group + packet seams + duplicate/causality + capacity fallback +10-step actual continuations',
+        'input_write_regression':{'status':'passed','checked_iterations':a.regression_repeat,'per_implementation':regression,'input_restore':False},
+        'cases':records,'continuous':continuous,'context':context_gate(torch,NAMES)},'exact_workloads':evidence}
+    write_json(destination/'gate.json',result)
+    return result
+
+
+def report_text(report):
+    lines=['# 三路MTP0/1/3/7 Plan对照','',
+      '仅设备目标kernel Duration，单位μs；不含恢复、CPU参考、校验、Transfer/SFA。固定地址预热。',
+      '旧BD在MTP7是逐行回退参考；新BD8需结合共享/回退计数判断实际路径。比值为当前实现P50/参考，小于1更快。','',
+      '| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 实现/ABCDF | 实现/旧BD | 共享/回退 | 实际descriptor数 |',
+      '|---|---|---|---:|---:|---:|---|---:|']
+    for r in report['runs']:
+        w=r['workload'];stats=r['stats']
+        for n,s in stats.items():
+            c=s['correctness']
+            lines.append(f"| {w['scenario']}/MTP{w['mtp']} | {n} | {s['p50_us']:.3f}/{s['p95_us']:.3f} | {s['count']} | {s['p50_us']/stats['abcdf_pages']['p50_us']:.3f} | {s['p50_us']/stats['joint_hot_bd_512']['p50_us']:.3f} | {c.get('joint_groups',0)}/{c.get('overflow_groups',0)} | {c['total_transfer_descriptors']} |")
+    lines+=['','## 各实现相对自身MTP0','',
+        '| 工况 | 实现 | MTP | 实际请求/行 | 自身MTP0请求/行 | P50比值 |',
+        '|---|---|---:|---|---|---:|']
+    for c in report['mtp_comparison']:
+        lines.append(f"| {c['scenario']} | {c['implementation']} | {c['mtp']} | {c['on_requests']}/{c['on_rows']} | {c['off_requests']}/{c['off_rows']} | {c['on_over_off_p50']:.3f} |")
+    lines+=['','逐样本严格校验。输入指纹、实际miss/共享/回退、源码/设备/库身份、原始样本、CSV路径与各阶段墙钟见capture_metadata.json/data_index.json。',
+        f"本轮每实现每工况{report['repeat']}个正式样本；5样本是探索结果，不与后续50样本混合统计。"]
+    return '\n'.join(lines)+'\n'
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__);common.add_runtime_arguments(p);p.set_defaults(device=0,temp_dir=None)
+    p.add_argument('--output',type=Path,required=True);p.add_argument('--skip-build',action='store_true')
+    p.add_argument('--describe-only',action='store_true');p.add_argument('--formal',action='store_true')
+    p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7])
+    p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
+    p.add_argument('--requests',type=int,default=32);p.add_argument('--topk',type=int,default=2048)
+    p.add_argument('--capacity',type=int,default=4096);p.add_argument('--max-token',type=int,default=262144)
+    p.add_argument('--warmup',type=int);p.add_argument('--repeat',type=int);p.add_argument('--regression-repeat',type=int,default=5)
+    p.add_argument('--correctness-report',type=Path,help='仅复用同源码/库/设备、同输入且包含本轮专项门禁的报告')
+    a=p.parse_args();a.warmup=(10 if a.formal else 2) if a.warmup is None else a.warmup
+    a.repeat=(50 if a.formal else 5) if a.repeat is None else a.repeat
+    if a.warmup<0 or min(a.repeat,a.regression_repeat,a.requests)<=0 or 0 not in a.mtp:p.error('positive counts, warmup>=0, MTP list must include0')
+    if len(set(a.mtp))!=len(a.mtp) or len(set(a.scenarios))!=len(a.scenarios):p.error('duplicate scenarios/MTP')
+    workloads=workload_cases(a)
+    if a.describe_only:
+        print(json.dumps({'implementations':NAMES,'mtp':a.mtp,'workloads':[describe(c) for c in workloads],
+            'warmup':a.warmup,'repeat':a.repeat,'regression_repeat':a.regression_repeat,'build':'--mtp8-only',
+            'target_active_samples':len(workloads)*len(NAMES)*a.repeat,'hardware_status':'not locally verified'},ensure_ascii=False,indent=2));return
+    a.output=a.output.expanduser().resolve();a.library=a.library.expanduser().resolve()
+    if a.output.exists():raise RuntimeError('refuse overwrite: '+str(a.output))
+    a.temp_dir=(a.temp_dir or a.output/'tmp').expanduser().resolve()
+    storage=preflight_args(a,a.output);status=a.output/'RUN_STATUS.json';log=a.output/'launcher.log'
+    state={'status':'running','storage':storage,'wall_seconds':{},'implementations':NAMES,'workload_count':len(workloads)}
+    os.chdir(ROOT);os.environ['PYTHONDONTWRITEBYTECODE']='1'
+    with diagnostic_log(log):
+      try:
+        if not a.skip_build:
+            state['phase']='build';write_json(status,state);t=time.monotonic()
+            with (a.output/'build.log').open('w') as stream:
+                subprocess.run(['bash','build_joint_plan.sh','--soc=ascend950','--mtp8-only'],stdout=stream,stderr=subprocess.STDOUT,check=True)
+            state['wall_seconds']['build']=time.monotonic()-t
+        torch,npu,env=common.load_runtime(a)
+        state['phase']='gate';write_json(status,state);t=time.monotonic()
+        if a.correctness_report:
+            from checks.check_joint_plan import validate_gate_report
+            validate_gate_report(a.correctness_report,env,a.regression_repeat,NAMES)
+            g=json.loads(a.correctness_report.read_text())
+            if not g['gate'].get('validation_scope','').startswith('mtp8_v1:'):raise RuntimeError('not an MTP8 targeted gate')
+            if any(g.get('exact_workloads',{}).get(n,{}).get(exact_workload_key(c))!='passed' for c in workloads for n in NAMES):raise RuntimeError('gate lacks exact workload inputs')
+            write_json(a.output/'gate.json',g)
+        else:g=gate(torch,a,workloads,env,a.output)
+        state['wall_seconds']['gate']=time.monotonic()-t
+        a.fast_fixed_check=True;a.reuse_workload_audit=True;a.workload_gate=g['exact_workloads']
+        report={'status':'running','environment':env,'storage':storage,'runs':[],'mtp_comparison':[],
+            'implementations':NAMES,'mtp':a.mtp,'warmup':a.warmup,'repeat':a.repeat,
+            'scope':'Plan kernel Duration only; same32requests; fixed-address warmup; no Transfer/SFA',
+            'gate':str(a.output/'gate.json'),'validation':'strict each sample, fixed certified reference cache, batchedD2H; continuous gate uncached'}
+        metadata=a.output/'capture_metadata.json';state['phase']='profile';write_json(status,state);t=time.monotonic()
+        for c in workloads:
+            current=a.output/'profile'/c['scenario']/f"mtp{c['mtp']}"
+            r=capture(torch,npu,c,NAMES,a,current);r['comparison']='same_requests';report['runs'].append(r)
+            write_json(metadata,report)
+        report['mtp_comparison']=mtp_comparison(report['runs']);state['wall_seconds']['profile']=time.monotonic()-t
+        report['wall_seconds']=state['wall_seconds'];report['status']='complete'
+        write_json(metadata,report)
+        write_json(a.output/'data_index.json',{'runs':[{'workload':r['workload'],'raw_csv':r['raw_csv'],'target_samples':r['target_samples']} for r in report['runs']]})
+        text=report_text(report)+'\n## 本轮说明\n\n旧BD的MTP7只作逐行回退对照；新BD8必须查看共享/回退数量，不能把容量溢出回退当成联合执行。\n'
+        text+='\n阶段墙钟秒数：'+json.dumps(state['wall_seconds'],ensure_ascii=False)+'\n'
+        text+='\n每工况的恢复、校验、首次参考认证、缓存命中、采集循环及profiler导出解析耗时见metadata；这些不是设备kernel耗时。\n'
+        (a.output/'report.md').write_text(text)
+        state['status']='complete';write_json(status,state);write_json(a.output/'COMPLETE.json',{'status':'complete','metadata':str(metadata)})
+        print('===== MTP8_ALL_STAGES_PASSED =====\n报告:',a.output/'report.md',flush=True)
+      except BaseException as exc:
+        record_failure(status,state,exc)
+        print(capture_error(a.output,log,exc),file=sys.stderr,flush=True)
+        raise
+if __name__=='__main__':main()

@@ -402,3 +402,7 @@ PC样本比例不是精确阶段周期占比；SIMT VF也不能承诺通过Instr
 [Reduce](https://asc.gitcode.com/api/SIMT-API/Warp_functions/Warp_reduce_functions/asc_reduce_add.html)、
 [CANN9.1 msOpProf指南](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/910/devaids/optool/docs/zh/user_guide/msopprof_user_guide.md)、
 [官方工具当前源码文档](https://github.com/Ascend/msopprof/blob/master/docs/zh/user_guide/msopprof_user_guide.md)。
+
+## MTP7八行联合候选（新分支）
+
+新增`joint_hot_bd8_512`，基于冻结新BD支持1/2/4/8行，512线程，生产动态UB181024字节。只构建/对比三路，默认5样本短测，逐样本校验和连续状态门禁保留。本地未做CANN/NPU验证。详见[八行联合规划与精简测试](docs/MTP7八行联合规划与精简测试.md)。

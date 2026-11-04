@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import time
 from pathlib import Path
 import numpy as np
 from joint_variants import supports_single_sorted,INTEGRATED_NAMES
@@ -86,7 +87,7 @@ def prepare(torch, case, name, inputs=None):
     controller_enabled = enabled or supports_single_sorted(name)
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
-                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")))
+                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")),mtp8=name=="joint_hot_bd8_512")
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name in INDEPENDENT:
         host = {key: case[key].copy() for key in ABCDF_STATE}
@@ -95,7 +96,7 @@ def prepare(torch, case, name, inputs=None):
     else:
         max_queries = (info["scratch_elements"] - 2 * info["joint_hash_capacity"] - case["capacity"]
                        if is_turbo and enabled else None)
-        if name in SORTED_NAMES: max_queries=4*case["topk"] if enabled else None
+        if name in SORTED_NAMES: max_queries=(8 if name=="joint_hot_bd8_512" else 4)*case["topk"] if enabled else None
         host = initial_arrays(case, enabled, max_queries)
     host["workspace"] = np.full(info["workspace_elements"], np.iinfo(np.int32).max, np.int32)
     tensors, buffers, initial = {}, {}, {}
@@ -172,7 +173,8 @@ def close(bundle):
 
 def snapshot(bundle):
     keys = (*ABCDF_STATE, *ABCDF_OUTPUT) if bundle["name"] in INDEPENDENT else (*PERSISTENT, *OUTPUTS)
-    return {key: bundle["state"][key].cpu().numpy().copy() for key in keys}
+    cached=bundle.get("_readback")
+    return {key: (cached["state/"+key].copy() if cached is not None else bundle["state"][key].cpu().numpy().copy()) for key in keys}
 
 
 def poison(bundle):
@@ -181,17 +183,20 @@ def poison(bundle):
     bundle["state"]["workspace"].fill_(np.iinfo(np.int32).max)
 
 
-def check(case, bundle, before=None):
-    if bundle["name"] in PAGED_NAMES:
-        np.testing.assert_array_equal(bundle["inputs"]["block_table"].cpu().numpy(), bundle["page_table_host"], err_msg="read-only/block_table")
+def _check_uncached(case, bundle, before=None):
     before = bundle["host_initial"] if before is None else before
-    for key, storage in bundle["buffers"].items():
-        for guard in (storage[:GUARD], storage[-GUARD:]):
-            np.testing.assert_array_equal(guard.cpu().numpy(), np.full(GUARD, GUARD_VALUE), err_msg="guard/" + key)
-    for key in INPUTS:
-        np.testing.assert_array_equal(bundle["inputs"][key].cpu().numpy(), case[key], err_msg="input write/" + key)
-    np.testing.assert_array_equal(bundle["inputs"]["active_rows"].cpu().numpy(),
-                                 [case.get("active_rows", case["rows"])], err_msg="active_rows write")
+    cached=bundle.get("_readback")
+    if cached is not None:
+        _check_readback(case,bundle,cached)
+    else:
+        if bundle["name"] in PAGED_NAMES:
+            np.testing.assert_array_equal(bundle["inputs"]["block_table"].cpu().numpy(),bundle["page_table_host"],err_msg="read-only/block_table")
+        for key, storage in bundle["buffers"].items():
+            for guard in (storage[:GUARD], storage[-GUARD:]):
+                np.testing.assert_array_equal(guard.cpu().numpy(),np.full(GUARD,GUARD_VALUE),err_msg="guard/"+key)
+        for key in INPUTS:
+            np.testing.assert_array_equal(bundle["inputs"][key].cpu().numpy(),case[key],err_msg="input write/"+key)
+        np.testing.assert_array_equal(bundle["inputs"]["active_rows"].cpu().numpy(),[case.get("active_rows",case["rows"])],err_msg="active_rows write")
     if bundle["name"] in INDEPENDENT:
         result = validate_abcdf(case, before, snapshot(bundle))
         if bundle["name"] in PAGED_NAMES:
@@ -200,8 +205,44 @@ def check(case, bundle, before=None):
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
-    if bundle["name"] in SORTED_NAMES: max_queries=4*case["topk"] if bundle["joint_enabled"] else None
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=supports_single_sorted(bundle["name"]))
+    if bundle["name"] in SORTED_NAMES: max_queries=(8 if bundle["name"]=="joint_hot_bd8_512" else 4)*case["topk"] if bundle["joint_enabled"] else None
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=supports_single_sorted(bundle["name"]),max_group_rows=8 if bundle["name"]=="joint_hot_bd8_512" else 4)
+
+
+def _check_readback(case,bundle,values):
+    for key in bundle['buffers']:
+        for side in ('left','right'):
+            np.testing.assert_array_equal(values[side+'/'+key],np.full(GUARD,GUARD_VALUE),err_msg='guard/'+key)
+    for key in INPUTS:
+        np.testing.assert_array_equal(values['input/'+key],case[key],err_msg='input write/'+key)
+    np.testing.assert_array_equal(values['input/active_rows'],[case.get('active_rows',case['rows'])],err_msg='active_rows write')
+    if bundle['name'] in PAGED_NAMES:
+        np.testing.assert_array_equal(values['input/block_table'],bundle['page_table_host'],err_msg='read-only/block_table')
+
+
+def check(case,bundle,before=None):
+    start=time.monotonic()
+    try:
+        if not bundle.get('fast_fixed_check') or (before is not None and not bundle.get('_fixed_audit')):
+            return _check_uncached(case,bundle,before)
+        base=bundle['host_initial'] if before is None else before
+        from fixed_plan_check import FixedExpectation,batched_readback
+        t=time.monotonic();bundle['_readback']=batched_readback(bundle)
+        timing=bundle.setdefault('check_timing',{'readback_seconds':0.,'reference_seconds':0.,'compare_seconds':0.,'reference_builds':0,'cache_hits':0})
+        timing['readback_seconds']+=time.monotonic()-t
+        _check_readback(case,bundle,bundle['_readback'])
+        t=time.monotonic();cached=bundle.get('_fixed_expectation')
+        if cached is None:
+            result=_check_uncached(case,bundle,before)
+            bundle['_fixed_expectation']=FixedExpectation(case,base,snapshot(bundle),result)
+            timing['reference_builds']+=1;timing['reference_seconds']+=time.monotonic()-t
+            return result
+        result=cached.check(case,base,snapshot(bundle))
+        timing['cache_hits']+=1;timing['compare_seconds']+=time.monotonic()-t
+        return result
+    finally:
+        bundle.pop('_readback',None)
+        bundle['check_seconds']=bundle.get('check_seconds',0.)+time.monotonic()-start
 
 
 def dump_failure(case, bundle, destination):
@@ -238,7 +279,9 @@ def audit(torch, case, bundle, repeats=5, failure_dir=None, progress_every=0):
             before = snapshot(bundle)
             invoke(bundle)
             torch.npu.synchronize()
-            result = check(case, bundle, before)
+            bundle["_fixed_audit"]=True
+            try:result = check(case,bundle,before)
+            finally:bundle.pop("_fixed_audit",None)
             if progress_every and (iteration + 1) % progress_every == 0:
                 print(f"输入错写回归: {iteration + 1}/{repeats} passed", flush=True)
         except BaseException as exc:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""新版联合Plan的MTP=0/1/3 profiling；逐行ABCDF作同输入对照。"""
+"""新版联合Plan的MTP=0/1/3/7 profiling；逐行ABCDF作同输入对照。"""
 from __future__ import annotations
 import argparse
 import csv
@@ -79,6 +79,7 @@ def duration_ratios(stats):
               for base in ("abcdf", "joint" if common.is_joint(name) else "private")]
     pairs += [(n, base) for n in common.MERGE_NAMES for base in ("abcdf_pages", "joint_merge", "joint_merge_bd", "joint_sorted_mrgsort", "private_turbo") if n != base]
     pairs += [(n,"joint_hw_ac_512") for n in stats if n.startswith("joint_union_") or n=="joint_hw_ac_256"]
+    pairs += [("joint_hot_bd8_512","joint_hot_bd_512")]
     pairs += [(n,r) for n in stats if n.startswith("joint_hot_") for r in ("joint_refine_abd_512","joint_refine_bd_512","joint_hot_base_512") if n!=r]
     pairs += [(n,r) for n in stats if n.startswith("joint_exec_") for r in ("joint_refine_abd_512","joint_refine_bd_512","joint_exec_base_512") if n!=r]
     pairs += [(n,r) for n in stats if n.startswith("joint_refine_") for r in ("joint_integrated_bounds_512","joint_refine_base_512") if n!=r]
@@ -104,11 +105,27 @@ def capture(torch, torch_npu, case, names, args, destination):
 
 
 def _capture(torch, torch_npu, case, names, args, destination, bundles):
+    wall_start=time.monotonic();phase_times={}
     inputs = common.upload_inputs(torch, case)
     for name in names:
         bundles[name] = common.prepare(torch, case, name, inputs)
-    audits = {name: common.audit(torch, case, bundle, failure_dir=destination / "failure_state")
-              for name, bundle in bundles.items()}
+    for bundle in bundles.values():bundle['fast_fixed_check']=bool(getattr(args,'fast_fixed_check',False))
+    phase_times['prepare_seconds']=time.monotonic()-wall_start
+    t=time.monotonic()
+    # Explicit reuse requires a validated matching gate AND this exact workload fingerprint.
+    reuse=getattr(args,'reuse_workload_audit',False)
+    if reuse:
+        from fixed_plan_check import exact_workload_key
+        key=exact_workload_key(case)
+        evidence=getattr(args,'workload_gate',{})
+        if any(evidence.get(n,{}).get(key)!='passed' for n in names):raise RuntimeError('missing exact-input gate; cannot skip audit')
+        audits={n:{'status':'passed','reused_exact_input_gate':key} for n in names}
+    else:
+        audits={name:common.audit(torch,case,bundle,repeats=getattr(args,'capture_audit_repeat',5),failure_dir=destination/'failure_state') for name,bundle in bundles.items()}
+    if not reuse:
+        for bundle in bundles.values():bundle.pop('_fixed_expectation',None) # poisoned audit initial != normal measurement initial
+    phase_times['audit_seconds']=time.monotonic()-t
+    t=time.monotonic()
     for iteration in range(args.warmup):
         for name in execution_order(names, iteration):
             bundles[name]["phase"] = f"warmup-{iteration + 1}"
@@ -120,6 +137,8 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
         # audit已经至少执行过一次，warmup=0也能检查最终状态。
         if args.warmup:
             common.check(case, bundle)
+    phase_times["warmup_seconds"]=time.monotonic()-t
+    restore_seconds=0.;target_host_seconds=0.;capture_started=time.monotonic()
     profiler = torch_npu.profiler
     config = profiler._ExperimentalConfig(profiler_level=profiler.ProfilerLevel.Level0,
         aic_metrics=profiler.AiCMetrics.AiCoreNone, export_type=[profiler.ExportType.Text])
@@ -147,17 +166,23 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
                 orders.append(order)
             for name in order:
                 bundles[name]["phase"] = f"profiler-step-{step}/active-sample-{step}"
-                common.restore(torch, bundles[name])
+                phase_start=time.monotonic();common.restore(torch,bundles[name]);restore_seconds+=time.monotonic()-phase_start
+                phase_start=time.monotonic()
                 with torch.profiler.record_function(f"joint_plan/mtp{case['mtp']}/{name}"):
                     common.invoke(bundles[name])
                     torch.npu.synchronize()
+                target_host_seconds+=time.monotonic()-phase_start
                 common.check(case, bundles[name])  # 逐样本必检；错误输入不恢复，不继续调用。
             prof.step()
+        collection_end=time.monotonic()
+    phase_times.update(capture_loop_seconds=collection_end-capture_started,profiler_finalize_parse_seconds=time.monotonic()-collection_end,restore_seconds=restore_seconds,target_host_seconds=target_host_seconds)
     final = {name: common.check(case, bundle) for name, bundle in bundles.items()}
     paths = sorted(destination.rglob("kernel_details.csv"))
     if not paths:
         raise RuntimeError("采集后未找到kernel_details.csv；检查此目录原始文件和详细日志")
-    records = read_kernels(paths, names, args.repeat, expected_order)
+    parse_started=time.monotonic()
+    records = read_kernels(paths,names,args.repeat,expected_order)
+    phase_times["csv_validate_seconds"]=time.monotonic()-parse_started
     stats = {}
     for name in names:
         samples = [r["duration_us"] for r in records if r["implementation"] == name]
@@ -169,7 +194,10 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
             "correctness": final[name], "implementation": common.description(name) if name in common.VARIANTS else {"name":name}}
     result = {"status": "passed", "workload": describe(case), "stats": stats,
               "execution_orders": orders, "audit": audits, "target_samples": records,
-              "raw_csv": [str(p) for p in paths], "capture_start_wait": wait_record}
+              "raw_csv": [str(p) for p in paths], "capture_start_wait": wait_record,
+              "wall_seconds":phase_times | {'total_seconds':time.monotonic()-wall_start},
+              "check_cost":{n:{'total_seconds':b.get('check_seconds',0.),**b.get('check_timing',{})} for n,b in bundles.items()},
+              "validation_mode":"fixed reference reuse, per-sample strict inputs/state/output/guards" if getattr(args,'fast_fixed_check',False) else "original full reference each check"}
     result.update(duration_ratios(stats))
     write_json(destination / "summary.json", result)
     with (destination / "kernel_summary.csv").open("w", newline="", encoding="utf-8") as stream:
@@ -205,7 +233,7 @@ def mtp_comparison(runs):
 
 
 def report_text(report):
-    lines = ["# 联合Plan MTP=0/1/3 profiling", "",
+    lines = ["# 联合Plan MTP=0/1/3/7 profiling", "",
         "单次调用处理所有query行；数据来自kernel_details.csv，单位μs。", "",
         "abcdf为13_abcdf独立设备路径，已移除来源页检查（14 tensors + 3 attrs）；不经过RunPrivateRow，不生成联合协议元数据。历史含页表版本数据不能直接作为本轮同场结果。",
         "private为本新版joint关闭后的逐行ABCDF路径，含新增映射发布。",
@@ -345,7 +373,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     common.add_runtime_arguments(parser)
     parser.add_argument("--implementations", nargs="+", choices=common.IMPLEMENTATIONS, default=list(common.DEFAULT_IMPLEMENTATIONS))
-    parser.add_argument("--mtp", nargs="+", type=int, choices=(0, 1, 3), default=[0, 1, 3])
+    parser.add_argument("--mtp", nargs="+", type=int, choices=(0, 1, 3, 7), default=[0, 1, 3])
     parser.add_argument("--requests", type=int, default=32)
     parser.add_argument("--comparison", choices=("same_requests", "same_query_rows", "both"), default="same_requests")
     parser.add_argument("--fixed-query-rows", type=int, default=32)

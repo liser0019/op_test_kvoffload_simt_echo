@@ -11,7 +11,7 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint", "overlap40")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False,mtp8=False):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
@@ -23,8 +23,11 @@ def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=Fals
         scratch=max(row,(128 if union_next else 64)+((4*topk+capacity+7)&~7)+max(3*capacity,64))
     if hot_packet and joint and topk==2048 and capacity==4096 and scratch<=112*1024//4:
         scratch=112*1024//4
+    if mtp8 and joint:
+        scratch=max(row,128+((8*topk+capacity+7)&~7)+max(3*capacity,24576))
+        if scratch*4>192*1024:raise ValueError("MTP8 UB layout exceeds192KiB; unsupported shape")
     aligned = (scratch * 4 + 31) & ~31
-    ub = aligned <= 112 * 1024
+    ub = aligned <= (192 if mtp8 else 112) * 1024
     return {"hash_capacity": h, "joint_hash_capacity": j, "scratch_elements": scratch,
             "workspace_elements": rows * (scratch + max_token) if bitmap else (1 if ub else rows * scratch),
             "dynamic_ub_bytes": 288 + (aligned if ub else (((128 if union_next else 64)+16*(min(768,max(64,3*capacity)//16)//4*4))*4 if sorted_union else 0)), "scratch_path": "UB" if ub else "GM"}
@@ -55,14 +58,14 @@ def valid_sets(case):
 
 def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
               scenario="full_cache_75pct", overlap="shared", seed=2026, block_size=64):
-    if mtp not in (0, 1, 3) or scenario not in SCENARIOS or overlap not in OVERLAPS:
-        raise ValueError("MTP只取0/1/3，工况/重合模式必须在目录内")
+    if mtp not in (0, 1, 3, 7) or scenario not in SCENARIOS or overlap not in OVERLAPS:
+        raise ValueError("MTP只取0/1/3/7，工况/重合模式必须在目录内")
     if requests <= 0 or not 0 < topk <= capacity or block_size <= 0 or capacity % block_size:
         raise ValueError("需要requests>0、0<topk<=capacity且capacity可被block_size整除")
     if max_token > np.iinfo(np.int32).max or capacity > np.iinfo(np.int32).max // 2:
         raise ValueError("token/capacity超出kernel的int32范围")
     context, width = max_token - 16, mtp + 1
-    if context <= 4 * topk + capacity + 1:
+    if context <= max(4,width) * topk + capacity + 1:
         raise ValueError("稳定token值域需大于4*topk+capacity+1；提高max-token")
     rows = requests * width
     req = np.repeat(np.arange(requests, dtype=np.int32), width)
@@ -178,7 +181,7 @@ def describe(case):
             "logical_input_sha256": array_hash({k: case[k] for k in (*INPUTS, "last_req_ids", "slot_to_token", "lru_slots")})}
 
 
-def validate(case, before, actual, joint, max_group_queries=None, merge=False, float_keys=False, preserve_tail=False, single_sorted=False):
+def validate(case, before, actual, joint, max_group_queries=None, merge=False, float_keys=False, preserve_tail=False, single_sorted=False,max_group_rows=4,reference_cache=None):
     """Private对独立golden逐字段比较；joint对集合、LRU、miss填充和逐行寻址完整校验。"""
     expected = {key: value.copy() for key, value in before.items()}
     sets, group_info = valid_sets(case), []
@@ -192,9 +195,10 @@ def validate(case, before, actual, joint, max_group_queries=None, merge=False, f
         if merge:
             q = (end - first) * topk
             bits = max(1, (q - 1).bit_length())
-            supported = (1 < end - first <= 4 and capacity <= 32768 and q <= 65535
+            supported = (1 < end - first <= max_group_rows and capacity <= 32768 and q <= 65535
                          and (case["max_token"] - 1) * (1 << bits) <= 0xffffffff and fits_queries
-                         and (not float_keys or case["max_token"] <= 16777216))
+                         and (not float_keys or case["max_token"] <= 16777216)
+                         and (max_group_rows!=8 or end-first in (1,2,4,8)))
             merge_reset = (before["row_modes"][first] != 1 or not 0 <= request < len(case["req_ids"])
                            or before["last_req_ids"][first] != case["req_ids"][request])
             stable = max(0, min(case["max_token"], min(map(int, case["stable_prefix_lens"][first:end]))))
