@@ -18,8 +18,9 @@ from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
+    hot=mask if 159<=mask<=192 else None
     execution=mask-143 if 143<=mask<=158 else None
-    refine=11 if execution is not None else mask-127 if 127<=mask<=142 else None
+    refine=11 if hot is not None or execution is not None else mask-127 if 127<=mask<=142 else None
     bounds = mask==126
     integrated = mask in (125,126)
     cold = mask in COLD_SWEEP.values() or integrated or refine is not None
@@ -33,7 +34,7 @@ def build(directory, mask, model_threads=64):
     config, count = re.subn(r'PLAN_THREADS = 1024U', f'PLAN_THREADS = {model_threads}U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h','integrated_stage.h','phase0_bounds_stage.h','refine_options.h','refine_stage.h','refine_controller.h','refine_simd.h','exec_options.h','exec_stage.h','exec_controller.h','exec_simd.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h','integrated_stage.h','phase0_bounds_stage.h','refine_options.h','refine_stage.h','refine_controller.h','refine_simd.h','exec_options.h','exec_stage.h','exec_controller.h','exec_simd.h','hot_plan_impl.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -52,14 +53,14 @@ def build(directory, mask, model_threads=64):
     library = directory / 'kernel.so'
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
-                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), '-I' + str(directory),
+                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), *(['-DJOINT_HOT=1','-DJOINT_HOT_BITS='+str(hot-159 if hot<=190 else 0),'-DJOINT_HOT_PART_ONLY='+str(int(hot==191)),'-DJOINT_HOT_MISS_ONLY='+str(int(hot==192))] if hot is not None else []), '-I' + str(directory),
                     '-I' + str(ROOT / 'checks/simt_variants'),
                     str(ROOT / 'checks/joint_variant_cpu_driver.cpp'), '-o', str(library)], check=True)
     return library
 
 
-def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False, single_sorted=False):
-    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next or single_sorted, case['max_token'], bitmap, turbo, sorted_union, union_next)
+def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False, single_sorted=False,hot_packet=False):
+    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next or single_sorted, case['max_token'], bitmap, turbo, sorted_union, union_next,hot_packet=hot_packet)
     scratch = max(info['scratch_elements'], 112 * 1024 // 4 + 1) if force_gm else info['scratch_elements']
     max_queries = (scratch - 2 * info['joint_hash_capacity'] - case['capacity']
                    if turbo and enabled else None)

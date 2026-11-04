@@ -12,7 +12,7 @@ from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
 ROOT = Path(__file__).resolve().parent
-from joint_variants import VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS, MERGE_NAMES, SORTED_NAMES
+from joint_variants import hot_config, VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS, MERGE_NAMES, SORTED_NAMES
 PAGED_NAMES = ("abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab")
 INDEPENDENT = ("abcdf", *PAGED_NAMES)
 IMPLEMENTATIONS = ("abcdf", "abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab", "private", "joint", *VARIANTS)
@@ -86,7 +86,7 @@ def prepare(torch, case, name, inputs=None):
     controller_enabled = enabled or supports_single_sorted(name)
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
-                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next)
+                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")))
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name in INDEPENDENT:
         host = {key: case[key].copy() for key in ABCDF_STATE}

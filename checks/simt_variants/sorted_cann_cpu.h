@@ -61,12 +61,18 @@ template<typename T,bool Exhaust>void MrgSort(LocalTensor<T> dst,const MrgSortSr
 
 // Reg API semantic model for the actual new SIMD body. No hardware timing/AS model.
 #define __simd_vf__
+#define __simd_callee__
 template <auto F,typename... A> inline void asc_vf_call(A...a){ F(a...); }
 namespace AscendC {
 enum class CMPMODE { EQ,NE,GE,LT };
 enum class RoundMode { CAST_TRUNC };
 namespace Reg {
 enum class RegLayout { UNKNOWN };
+enum class MemType { VEC_ALL };
+#ifdef JOINT_HOT
+inline uintptr_t HotDataLo=0,HotDataHi=0,HotCtxLo=0,HotCtxHi=0; // CPU primitive range observer only
+#endif
+template<MemType src,MemType dst>void LocalMemBar(){}
 enum class SatMode { NO_SAT };
 enum class MaskMergeMode { ZEROING };
 struct CastTrait {RegLayout layoutMode;SatMode satMode;MaskMergeMode mrgMode;RoundMode roundMode;};
@@ -95,11 +101,21 @@ template<typename T,typename I>void Scatter(T*p,const RegTensor<T>&a,const RegTe
   assert(reinterpret_cast<uintptr_t>(p)%32U==0U);
   std::vector<I> indices(idx.v,idx.v+64);std::sort(indices.begin(),indices.end());
   assert(std::adjacent_find(indices.begin(),indices.end())==indices.end());
+#ifdef JOINT_HOT
+  if(HotDataLo){
+    auto base=reinterpret_cast<uintptr_t>(p);
+    auto lo=(base>=HotCtxLo && base<HotCtxHi)?HotCtxLo:HotDataLo;
+    auto hi=(base>=HotCtxLo && base<HotCtxHi)?HotCtxHi:HotDataHi;
+    for(int i=0;i<64;++i){auto address=base+static_cast<uint64_t>(idx.v[i])*sizeof(T);assert(address>=lo && address+sizeof(T)<=hi);}
+  }
+#endif
 #endif
   for(int i=0;i<64;++i)if(m.v[i])std::memcpy(p+idx.v[i],&a.v[i],sizeof(T));
 }
 template<typename T>void Add(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]+y.v[i];}
 template<typename T>void Or(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]|y.v[i];}
+template<typename T>void And(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]&y.v[i];}
+template<typename T>void Sub(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]-y.v[i];}
 }
 }
 

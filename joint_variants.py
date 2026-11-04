@@ -54,7 +54,23 @@ EXEC_SWEEP={"exec_"+("".join(c for i,c in enumerate(EXEC_OPTIONS) if bits&(1<<i)
 MASKS.update(EXEC_SWEEP)
 EXEC_NAMES=tuple("joint_"+n for n in EXEC_SWEEP)
 EXEC_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_abd_512","joint_refine_bd_512","joint_exec_base_512")
-INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES)
+HOT_OPTIONS={"a":"4KiB UB negative filter before exact resident search",
+             "b":"SIMD stable partition and miss assignment, combined in one SIMD VF",
+             "c":"production UB merge packet expansion within existing112KiB limit",
+             "d":"reuse invalidation tags in partition; no second resident read",
+             "e":"2048/4096 stage specialization inside existing VF; generic fallback"}
+HOT_SWEEP={"hot_"+("".join(c for i,c in enumerate(HOT_OPTIONS) if bits&(1<<i)) or "base")+"_512":159+bits for bits in range(32)}
+HOT_SWEEP.update(hot_part_512=191,hot_miss_512=192)
+MASKS.update(HOT_SWEEP)
+HOT_NAMES=tuple("joint_"+n for n in HOT_SWEEP)
+HOT_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_abd_512","joint_refine_bd_512","joint_hot_base_512")
+def hot_config(name):
+    value=VARIANTS.get(name,0)
+    if not 159<=value<=192:return None
+    bits=value-159 if value<=190 else 0
+    return {"bits":bits,"filter":bool(bits&1),"partition":bool(bits&2) or value==191,
+            "miss":bool(bits&2) or value==192,"packet":bool(bits&4),"reuse":bool(bits&8),"fixed":bool(bits&16)}
+INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES)
 INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",INTEGRATED_NAME,BOUNDS_NAME)
 def supports_single_sorted(name):
     return name.startswith("joint_union_") or name in INTEGRATED_NAMES
@@ -71,14 +87,14 @@ def union_config(name):
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 159))
+TURBO_MASKS = tuple(range(17, 193))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return 72 if 127<=mask<=158 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
+    return 72 if 127<=mask<=192 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -87,6 +103,15 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if 159<=mask<=192:
+        config=hot_config(name)
+        return description("joint_refine_abd_512") | {"mask":mask,"parent":"joint_refine_abd_512",
+            "structure":"ABD512 hot pipeline factorial","hot_config":config,
+            "new_optimization_factors":[v for i,v in enumerate(HOT_OPTIONS.values()) if config['bits']&(1<<i)],
+            "partial_SIMD":"partition only" if mask==191 else "miss only" if mask==192 else None,
+            "filter_contract":"negative-only, UB and capacity>=1024; exact search on positives",
+            "packet_contract":"only production2048/4096 UB shape; original112KiB row limit",
+            "GM_contract":"original SIMT compaction; negative filter bypass"}
     if 143<=mask<=158:
         bits=mask-143
         return description("joint_refine_abd_512") | {"mask":mask,"exec_bits":bits,"parent":"joint_refine_abd_512",

@@ -146,3 +146,16 @@ extern "C" __attribute__((visibility("default"))) void run_exec_packed(
   });
 }
 #endif
+
+#ifdef JOINT_HOT
+extern "C" __attribute__((visibility("default"))) void run_hot_compact(int32_t* data,int32_t* ctx,
+    uint32_t q,uint32_t capacity,uint32_t u,uint32_t evicts,uint32_t hits,uint32_t mode){
+  AscendC::Reg::HotDataLo=reinterpret_cast<uintptr_t>(data);
+  AscendC::Reg::HotDataHi=AscendC::Reg::HotDataLo+4U*(((q+capacity+7U)&~7U)+std::max(3U*capacity,64U));
+  AscendC::Reg::HotCtxLo=reinterpret_cast<uintptr_t>(ctx);AscendC::Reg::HotCtxHi=AscendC::Reg::HotCtxLo+256U;
+  if(mode==0)HotCompactVf<true,false>(data,ctx,q,capacity,u,evicts,hits);
+  else if(mode==1)HotCompactVf<false,true>(data,ctx,q,capacity,u,evicts,hits);
+  else HotCompactVf<true,true>(data,ctx,q,capacity,u,evicts,hits);
+  AscendC::Reg::HotDataLo=0;
+}
+#endif

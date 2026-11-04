@@ -5,10 +5,10 @@ import argparse
 import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,REFINE_SWEEP,EXEC_SWEEP
+from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,REFINE_SWEEP,EXEC_SWEEP,HOT_SWEEP
 
 
-def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False):
+def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False,hot_only=False):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     launch = (ROOT / "csrc/joint_plan/launch.h").read_text()
@@ -17,6 +17,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
                "sparse_kv_plan_private_kernel")
     declarations, entries = [], ["nullptr"] * (max(MASKS.values()) + 1)
     for letters, mask in MASKS.items():
+        if hot_only and letters not in ("integrated_bounds_512","refine_abd_512","refine_bd_512") and letters not in HOT_SWEEP:continue
         if exec_only and letters not in ("integrated_bounds_512","refine_abd_512","refine_bd_512") and letters not in EXEC_SWEEP:continue
         if refine_only and letters!="integrated_bounds_512" and letters not in REFINE_SWEEP:continue
         if integrated_only and letters not in ("union_cold_512","hw_ac_cold_512","integrated_512","integrated_bounds_512"): continue
@@ -35,7 +36,10 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
         if mask in (125,126): text += "#define JOINT_INTEGRATED 1\n"
         if mask==126: text += "#define JOINT_PHASE0_BOUNDS 1\n"
         if 127<=mask<=142:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS {mask-127}\n"
-        if mask>=143:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_EXEC 1\n#define JOINT_EXEC_BITS {mask-143}\n"
+        if 143<=mask<=158:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_EXEC 1\n#define JOINT_EXEC_BITS {mask-143}\n"
+        if mask>=159:
+            bits=mask-159 if mask<=190 else 0
+            text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_HOT 1\n#define JOINT_HOT_BITS {bits}\n#define JOINT_HOT_PART_ONLY {int(mask==191)}\n#define JOINT_HOT_MISS_ONLY {int(mask==192)}\n"
         text += "".join(f"#define {name} {new}\n" for name, new in replacements.items())
         text += '#include "' + str(ROOT / "csrc/joint_variants/kernel.cpp") + '"\n'
         (destination / f"variant_{letters}.cpp").write_text(text)
@@ -47,8 +51,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
     text += "inline decltype(&launch_joint_plan) JointVariantLaunch(int64_t mask) {\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {" + ", ".join(entries) + "};\n"
-    text += "  return mask > 0 && mask <= 158 ? launches[mask] : nullptr;\n}\n"
-    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 158)) ? 72 : mask; }\n'
+    text += "  return mask > 0 && mask <= 192 ? launches[mask] : nullptr;\n}\n"
+    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 192)) ? 72 : mask; }\n'
     text += signature + " {\n  auto launch = JointVariantLaunch(mask);\n"
     text += "  if (!launch) throw std::invalid_argument(\"joint mask not built\");\n"
     text += "  launch(" + args + ");\n}\n"
@@ -67,5 +71,6 @@ if __name__ == "__main__":
     parser.add_argument("--integrated-only",action="store_true")
     parser.add_argument("--refine-only",action="store_true")
     parser.add_argument("--exec-only",action="store_true")
+    parser.add_argument("--hot-only",action="store_true")
     args = parser.parse_args()
-    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only,args.exec_only)
+    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only,args.exec_only,args.hot_only)

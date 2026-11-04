@@ -11,7 +11,7 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint", "overlap40")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
@@ -21,6 +21,8 @@ def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=Fals
         scratch = max(row, (max_token + 31) // 32 + 2 * capacity)
     if sorted_union and joint:
         scratch=max(row,(128 if union_next else 64)+((4*topk+capacity+7)&~7)+max(3*capacity,64))
+    if hot_packet and joint and topk==2048 and capacity==4096 and scratch<=112*1024//4:
+        scratch=112*1024//4
     aligned = (scratch * 4 + 31) & ~31
     ub = aligned <= 112 * 1024
     return {"hash_capacity": h, "joint_hash_capacity": j, "scratch_elements": scratch,

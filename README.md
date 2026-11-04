@@ -1,3 +1,9 @@
+## 当前实验：ABD512热路径五因素组合
+
+新增4KiB UB负过滤、SIMD分类与miss分配、归并包扩容、失效判断复用、生产尺寸特化。32种组合含control，另加分类/miss的两个单独SIMD版本及四条冻结参考，共38路。新计算代码集中在 `csrc/joint_variants/hot_plan_impl.h`。入口 `bash scripts/test_hot_sweep.sh --device 0`：构建→门禁→全路初筛→独立50样本复测；`--full-confirm`全部正式采集。详见[中文教程](docs/ABD512热路径组合实验.md)。新候选尚未执行本机CANN/NPU验证。
+
+以下为历史实验说明。
+
 ## 当前实验：ABD512执行优化四因素组合
 
 基于已上机验证的 `joint_refine_abd_512`，新增交错加载、hit/evict ballot Scan、单行VF合并、打包游标四项及16配置；另保留ABCDF、bounds、旧ABD、旧BD，共20路。固定512线程，旧算法及回退保留。入口 `bash scripts/test_exec_sweep.sh --device 3`，自动构建→门禁→初筛→独立50样本复测；加 `--full-confirm` 全部正式采集。详见[中文教程](docs/ABD512执行优化组合实验.md)。新候选尚未进行本机CANN/NPU验证。
