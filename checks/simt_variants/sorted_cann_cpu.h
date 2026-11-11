@@ -82,7 +82,7 @@ template<MemType src,MemType dst>void LocalMemBar(){}
 enum class SatMode { NO_SAT };
 enum class MaskMergeMode { ZEROING };
 struct CastTrait {RegLayout layoutMode;SatMode satMode;MaskMergeMode mrgMode;RoundMode roundMode;};
-template<typename T>struct RegTensor { T v[64]{}; };
+template<typename T>struct RegTensor { T v[256/sizeof(T)]{}; };
 struct MaskReg { bool v[64]{}; };
 enum class MaskPattern { ALL };
 enum class LoadDist { DIST_DINTLV_B32 };
@@ -103,6 +103,21 @@ template<typename T,CMPMODE M,typename S>void Compares(MaskReg&o,const RegTensor
 template<typename T,typename I>void Gather(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<I>&idx){auto x=a;for(int i=0;i<64;++i)o.v[i]=x.v[idx.v[i]%64];}
 template<typename T,typename S,typename I>void Gather(RegTensor<T>&o,S*p,const RegTensor<I>&idx,const MaskReg&m){for(int i=0;i<64;++i)if(m.v[i])std::memcpy(&o.v[i],p+idx.v[i],sizeof(T));}
 template<typename T,typename I>void Scatter(T*p,const RegTensor<T>&a,const RegTensor<I>&idx,const MaskReg&m){
+  if constexpr (sizeof(T) == 2) {
+    static_assert(std::is_same_v<T,uint16_t> && std::is_same_v<I,uint16_t>);
+    assert(reinterpret_cast<uintptr_t>(p)%32U == 0U);
+    std::vector<I> indices(idx.v,idx.v+128);
+    std::sort(indices.begin(),indices.end());
+    assert(std::adjacent_find(indices.begin(),indices.end())==indices.end());
+#ifdef JOINT_HOT
+    if (HotDataLo) for (uint32_t i=0; i<128U; ++i) {
+      const uintptr_t address=reinterpret_cast<uintptr_t>(p)+static_cast<uint64_t>(idx.v[i])*2U;
+      assert(address>=HotDataLo && address+2U<=HotDataHi);
+    }
+#endif
+    for (uint32_t i=0;i<64U;++i) if(m.v[i])
+      std::memcpy(p+idx.v[2U*i],&a.v[2U*i],sizeof(T));
+  } else {
 #ifdef JOINT_REFINE
   assert(reinterpret_cast<uintptr_t>(p)%32U==0U);
   std::vector<I> indices(idx.v,idx.v+64);std::sort(indices.begin(),indices.end());
@@ -117,6 +132,7 @@ template<typename T,typename I>void Scatter(T*p,const RegTensor<T>&a,const RegTe
 #endif
 #endif
   for(int i=0;i<64;++i)if(m.v[i])std::memcpy(p+idx.v[i],&a.v[i],sizeof(T));
+  }
 }
 template<typename T>void Add(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]+y.v[i];}
 template<typename T>void Or(RegTensor<T>&o,const RegTensor<T>&a,const RegTensor<T>&b,const MaskReg&m){auto x=a,y=b;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=x.v[i]|y.v[i];}

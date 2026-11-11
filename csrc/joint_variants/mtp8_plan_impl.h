@@ -69,6 +69,28 @@ __simt_callee__ __aicore__ inline int32_t RefineBoolScan(__ubuf__ int32_t* work,
   total=asc_shfl(sum,SORTED_WARPS-1U,PLAN_WARP_SIZE);
   return asc_shfl(sum-own,warp,PLAN_WARP_SIZE)+ownRank;
 }
+#if JOINT_MTP7_MAP16
+// Compress only supported eight-row UB groups.0xffff is the invalid UID.
+__simt_callee__ __aicore__ inline bool EightMapIsPacked(uint32_t rows, uint32_t topk) {
+  return rows == 8U && static_cast<uint64_t>(rows) * topk <= 65408U;
+}
+__aicore__ inline uint32_t EightMapWords(uint32_t queries, uint32_t topk) {
+  return queries / topk == 8U && queries <= 65408U ? (queries + 1U) / 2U : queries;
+}
+struct EightMap16View {
+  __ubuf__ uint16_t* values;
+  __simt_callee__ __aicore__ inline int32_t operator[](uint32_t i) const {
+    const uint16_t value = values[i];
+    return value == 65535U ? -1 : static_cast<int32_t>(value);
+  }
+};
+#define EIGHT_MAP_PARAMETER , uint32_t mapWords
+#define EIGHT_MAP_ARGUMENT(q, t) , EightMapWords(q, static_cast<uint32_t>(t))
+#else
+#define EIGHT_MAP_PARAMETER
+#define EIGHT_MAP_ARGUMENT(q, t)
+#endif
+
 // Hash-free sorted union planner. Helpers enter only through SortedStageVf.
 // Lifetime: ctx[128] | queryToUid[8T] | unique[C] | work[max(3C,64)].
 // work is packet input/output during union construction, then owner/flags/LRU.
@@ -87,7 +109,14 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
   const uint32_t topk=Fixed?2048U:a.topk,capacity=Fixed?4096U:a.capacity;
   const uint32_t t=static_cast<uint32_t>(threadIdx.x), rows=static_cast<uint32_t>(end-first);
   const uint32_t mapRows=HW_C&&rows<=8U?rows:8U;
+#if JOINT_MTP7_MAP16
+  const bool packedMap = EightMapIsPacked(rows, topk);
+  const uint32_t mapWords = packedMap ? (mapRows * topk + 1U) / 2U : mapRows * topk;
+  P map=data, unique=data+mapWords, owner=data+((mapWords+capacity+7U)&~7U);
+  auto* map16 = reinterpret_cast<__ubuf__ uint16_t*>(ctx + EIGHT_CTX);
+#else
   P map=data, unique=map+mapRows*topk, owner=data+((mapRows*topk+capacity+7U)&~7U);
+#endif
   P flags=owner+capacity, partition=flags+capacity;
   const uint32_t q=rows*topk;
   const int64_t qb=first*static_cast<int64_t>(topk),cb=first*static_cast<int64_t>(capacity);
@@ -98,7 +127,11 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
       if(chunk>768U)chunk=768U;ctx[3]=static_cast<int32_t>(chunk&~3U);
       uint64_t words=16ULL*static_cast<uint32_t>(ctx[3]);
       if(HW_C && a.scratchElements<=EIGHT_UB_WORDS)
+#if JOINT_MTP7_MAP16
+        words=a.scratchElements-EIGHT_CTX-((mapWords+capacity+7U)&~7U);
+#else
         words=a.scratchElements-EIGHT_CTX-((mapRows*topk+capacity+7U)&~7U);
+#endif
       ctx[30]=static_cast<int32_t>((words/2U)&~uint64_t{7U}); // fixed input/output split
 
       const int32_t req=a.tokenToReq[first];
@@ -137,10 +170,23 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
           const bool valid=i>=static_cast<uint32_t>(ctx[48]) && i<static_cast<uint32_t>(ctx[56]);
           map[i]=valid?static_cast<int32_t>(i-static_cast<uint32_t>(ctx[48])):-1;
           if(valid)unique[i-static_cast<uint32_t>(ctx[48])]=token;
+#if JOINT_MTP7_MAP16
+        }else {
+          // One writer per32-bit word, including odd TopK shapes.
+          if (packedMap) { if (i < mapWords) map[i] = -1; }
+          else map[i] = -1;
+        }
+#else
         }else map[i]=-1;
+#endif
       }else{
         if(rows==1U && i && a.topkIndices[qb+i]==a.topkIndices[qb+i-1U])asc_atomic_min(ctx,0);
+#if JOINT_MTP7_MAP16
+        if (packedMap) { if (i < mapWords) map[i] = -1; }
+        else map[i] = -1;
+#else
         map[i]=-1;
+#endif
       }
     }
     asc_syncthreads();
@@ -169,8 +215,16 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
       if(rows>4U){
         // Same total allocation. Release first-half inputs after its merge;
         // work now needs40*chunk int32s rather than48*chunk.
+#if JOINT_MTP7_MAP16
+        const uint64_t work = a.scratchElements - EIGHT_CTX - ((mapWords + capacity + 7U) & ~uint64_t{7U});
+        const uint32_t maximum = packedMap ? 816U : 612U;
+        // Eight-record alignment makes the full eight-row output a multiple of64.
+        chunk = static_cast<uint32_t>(work / 40U) & (packedMap ? ~7U : ~3U);
+        if (chunk > maximum) chunk = maximum;
+#else
         const uint64_t work=a.scratchElements-EIGHT_CTX-((mapRows*topk+capacity+7U)&~uint64_t{7U});
         chunk=static_cast<uint32_t>(work/40U)&~3U;if(chunk>612U)chunk=612U;
+#endif
         ctx[30]=24U*chunk;
       }else if(HW_C&&active){chunk=(static_cast<uint32_t>(ctx[30])/(2U*active))&~3U;if(chunk>4092U)chunk=4092U;}
 #else
@@ -181,6 +235,37 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
       uint32_t total=0;
       for(uint32_t k=0;k<active;++k){uint32_t r=ctx[64+k],n=ctx[56+r]-ctx[48+r];
         if(n>chunk)n=chunk;ctx[72+k]=n;ctx[80+k]=0;total+=n;}
+#if JOINT_MTP7_PREFIX
+      if (rows == 8U && active > 0U) {
+        // Anything beyond the minimum tail of an incomplete source could
+        // precede an unseen value. Only consume the safe inclusive frontier.
+        int32_t frontier = a.maxToken;
+        for (uint32_t k = 0; k < active; ++k) {
+          const uint32_t row = ctx[64U + k], n = ctx[72U + k];
+          const uint32_t begin = ctx[48U + row];
+          if (n < static_cast<uint32_t>(ctx[56U + row]) - begin) {
+            const int32_t tail = a.topkIndices[qb + row * topk + begin + n - 1U];
+            if (tail < frontier) frontier = tail;
+          }
+        }
+        uint32_t selected = 0U;
+        total = 0U;
+        for (uint32_t k = 0; k < active; ++k) {
+          const uint32_t row = ctx[64U + k];
+          const uint32_t begin = ctx[48U + row];
+          const uint32_t n = SortedLower(a.topkIndices + qb + row * topk + begin,
+                                          static_cast<uint32_t>(ctx[72U + k]), frontier + 1);
+          if (n == 0U) continue; // never pass a zero-length source to MrgSort
+          ctx[64U + selected] = static_cast<int32_t>(row);
+          ctx[72U + selected] = static_cast<int32_t>(n);
+          ctx[80U + selected] = static_cast<int32_t>(n);
+          ++selected;
+          total += n;
+        }
+        ctx[28] = static_cast<int32_t>(selected);
+        if (selected == 0U) ctx[0] = 0;
+      }
+#endif
       ctx[4]=total;ctx[5]=total;
     }
     asc_syncthreads();
@@ -233,7 +318,12 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
       int32_t total=0;const int32_t rank=RefineBoolScan(scan,added,t,parity,total);
       if(i<n){uint32_t uid=count+static_cast<uint32_t>(rank)-(added?0U:1U);
         if(uid<capacity&&added)unique[uid]=token;
+#if JOINT_MTP7_MAP16
+        if (packedMap) map16[static_cast<uint32_t>(out[2U*i+1U])] = static_cast<uint16_t>(uid);
+        else map[static_cast<uint32_t>(out[2U*i+1U])] = static_cast<int32_t>(uid);
+#else
         map[static_cast<uint32_t>(out[2U*i+1U])]=static_cast<int32_t>(uid);
+#endif
       }
       asc_syncthreads();count+=static_cast<uint32_t>(total);
     }
@@ -246,7 +336,16 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
     int32_t stable=(Phase==5||Phase==6)?0:ctx[40];
     if constexpr(Phase==5 || Phase==6){
     const bool reset=a.rowModes[first]!=(rows==1U?ROW_PRIVATE:ROW_JOINT)||a.lastReqIds[first]!=reqid;
+#if JOINT_MTP7_MAP16
+    if (reset) {
+      asc_syncthreads();
+      if (packedMap) FinishColdSorted<SORTED_THREADS,true>(a,first,end,EightMap16View{map16},unique,ctx,t);
+      else FinishColdSorted<SORTED_THREADS,true>(a,first,end,map,unique,ctx,t);
+      return;
+    }
+#else
     if(reset){asc_syncthreads();FinishColdSorted<SORTED_THREADS,true>(a,first,end,map,unique,ctx,t);return;}
+#endif
     stable=a.stablePrefixLens[first];
     for(int64_t row=first+1;row<end;++row)if(a.stablePrefixLens[row]<stable)stable=a.stablePrefixLens[row];
     if(stable<0)stable=0;if(stable>a.maxToken)stable=a.maxToken;
@@ -336,7 +435,14 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
       const int32_t slot=owner[pos]&0xffff,rank=flags[pos];
       a.slotToToken[cb+slot]=unique[pos];a.missTokens[qb+rank]=unique[pos];a.missSlots[qb+rank]=slot;
     }
+#if JOINT_MTP7_MAP16
+    for (uint32_t i=t; i<q; i+=SORTED_THREADS) {
+      const int32_t uid = packedMap ? EightMap16View{map16}[i] : map[i];
+      a.currentSlots[qb+i] = uid >= 0 ? (owner[uid] & 0xffff) : -1;
+    }
+#else
     for(uint32_t i=t;i<q;i+=SORTED_THREADS){int32_t uid=map[i];a.currentSlots[qb+i]=uid>=0?(owner[uid]&0xffff):-1;}
+#endif
     for(uint32_t i=misses+t;i<q;i+=SORTED_THREADS){a.missTokens[qb+i]=-1;a.missSlots[qb+i]=-1;}
     const uint32_t unused=evicts-misses;
     for(uint32_t order=t;order<capacity;order+=SORTED_THREADS){
@@ -407,7 +513,14 @@ __simt_vf__ __aicore__ LAUNCH_BOUND((Phase==4?PLAN_THREADS:SORTED_THREADS)) inli
     __ubuf__ int32_t* ctx=scanWorkspace+PLAN_SCAN_STORAGE_ELEMENTS;
     if(scratchElements<=EIGHT_UB_WORDS){
       __ubuf__ int32_t* data=ctx+EIGHT_CTX;
+#if JOINT_MTP7_MAP16
+      const uint32_t groupRows = HW_C && rowStride-rowStart<=8 ? static_cast<uint32_t>(rowStride-rowStart) : 8U;
+      const uint32_t queries = groupRows * args.topk;
+      const uint32_t words = EightMapIsPacked(groupRows,args.topk) ? (queries+1U)/2U : queries;
+      auto* packet=data+((words+args.capacity+7U)&~7U);
+#else
       auto* packet=data+((((HW_C&&rowStride-rowStart<=8?static_cast<uint32_t>(rowStride-rowStart):8U)*args.topk+args.capacity+7U)&~7U));
+#endif
       if constexpr(HOT_FIXED){if(args.topk==2048U&&args.capacity==4096U){
         SortedStage<Phase,true>(args,rowStart,rowStride,data,ctx,packet,scanWorkspace);return;}}
       SortedStage<Phase,false>(args,rowStart,rowStride,data,ctx,packet,scanWorkspace);
@@ -426,7 +539,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND((Phase==4?PLAN_THREADS:SORTED_THREADS)) inli
 // so odd TopK/capacity layouts do not require an aligned unique pointer.
 __simd_vf__ inline void RefineUniqueMapVf(__ubuf__ int32_t* records,
     __ubuf__ int32_t* data,__ubuf__ int32_t* ctx,uint32_t n,uint32_t q,
-    uint32_t capacity,uint32_t initialCount,int32_t initialLast,uint32_t more){
+    uint32_t capacity,uint32_t initialCount,int32_t initialLast,uint32_t more EIGHT_MAP_PARAMETER){
   using namespace AscendC;
   Reg::RegTensor<uint32_t> lane,zero,one,even,odd,previousIndex,lastIndex;
   Reg::RegTensor<uint32_t> flags,prefix,carry,uid,payload,index,safeIndex,writeFlag,status,value;
@@ -466,14 +579,34 @@ __simd_vf__ inline void RefineUniqueMapVf(__ubuf__ int32_t* records,
     Reg::Compares<uint32_t,CMPMODE::LT>(fits,uid,capacity,full);
     Reg::Select(writeFlag,flags,zero,fits);
     Reg::Compares<uint32_t,CMPMODE::NE>(writeHead,writeFlag,uint32_t{0},full);
+#if JOINT_MTP7_MAP16
+    Reg::Adds(index,uid,mapWords,full);
+    Reg::Adds(safeIndex,lane,mapWords+capacity,full);
+#else
     Reg::Adds(index,uid,q,full);
     Reg::Adds(safeIndex,lane,q+capacity,full);
+#endif
     Reg::Select(index,index,safeIndex,writeHead); // even masked indices are unique
     Reg::Scatter<int32_t,uint32_t>(data,token,index,writeHead);
     Reg::Duplicate(payload,uint32_t{0});
     Reg::Gather<uint32_t,uint32_t,uint32_t>(payload,reinterpret_cast<__ubuf__ uint32_t*>(records),odd,valid);
     Reg::Adds(safeIndex,lane,q,full);Reg::Select(payload,payload,safeIndex,valid);
+#if JOINT_MTP7_MAP16
+    if (mapWords != q) {
+      // B32 mask selects even B16 lanes. Each low half stores one UID;
+      // inactive odd-lane indices are distinct and inside allocated scratch.
+      Reg::Adds(safeIndex,lane,q+64U,full);
+      Reg::ShiftLefts(index,safeIndex,int16_t{16},full);
+      Reg::Or(index,index,payload,full);
+      Reg::Scatter<uint16_t,uint16_t>(reinterpret_cast<__ubuf__ uint16_t*>(data),
+          reinterpret_cast<Reg::RegTensor<uint16_t>&>(uid),
+          reinterpret_cast<Reg::RegTensor<uint16_t>&>(index),valid);
+    } else {
+      Reg::Scatter<uint32_t,uint32_t>(reinterpret_cast<__ubuf__ uint32_t*>(data),uid,payload,valid);
+    }
+#else
     Reg::Scatter<uint32_t,uint32_t>(reinterpret_cast<__ubuf__ uint32_t*>(data),uid,payload,valid);
+#endif
     Reg::Duplicate(lastIndex,uint32_t{63});Reg::Gather<uint32_t,uint32_t>(carry,prefix,lastIndex);
     Reg::Duplicate(lastIndex,count-1U);
     Reg::Gather<float,uint32_t>(lastScore,score,lastIndex);
@@ -507,9 +640,13 @@ __simd_callee__ inline void HotPutCtx(__ubuf__ int32_t* ctx,
 }
 template<bool DoPartition,bool DoMiss>
 __simd_vf__ inline void HotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32_t* ctx,
-    uint32_t q,uint32_t capacity,uint32_t u,uint32_t oldEvicts,uint32_t oldHits){
+    uint32_t q,uint32_t capacity,uint32_t u,uint32_t oldEvicts,uint32_t oldHits EIGHT_MAP_PARAMETER){
   using namespace AscendC;
+#if JOINT_MTP7_MAP16
+  const uint32_t ow=(mapWords+capacity+7U)&~7U,fl=ow+capacity,pa=fl+capacity;
+#else
   const uint32_t ow=(q+capacity+7U)&~7U,fl=ow+capacity,pa=fl+capacity;
+#endif
   Reg::RegTensor<uint32_t> lane,zero,one,maskHit,keep,raw,hflag,eflag,vflag,hprefix,eprefix;
   Reg::RegTensor<uint32_t> hi,ei,hcarry,ecarry,mc,rank,inc,index,safe,slotTag,value,sum,status,tmp;
   Reg::RegTensor<int32_t> f,ownerValue,missRank;
@@ -796,8 +933,13 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
 #if JOINT_OPT_MASK >= 39
         if(end-first>4 && ctx[28]>4){
           const uint32_t chunk=ctx[3];
+#if JOINT_MTP7_MAP16
+          const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+
+              ((EightMapWords(static_cast<uint32_t>(end-first)*d.topk,static_cast<uint32_t>(d.topk))+d.capacity+7U)&~7U);
+#else
           const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+
               ((static_cast<uint32_t>(end-first)*d.topk+d.capacity+7U)&~7U);
+#endif
           auto floats=storage.Get<float>();auto* packet=scan+inputOffset;
           uint32_t lengths[2]={0,0}; bool allComplete[2]={true,true};
           for(uint32_t half=0;half<2U;++half){
@@ -805,7 +947,9 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
             uint16_t lens[4]={0,0,0,0};uint32_t used[4]={0,0,0,0};
             for(uint32_t k=0;k<count;++k){
               lens[k]=static_cast<uint16_t>(ctx[72+begin+k]);
+#if !JOINT_MTP7_PREFIX
               if(ctx[72+begin+k]!=ctx[56+ctx[64+begin+k]]-ctx[48+ctx[64+begin+k]])allComplete[half]=false;
+#endif
             }
 #if JOINT_MTP7_REUSE
             const uint32_t mid=half==0U?16U*chunk:0U;
@@ -858,6 +1002,15 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
             if(used[0]>lens[0]||used[1]>lens[1]||used[0]+used[1]==0U)ctx[0]=0;
             else{
               ctx[4]=used[0]+used[1];
+#if JOINT_MTP7_PREFIX
+              uint32_t expected = 0U;
+              for (uint32_t k=0; k<static_cast<uint32_t>(ctx[28]); ++k) {
+                const uint32_t row=ctx[64U+k], n=ctx[72U+k];
+                ctx[48U+row] += n;
+                expected += n;
+              }
+              if (expected != static_cast<uint32_t>(ctx[4])) ctx[0]=0;
+#else
               SortedScalarToVector(pipe);
 #if JOINT_MTP7_OPT >= 1
 #if JOINT_MTP7_REUSE
@@ -869,6 +1022,7 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
               asc_vf_call<EightProgressVf>(dim3(SORTED_THREADS),packet+32U*chunk,ctx,static_cast<uint32_t>(ctx[4]),static_cast<uint32_t>(d.topk));
 #endif
               SortedVectorToScalar(pipe);
+#endif
             }
           }
 #endif
@@ -880,15 +1034,26 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
         }else
         if(ctx[28]>1){
           const uint32_t chunk=ctx[3];
+#if JOINT_MTP7_MAP16
+          const uint32_t inputOffset=d.scratchElements<=EIGHT_UB_WORDS?
+              PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+((EightMapWords((HW_C?static_cast<uint32_t>(end-first):8U)*d.topk,d.topk)+d.capacity+7U)&~7U):PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX;
+#else
           const uint32_t inputOffset=d.scratchElements<=EIGHT_UB_WORDS?
               PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+((((HW_C?static_cast<uint32_t>(end-first):8U)*d.topk+d.capacity+7U)&~7U)):PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX;
+#endif
           auto floats=storage.Get<float>();auto out=floats[inputOffset+static_cast<uint32_t>(ctx[30])];
           AscendC::MrgSortSrcList<float> lists{floats[inputOffset],floats[inputOffset+2U*chunk],
               floats[inputOffset+(ctx[28]>2?4U*chunk:0U)],floats[inputOffset+(ctx[28]>3?6U*chunk:0U)]};
           uint16_t lens[4]={0,0,0,0};uint32_t consumed[4]={0,0,0,0};
           for(int k=0;k<ctx[28];++k)lens[k]=static_cast<uint16_t>(ctx[72+k]);
           bool complete=HW_C;
+#if JOINT_MTP7_PREFIX
+          if (end-first != 8) {
           for(int k=0;k<ctx[28];++k)if(ctx[72+k]!=ctx[56+ctx[64+k]]-ctx[48+ctx[64+k]])complete=false;
+          }
+#else
+          for(int k=0;k<ctx[28];++k)if(ctx[72+k]!=ctx[56+ctx[64+k]]-ctx[48+ctx[64+k]])complete=false;
+#endif
           if(complete){
             AscendC::MrgSort<float,false>(out,lists,lens,consumed,static_cast<uint16_t>((1U<<ctx[28])-1U),1);
             for(int k=0;k<ctx[28];++k)consumed[k]=lens[k];
@@ -905,12 +1070,16 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
 #if (JOINT_REFINE_BITS & 8)
           if(d.scratchElements<=EIGHT_UB_WORDS && ctx[0]==1){
             const uint32_t q=static_cast<uint32_t>(end-first)*static_cast<uint32_t>(d.topk);
+#if JOINT_MTP7_MAP16
+            const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+((EightMapWords(q,d.topk)+d.capacity+7U)&~7U);
+#else
             const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+((q+d.capacity+7U)&~7U);
+#endif
             auto* records=scan+inputOffset+(ctx[7]?0U:static_cast<uint32_t>(ctx[30]));
             uint32_t more=0;for(int64_t r=0;r<end-first;++r)if(ctx[48+r]<ctx[56+r])more=1;
             asc_vf_call<RefineUniqueMapVf>(records,ctx+EIGHT_CTX,ctx,
                 static_cast<uint32_t>(ctx[4]),q,static_cast<uint32_t>(d.capacity),
-                static_cast<uint32_t>(ctx[1]),ctx[2],more);
+                static_cast<uint32_t>(ctx[1]),ctx[2],more EIGHT_MAP_ARGUMENT(q,d.topk));
           }else {SORTED_CALL(3);} // GM scratch retains SIMT, including B if enabled.
 #else
         SORTED_CALL(3);
@@ -923,16 +1092,16 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
           const uint32_t q=static_cast<uint32_t>(end-first)*static_cast<uint32_t>(d.topk);
           if(ctx[0]==1){
             if constexpr(HOT_PART && HOT_MISS){
-              asc_vf_call<HotCompactVf<true,true>>(ctx+EIGHT_CTX,ctx,q,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),0U,0U);
+              asc_vf_call<HotCompactVf<true,true>>(ctx+EIGHT_CTX,ctx,q,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),0U,0U EIGHT_MAP_ARGUMENT(q,d.topk));
               SortedVectorToScalar(pipe);
             }else{
               if constexpr(HOT_PART){
-                asc_vf_call<HotCompactVf<true,false>>(ctx+EIGHT_CTX,ctx,q,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),0U,0U);
+                asc_vf_call<HotCompactVf<true,false>>(ctx+EIGHT_CTX,ctx,q,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),0U,0U EIGHT_MAP_ARGUMENT(q,d.topk));
                 SortedVectorToScalar(pipe);
               }else{SORTED_CALL(7);SortedVectorToScalar(pipe);}
               if(ctx[0]==1){
                 if constexpr(HOT_MISS){
-                  asc_vf_call<HotCompactVf<false,true>>(ctx+EIGHT_CTX,ctx,q,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),static_cast<uint32_t>(ctx[43]),static_cast<uint32_t>(ctx[44]));
+                  asc_vf_call<HotCompactVf<false,true>>(ctx+EIGHT_CTX,ctx,q,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),static_cast<uint32_t>(ctx[43]),static_cast<uint32_t>(ctx[44]) EIGHT_MAP_ARGUMENT(q,d.topk));
                   SortedVectorToScalar(pipe);
                 }else{SORTED_CALL(8);SortedVectorToScalar(pipe);}
               }

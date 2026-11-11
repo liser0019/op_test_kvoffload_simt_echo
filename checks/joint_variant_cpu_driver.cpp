@@ -2,6 +2,11 @@
 #include <climits>
 #include "cpu_runtime.h"
 #include "kernel_under_test.h"
+#if JOINT_MTP7_MAP16
+#define CPU_MAP_WORDS , q
+#else
+#define CPU_MAP_WORDS
+#endif
 extern "C" __attribute__((visibility("default"))) void run_variant(void** p, const int64_t* d, int32_t* scan) {
 #if JOINT_OPT_MASK >= 37
   JointDirectTilingData tiling{};
@@ -127,7 +132,7 @@ extern "C" __attribute__((visibility("default"))) void run_refine_unique(
 #ifdef JOINT_EXEC
   ExecUniqueMapVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more);
 #else
-  RefineUniqueMapVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more);
+  RefineUniqueMapVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more CPU_MAP_WORDS);
 #endif
 }
 #endif
@@ -159,9 +164,9 @@ extern "C" __attribute__((visibility("default"))) void run_hot_compact(int32_t* 
   AscendC::Reg::HotDataLo=reinterpret_cast<uintptr_t>(data);
   AscendC::Reg::HotDataHi=AscendC::Reg::HotDataLo+4U*(((q+capacity+7U)&~7U)+std::max(3U*capacity,64U));
   AscendC::Reg::HotCtxLo=reinterpret_cast<uintptr_t>(ctx);AscendC::Reg::HotCtxHi=AscendC::Reg::HotCtxLo+256U;
-  if(mode==0)HotCompactVf<true,false>(data,ctx,q,capacity,u,evicts,hits);
-  else if(mode==1)HotCompactVf<false,true>(data,ctx,q,capacity,u,evicts,hits);
-  else HotCompactVf<true,true>(data,ctx,q,capacity,u,evicts,hits);
+  if(mode==0)HotCompactVf<true,false>(data,ctx,q,capacity,u,evicts,hits CPU_MAP_WORDS);
+  else if(mode==1)HotCompactVf<false,true>(data,ctx,q,capacity,u,evicts,hits CPU_MAP_WORDS);
+  else HotCompactVf<true,true>(data,ctx,q,capacity,u,evicts,hits CPU_MAP_WORDS);
   AscendC::Reg::HotDataLo=0;
 }
 #endif
@@ -183,4 +188,18 @@ extern "C" __attribute__((visibility("default"))) void run_eight_rank(int32_t* p
 #ifdef JOINT_MTP8
 extern "C" __attribute__((visibility("default"))) uint64_t eight_cpu_merge_calls(){return AscendC::EightCpuMergeCalls;}
 extern "C" __attribute__((visibility("default"))) void eight_cpu_reset_merge_calls(){AscendC::EightCpuMergeCalls=0;}
+#endif
+
+#if JOINT_MTP7_MAP16
+extern "C" __attribute__((visibility("default"))) void run_prefix_packed_unique(
+    int32_t* records,int32_t* data,int32_t* ctx,uint32_t n,uint32_t q,
+    uint32_t capacity,uint32_t initialCount,int32_t initialLast,uint32_t more,
+    uint32_t mapWords,uint32_t allocatedWords) {
+  AscendC::Reg::HotDataLo=reinterpret_cast<uintptr_t>(data);
+  AscendC::Reg::HotDataHi=AscendC::Reg::HotDataLo+4U*allocatedWords;
+  AscendC::Reg::HotCtxLo=reinterpret_cast<uintptr_t>(ctx);
+  AscendC::Reg::HotCtxHi=AscendC::Reg::HotCtxLo+4U*128U;
+  RefineUniqueMapVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more,mapWords);
+  AscendC::Reg::HotDataLo=0;
+}
 #endif

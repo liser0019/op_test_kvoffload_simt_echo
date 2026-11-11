@@ -61,11 +61,11 @@ def primitives(lib,mask=195):
     return {'progress_cases':checks,'rank_prefix_cases':ranks}
 
 
-def worker(mask):
+def worker(mask,reference_mask=193,include_prefix=False):
     with tempfile.TemporaryDirectory(prefix='mtp7_parallel_cpu_') as tmp:
-        path=Path(tmp);ref=load(path/'ref',193);lib=load(path/'candidate',mask)
+        path=Path(tmp);ref=load(path/'ref',reference_mask);lib=load(path/'candidate',mask)
         count=0;kw=dict(turbo=True,merge=True,sorted_union=True,single_sorted=True,mtp8=True)
-        for label,c in cases(include_extreme=True):
+        for label,c in cases(include_extreme=True,include_prefix=include_prefix):
             before=None
             for step in range(3):
                 current=dict(c,req_ids=c['req_ids']+41) if step==2 else c
@@ -94,7 +94,7 @@ def worker(mask):
             count+=1
         merge_calls={}
         c=sort_topk(make_case(1,2048,4096,262144,7,'full_cache_75pct','overlap40'))
-        for label,obj in (('frozen193',ref),('candidate',lib)):
+        for label,obj in (('frozen'+str(reference_mask),ref),('candidate',lib)):
             obj.eight_cpu_merge_calls.restype=ctypes.c_uint64;obj.eight_cpu_reset_merge_calls()
             execute(obj,c,True,False,**kw);count+=1
             merge_calls[label]=obj.eight_cpu_merge_calls()

@@ -72,7 +72,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 199, "joint variant mask must be 1..199");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 202, "joint variant mask must be 1..202");
     TORCH_CHECK(JointVariantLaunch(variantMask) != nullptr, "joint variant not compiled in this build");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
@@ -125,13 +125,13 @@ class Prepared : public torch::CustomClassHolder {
     if(variantMask>=159 && variantMask<=190 && ((variantMask-159)&4) && attrs[4] && t==2048 && c==4096 &&
        d.scratchElements<=sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_ELEMENTS)
       d.scratchElements=sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_ELEMENTS;
-    if((variantMask>=193 && variantMask<=199)){
+    if((variantMask>=193 && variantMask<=202)){
       // 8T map + C unique + max(3C owner/flags/partition, 3 merge buffers).
       d.scratchElements=std::max(d.workspaceRowElements,uint64_t{128}+((8U*t+c+7U)&~uint64_t{7U})+std::max(uint64_t{3}*c,uint64_t{24576}));
       TORCH_CHECK(d.scratchElements*4U<=192U*1024U,"MTP8 UB layout exceeds192KiB; shape unsupported, no silent GM fallback");
     }
     const uint64_t alignedBytes = (d.scratchElements * 4U + 31U) & ~uint64_t{31U};
-    const bool ub = alignedBytes <= ((variantMask>=193 && variantMask<=199)?192U*1024U:sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_BYTES);
+    const bool ub = alignedBytes <= ((variantMask>=193 && variantMask<=202)?192U*1024U:sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_BYTES);
     uint64_t stageBytes=0;
     if(algorithmMask>=37) {
       const uint64_t chunk=(std::min(uint64_t{768}, std::max(uint64_t{64},uint64_t{3}*c)/16U)/4U)*4U;

@@ -1,3 +1,9 @@
+## 当前小范围实验：MTP7 安全前缀／16位映射 A、B、AB
+
+冻结 `joint_mtp7_reuse_parallel_512`，新增 A（归并前安全消费前缀，省事后统计）、B（8行16位UID映射、扩大归并包）及AB。四路512线程、生产动态UB同为181024B；28请求，冷/热×MTP0/1/3/7，默认每路5样本，共160个正式目标样本。入口 `bash scripts/test_mtp7_prefix.sh --device 1 --output /workspace/mtp7_prefix_results`，一次门禁、一次采集，无历史大矩阵。详见[实现、CPU检查与服务器命令](docs/MTP7安全前缀与16位映射对照.md)。新候选尚未进行本机CANN/NPU验证。
+
+以下为历史实验说明。
+
 ## 当前实验：ABD512热路径五因素组合
 
 新增4KiB UB负过滤、SIMD分类与miss分配、归并包扩容、失效判断复用、生产尺寸特化。32种组合含control，另加分类/miss的两个单独SIMD版本及四条冻结参考，共38路。新计算代码集中在 `csrc/joint_variants/hot_plan_impl.h`。入口 `bash scripts/test_hot_sweep.sh --device 0`：构建→门禁→全路初筛→独立50样本复测；`--full-confirm`全部正式采集。详见[中文教程](docs/ABD512热路径组合实验.md)。新候选尚未执行本机CANN/NPU验证。

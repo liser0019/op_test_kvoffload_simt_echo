@@ -3,9 +3,15 @@
 // a block barrier BEFORE any mode/request-ID write. Never call on mere all-miss.
 // Sorted union and capacity checks remain in the unchanged parent stages.
 static_assert(JOINT_OPT_MASK==72 || JOINT_OPT_MASK==90,"cold finish requires frozen AC512 or union base512");
+#if JOINT_MTP7_MAP16
+template <uint32_t Threads,bool SingleAllowed,typename P,typename MapP>
+__simt_callee__ __aicore__ inline void FinishColdSorted(const JointPlanArgs& a,
+    int64_t first,int64_t end,MapP map,P unique,__ubuf__ int32_t* ctx,uint32_t thread) {
+#else
 template <uint32_t Threads,bool SingleAllowed,typename P>
 __simt_callee__ __aicore__ inline void FinishColdSorted(const JointPlanArgs& a,
     int64_t first,int64_t end,P map,P unique,__ubuf__ int32_t* ctx,uint32_t thread) {
+#endif
   const uint32_t u=static_cast<uint32_t>(ctx[1]),rows=static_cast<uint32_t>(end-first);
   if(u>a.capacity){if(thread==0U)ctx[0]=0;asc_syncthreads();return;}
 #ifdef JOINT_COLD_CPU_MODEL
