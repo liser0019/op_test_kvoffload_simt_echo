@@ -32,6 +32,7 @@ def read_kernels(paths, names, repeat, expected_order):
             nk = field("Name", "Kernel Name", "Op Name")
             dk = field("Duration(us)", "Duration(µs)", "Duration(μs)")
             sk = field("Start Time(us)", "Start Time(µs)", "Start Time(μs)")
+            block_key = field("Block Num", "Block Dim")
             tk, stream_key, device_key = field("Task Type"), field("Stream ID"), field("Device ID")
             if not nk or not dk or not sk:
                 raise RuntimeError(f"CSV缺少kernel名、Duration(us)或Start Time(us): {path}; {reader.fieldnames}")
@@ -47,7 +48,7 @@ def read_kernels(paths, names, repeat, expected_order):
                     raise RuntimeError("设备时间无效")
                 records.append({"implementation": found[0], "kernel_name": row[nk],
                     "task_type": row.get(tk, ""), "duration_us": duration, "start_us": start,
-                    "stream": row.get(stream_key), "device": row.get(device_key), "csv": str(path)})
+                    "block_num": row.get(block_key), "stream": row.get(stream_key), "device": row.get(device_key), "csv": str(path)})
     for name in names:
         items = [r for r in records if r["implementation"] == name]
         if len(items) != repeat or len({(r["kernel_name"], r["task_type"]) for r in items}) != 1:
@@ -191,6 +192,7 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
             "raw_csv": sorted({r["csv"] for r in records if r["implementation"] == name}),
             "us_per_query_row_p50": float(np.percentile(samples, 50)) / case["rows"],
             "us_per_request_p50": float(np.percentile(samples, 50)) / case["requests"],
+            "block_nums": sorted({r["block_num"] for r in records if r["implementation"] == name and r.get("block_num") is not None}),
             "joint_enabled": bundles[name]["joint_enabled"], "layout": bundles[name]["layout"],
             "correctness": final[name], "implementation": common.description(name) if name in common.VARIANTS else {"name":name}}
     result = {"status": "passed", "workload": describe(case), "stats": stats,
@@ -375,7 +377,7 @@ def main():
     common.add_runtime_arguments(parser)
     parser.add_argument("--implementations", nargs="+", choices=common.IMPLEMENTATIONS, default=list(common.DEFAULT_IMPLEMENTATIONS))
     parser.add_argument("--mtp", nargs="+", type=int, choices=(0, 1, 3, 7), default=[0, 1, 3])
-    parser.add_argument("--requests", type=int, default=32)
+    parser.add_argument("--requests", type=int, default=28)
     parser.add_argument("--comparison", choices=("same_requests", "same_query_rows", "both"), default="same_requests")
     parser.add_argument("--fixed-query-rows", type=int, default=32)
     parser.add_argument("--scenarios", nargs="+", choices=SCENARIOS, default=["full_cache_75pct"])

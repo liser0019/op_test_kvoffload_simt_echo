@@ -95,10 +95,10 @@ message(STATUS "torch lib: ${TORCH_LIB_DIR}; torch_npu: ${TORCH_NPU_DIR}")
 get_filename_component(JOINT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(JOINT_DIR "${JOINT_ROOT}/csrc/joint_plan")
 set(JOINT_FLAGS -O3 --cce-auto-sync=off -Wno-deprecated-declarations
-    -mllvm -cce-vf-remove-membar=false -mllvm -cce-aicore-hoist-movemask=false
-    -mllvm -cce-aicore-dcci-before-kernel-end=false)
+    -mllvm -cce-vf-remove-membar=false -mllvm -cce-aicore-hoist-movemask=false)
 option(JOINT_REFINE_ONLY "Build frozen bounds512 and refinement factorial" OFF)
 option(JOINT_EXEC_ONLY "Build ABD512 execution factorial and frozen references" OFF)
+option(JOINT_PEER_ONLY "Build peer standalone Plan and one current candidate" OFF)
 option(JOINT_MTP7_PACK_ONLY "Build BD8 parallel/reuse/tile controls only" OFF)
 option(JOINT_MTP7_FIX_ONLY "Build BD8 reference and2 MTP7 parallel candidates" OFF)
 option(JOINT_MTP8_ONLY "Build only BD and8-row BD candidate plus independent ABCDF" OFF)
@@ -126,7 +126,7 @@ set(JOINT_INFO "${CMAKE_CURRENT_BINARY_DIR}/source_info.cpp")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_plan_manifest.json" "${JOINT_ROOT}/checks/joint_build_info.py")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${JOINT_ROOT}/checks/joint_build_info.py"
-    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY};ac_threads_only=${JOINT_AC_THREADS_ONLY};cold_compare_only=${JOINT_COLD_COMPARE_ONLY};integrated_only=${JOINT_INTEGRATED_ONLY};refine_only=${JOINT_REFINE_ONLY};exec_only=${JOINT_EXEC_ONLY};hot_only=${JOINT_HOT_ONLY};mtp8_only=${JOINT_MTP8_ONLY};mtp7_fix_only=${JOINT_MTP7_FIX_ONLY};mtp7_pack_only=${JOINT_MTP7_PACK_ONLY}"
+    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY};ac_threads_only=${JOINT_AC_THREADS_ONLY};cold_compare_only=${JOINT_COLD_COMPARE_ONLY};integrated_only=${JOINT_INTEGRATED_ONLY};refine_only=${JOINT_REFINE_ONLY};exec_only=${JOINT_EXEC_ONLY};hot_only=${JOINT_HOT_ONLY};mtp8_only=${JOINT_MTP8_ONLY};mtp7_fix_only=${JOINT_MTP7_FIX_ONLY};mtp7_pack_only=${JOINT_MTP7_PACK_ONLY};peer_only=${JOINT_PEER_ONLY}"
     RESULT_VARIABLE _identity_result)
 if(NOT _identity_result EQUAL 0)
     message(FATAL_ERROR "Joint Plan source identity check failed")
@@ -159,7 +159,9 @@ set(JOINT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/joint_variants")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_variants.py" "${JOINT_ROOT}/checks/generate_joint_variants.py")
 set(_merge_generate_args)
-if(JOINT_MTP7_PACK_ONLY)
+if(JOINT_PEER_ONLY)
+    list(APPEND _merge_generate_args --peer-only)
+elseif(JOINT_MTP7_PACK_ONLY)
     list(APPEND _merge_generate_args --mtp7-pack-only)
 elseif(JOINT_MTP7_FIX_ONLY)
     list(APPEND _merge_generate_args --mtp7-fix-only)
@@ -198,6 +200,9 @@ if(NOT _catalog_result EQUAL 0)
     message(FATAL_ERROR "Cannot query variant catalog")
 endif()
 foreach(_name IN LISTS JOINT_VARIANT_NAMES)
+    if(JOINT_PEER_ONLY AND NOT _name STREQUAL "mtp7_reuse_parallel_512")
+        continue()
+    endif()
     if(JOINT_MTP7_PACK_ONLY AND NOT _name MATCHES "^(hot_bd8_512|mtp7_parallel_512|mtp7_rank_512|mtp7_reuse_parallel_512|mtp7_reuse_rank_512|mtp7_tile_512|mtp7_reuse_tile_512)$")
         continue()
     endif()
@@ -266,7 +271,7 @@ set_source_files_properties("${ABCDF_PAGES_OBJECT}" PROPERTIES GENERATED TRUE EX
 set(PAGED_OPT_OBJECTS)
 set(PAGED_OPT_PLUGINS)
 foreach(_name a b ab)
-    if(JOINT_MTP7_PACK_ONLY OR JOINT_MTP7_FIX_ONLY OR JOINT_MTP8_ONLY OR JOINT_UNION_ONLY OR JOINT_AC_THREADS_ONLY OR JOINT_COLD_COMPARE_ONLY)
+    if(JOINT_PEER_ONLY OR JOINT_MTP7_PACK_ONLY OR JOINT_MTP7_FIX_ONLY OR JOINT_MTP8_ONLY OR JOINT_UNION_ONLY OR JOINT_AC_THREADS_ONLY OR JOINT_COLD_COMPARE_ONLY)
         continue()
     endif()
     set(_dir "${JOINT_ROOT}/csrc/abcdf_paged_opt")
@@ -280,7 +285,18 @@ foreach(_name a b ab)
     list(APPEND PAGED_OPT_OBJECTS "${_obj}")
     list(APPEND PAGED_OPT_PLUGINS "${_dir}/${_name}/plugin.cpp")
 endforeach()
-add_library(mtp_joint_plan_ops SHARED ${PAGED_OPT_OBJECTS} ${PAGED_OPT_PLUGINS} "${ABCDF_PAGES_DIR}/plugin.cpp" "${ABCDF_PAGES_OBJECT}" "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
+# Standalone Plan snapshot supplied by the peer QLI branch, same compiler flags.
+set(PEER_PLAN_DIR "${JOINT_ROOT}/csrc/peer_qli_plan")
+set(PEER_PLAN_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/peer_qli_plan.o")
+file(GLOB_RECURSE PEER_PLAN_HEADERS CONFIGURE_DEPENDS "${PEER_PLAN_DIR}/*.h")
+add_custom_command(OUTPUT "${PEER_PLAN_OBJECT}"
+    COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+        ${JOINT_FLAGS} ${JOINT_INCLUDES} -I${PEER_PLAN_DIR}
+        -c "${PEER_PLAN_DIR}/kernel.cpp" -o "${PEER_PLAN_OBJECT}"
+    DEPENDS "${PEER_PLAN_DIR}/kernel.cpp" ${PEER_PLAN_HEADERS}
+        "${JOINT_ROOT}/joint_plan_manifest.json" VERBATIM)
+set_source_files_properties("${PEER_PLAN_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+add_library(mtp_joint_plan_ops SHARED "${PEER_PLAN_OBJECT}" "${PEER_PLAN_DIR}/plugin.cpp" ${PAGED_OPT_OBJECTS} ${PAGED_OPT_PLUGINS} "${ABCDF_PAGES_DIR}/plugin.cpp" "${ABCDF_PAGES_OBJECT}" "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
     "${JOINT_OBJECT}" "${ABCDF_DIR}/plugin.cpp" "${ABCDF_OBJECT}"
     "${JOINT_VARIANT_DIR}/plugin.cpp" ${JOINT_VARIANT_OBJECTS})
 target_include_directories(mtp_joint_plan_ops PRIVATE "${JOINT_GENERATED}")

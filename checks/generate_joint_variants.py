@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,REFINE_SWEEP,EXEC_SWEEP,HOT_SWEEP,mtp7_config,MTP7_PACK_MASKS
 
 
-def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False,hot_only=False,mtp8_only=False,mtp7_fix_only=False,mtp7_pack_only=False):
+def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False,hot_only=False,mtp8_only=False,mtp7_fix_only=False,mtp7_pack_only=False,peer_only=False):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     launch = (ROOT / "csrc/joint_plan/launch.h").read_text()
@@ -17,6 +17,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
                "sparse_kv_plan_private_kernel")
     declarations, entries = [], ["nullptr"] * (max(MASKS.values()) + 1)
     for letters, mask in MASKS.items():
+        if peer_only and letters != "mtp7_reuse_parallel_512": continue
         if mtp7_pack_only and letters not in ("hot_bd8_512","mtp7_parallel_512","mtp7_rank_512",*MTP7_PACK_MASKS):continue
         if mtp7_fix_only and letters not in ("hot_bd8_512","mtp7_parallel_512","mtp7_rank_512"):continue
         if mtp8_only and letters not in ("hot_bd_512","hot_bd8_512"):continue
@@ -82,5 +83,6 @@ if __name__ == "__main__":
     parser.add_argument("--mtp8-only",action="store_true")
     parser.add_argument("--mtp7-fix-only",action="store_true")
     parser.add_argument("--mtp7-pack-only",action="store_true")
+    parser.add_argument("--peer-only", action="store_true")
     args = parser.parse_args()
-    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only,args.exec_only,args.hot_only,args.mtp8_only,args.mtp7_fix_only,args.mtp7_pack_only)
+    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only,args.exec_only,args.hot_only,args.mtp8_only,args.mtp7_fix_only,args.mtp7_pack_only,args.peer_only)

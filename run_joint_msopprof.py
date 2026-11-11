@@ -14,7 +14,7 @@ def main():
     common.add_runtime_arguments(parser)
     parser.add_argument("--implementation", choices=common.IMPLEMENTATIONS, default="joint")
     parser.add_argument("--mtp", type=int, choices=(0, 1, 3), default=3)
-    parser.add_argument("--requests", type=int, default=32)
+    parser.add_argument("--requests", type=int, default=28)
     parser.add_argument("--scenario", choices=SCENARIOS, default="full_cache_75pct")
     parser.add_argument("--overlap", choices=OVERLAPS, default="shared")
     for name, value in (("topk", 2048), ("capacity", 4096), ("max-token", 262144), ("block-size", 64), ("seed", 2026)):

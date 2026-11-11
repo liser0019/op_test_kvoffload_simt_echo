@@ -181,7 +181,7 @@ def describe(case):
             "logical_input_sha256": array_hash({k: case[k] for k in (*INPUTS, "last_req_ids", "slot_to_token", "lru_slots")})}
 
 
-def validate(case, before, actual, joint, max_group_queries=None, merge=False, float_keys=False, preserve_tail=False, single_sorted=False,max_group_rows=4,reference_cache=None):
+def validate(case, before, actual, joint, max_group_queries=None, merge=False, float_keys=False, preserve_tail=False, single_sorted=False,max_group_rows=4,reference_cache=None,require_power_two_groups=True):
     """Private对独立golden逐字段比较；joint对集合、LRU、miss填充和逐行寻址完整校验。"""
     expected = {key: value.copy() for key, value in before.items()}
     sets, group_info = valid_sets(case), []
@@ -198,7 +198,7 @@ def validate(case, before, actual, joint, max_group_queries=None, merge=False, f
             supported = (1 < end - first <= max_group_rows and capacity <= 32768 and q <= 65535
                          and (case["max_token"] - 1) * (1 << bits) <= 0xffffffff and fits_queries
                          and (not float_keys or case["max_token"] <= 16777216)
-                         and (max_group_rows!=8 or end-first in (1,2,4,8)))
+                         and (not require_power_two_groups or max_group_rows!=8 or end-first in (1,2,4,8)))
             merge_reset = (before["row_modes"][first] != 1 or not 0 <= request < len(case["req_ids"])
                            or before["last_req_ids"][first] != case["req_ids"][request])
             stable = max(0, min(case["max_token"], min(map(int, case["stable_prefix_lens"][first:end]))))

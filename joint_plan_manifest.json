@@ -211,7 +211,8 @@
     "joint_mtp7_reuse_parallel_512": "sparse_kv_plan_joint_kernel_mtp7_reuse_parallel_512",
     "joint_mtp7_reuse_rank_512": "sparse_kv_plan_joint_kernel_mtp7_reuse_rank_512",
     "joint_mtp7_tile_512": "sparse_kv_plan_joint_kernel_mtp7_tile_512",
-    "joint_mtp7_reuse_tile_512": "sparse_kv_plan_joint_kernel_mtp7_reuse_tile_512"
+    "joint_mtp7_reuse_tile_512": "sparse_kv_plan_joint_kernel_mtp7_reuse_tile_512",
+    "peer_qli_plan": "sparse_kv_plan_peer_qli_kernel"
   },
   "mtp": [
     0,
@@ -226,8 +227,8 @@
   "hardware_validation": "not_run_on_development_machine",
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
-    "build_joint_plan.sh": "4f7f4b4d628e1a9558afb594f369cbc1c99eb08634f95fc8fadf46a58b965686",
-    "joint_plan/CMakeLists.txt": "0b35cd58dc517e7638002823763db89c961ec8cd0110015b06e0a2dceaa9df59",
+    "build_joint_plan.sh": "e60de25029505f6e78f7eb2a6b5504ddaea10bc796a72d02842031a74f277b91",
+    "joint_plan/CMakeLists.txt": "7e6c47fc70fe1cf8cc2da55a7a71c754e759a233bb6297488da7c2a41edd4c64",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -236,13 +237,13 @@
     "csrc/joint_plan/upstream/sparse_kv_plan_apt.cpp": "3efda88e8a66cefb4554ab36fc349758981272a4bffab1eb5cc5c16281f87e8d",
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
-    "joint_plan_cases.py": "281a061aedaae8e134a8512386b9a2b9b07787498d98a072977cfe06a19c8c2b",
-    "joint_plan_common.py": "8f8bdb93fe730fbe6889d0bf63c45eff26f55e204f35c3ee3c826f4c2bb3178e",
-    "profile_joint_mtp.py": "9ebce3dd84353edf11430bc9f7667137966e595eeca4771777fa67cb624f20b7",
-    "run_joint_msopprof.py": "5fa9cf4bd06399d32fc32c6db94ff73658340ef46ea64bd37c0189d57ee89bab",
-    "checks/check_joint_plan.py": "fc00820dcfb69f2f68da638de85a1ae4cf18f2acb1b279d467b315066377af72",
+    "joint_plan_cases.py": "ef61837beb6e1f41da45ada5968f5f3cb4626efa519ab81443f1cd9cce853b63",
+    "joint_plan_common.py": "83b6630380e89b15a8c7d6577b41086eed148839e3d3eaf289673df0b496bda8",
+    "profile_joint_mtp.py": "af828d0176aed0680c4b3bd5f03d589d4d7099f4e4fe454ab8ba0d93f6db33ad",
+    "run_joint_msopprof.py": "eea7d00f4a4c275ade27a1799eba933195d0899279fdec1e8adb3d5de508525f",
+    "checks/check_joint_plan.py": "90cafb835272b0efb7afe72a1e361655879243403da9c7d6fad2a5cbaffe5ea0",
     "checks/check_joint_models.py": "0f1459f4b71a2fa7eafb36a98cc2a395cf46686313a33387ff8e4a6954faa426",
-    "checks/joint_build_info.py": "39b13ca3b3250a2cc53721eb1b47b9e4bb35e763c22ce45ecc7faac914e5c031",
+    "checks/joint_build_info.py": "2c60af1137a8fe17168d5aea132b94a4348f77669f1b5086b367fca3f4762bd7",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "b368b278d50c6982fd408ef2a80eb8f79e1faa7f8589922ee6f69caf66900c54",
     "mtp_cases.py": "72bc420b5751f2d17cd21c32b04079c36e36d94ca49c9f4e6f7f7454a0325195",
@@ -257,7 +258,7 @@
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
     "joint_variants.py": "826f61a280d840bf66bb50ee28f46357d752a9de4ca734a585f3cab94c5eb4a7",
-    "checks/generate_joint_variants.py": "dfc1396da50558c2d7f21eb29aff9a4957a4bcf49f852b5d7fc128adeb8ee690",
+    "checks/generate_joint_variants.py": "56998e5c4aff892a23f7312aee902916981df1c9fb89f7ac56c9dbfabcd180dc",
     "checks/check_joint_variant_kernels.py": "a0ac49295ed3f5470107e42b39551973a6c9b92a86a459f00c8f6892e5f0076f",
     "checks/joint_variant_cpu_driver.cpp": "f153dc7ef32d4c8cf1b3f93beba0091d6e25c2d8dc87c0fe9dfdf31fe27def2b",
     "checks/simt_variants/cpu_runtime.h": "e7d893c63524557c2ce3d0280a369214e834d41e56b6eca48277a54754b62356",
@@ -310,7 +311,7 @@
     "scripts/test_merge_abcd.sh": "1762e5005b2fa69574c9c183e945e69294665b395a4bdd470be1a1949289f764",
     "checks/check_merge_abcd_npu.py": "fcc06c2e1695b26df37ffd9240df1fdd31825d34db36df083e259bf79c798fb7",
     "checks/check_merge_abcd.py": "e9010fcf1a465814a3f2f6b60888d2e10e215cfd5b92944d8b520fa8520a7c48",
-    "checks/check_merge_catalog.py": "a5b1d3b3163f61c77cfe1d392daa538cdaf872b3fdf68a0da4e698e46c499486",
+    "checks/check_merge_catalog.py": "b86b4b9fec32c9bab3f0639c336f7f0a05b9f1cbe8c47eb03471a2d8182580c4",
     "checks/simt_variants/sorted_cann_cpu.h": "79e03a914ec0d093fe90db1bd7527c464d372ceb77e309465db74acdd1754fb9",
     "docs/无Hash与硬件归并实验.md": "2c4c346daf1fc6c460a1bb4d245c9e32f4d19b024f98a8f08f0612bdc2d2583f",
     "csrc/joint_variants/sorted_stage.h": "4211576da32eacd78af61506a79aa76c940348ac5d4bf5c1713486480913fac6",
@@ -379,7 +380,7 @@
     "docs/ABD512热路径组合实验.md": "82c1905f58ce0b9b91c1f24b0e8dd15c1f5571a7b16915ef5f99d25a7f125c28",
     "csrc/joint_variants/mtp8_plan_impl.h": "93e71670eb6de38f861e568f6695b2f76836e6d0b08db693ff03169c22a057d2",
     "fixed_plan_check.py": "4ba808f12c059b630a8f9c8aaf20811101e03cbdb1ba08cdf5d47f59c44c22ac",
-    "run_mtp8.py": "8be1f2c714ac673f7cd6566454c69a050adc0ba5813cb24ad2e0a56cd7a7192b",
+    "run_mtp8.py": "9fc000b9b67a80baebb1ce34047071e81313b49d7e1922b57dfff3cbf2b5a68f",
     "scripts/test_mtp8.sh": "1f43748b673a8e1f607f5f929f0baebacd42b53220590a764db9cc3c4e9f0120",
     "checks/mtp8_cases.py": "490656912d44e9b8bea71b353e0b371875422a30c12c3808b9448a5130c7ccb5",
     "checks/check_mtp8.py": "98171f9ba598b4d7661fd46b5c445cd3f48107b5fff66472d13159c2e29ca17c",
@@ -393,7 +394,21 @@
     "checks/check_mtp7_pack_suite.py": "e25177d268b00f61bb93c1e704ceef2acd8773eac87af636a3e50d00ffa8b4b6",
     "scripts/test_mtp7_sweep.sh": "f29913b2edf5a09a8215e9ba5f153041d5f2b934d9a6d56387e102d102c18269",
     "docs/MTP7缓冲复用与分段归并一轮测试.md": "1dda9a81e9f7afa9f0c90c8c33e0b8ab0f814020674ee206749d4b2fd5717b90",
-    "README.md": "ceb4cda994988e49256bb1381585515644f664c5244c990a1f57db91f5a1bb97"
+    "README.md": "fa521abfe337c953916055a06e420f907977b5026eae82884a34bbbed126dc9d",
+    "csrc/peer_qli_plan/standalone_body.h": "ce6a55bba7e1c9386e5d1293be556b85cbcc4d5499f089e87e04b8cf4be0e37d",
+    "csrc/peer_qli_plan/plugin.cpp": "2886c7bb1c49b8fe77679fc5006a3f477ad2da993b9d29c0f2a6a12e816bc625",
+    "csrc/peer_qli_plan/kernel.cpp": "d96d2555457b89b36c8ab830e2d648fc62f99816ceb964db161694b00103a2b1",
+    "csrc/peer_qli_plan/launch.h": "22f81b49375aebd8a3f6378c94cac461ae7ac227a4c80a9b0d953a6f480abedd",
+    "csrc/peer_qli_plan/upstream/sparse_kv_plan_apt.cpp": "6131e6a9ae278c141f9f927be68eb1dbf248e3c0b47050951da0cf5d072dbe22",
+    "csrc/peer_qli_plan/upstream/source.json": "496d3a322892693f2135ecc1a4262a212abfc3d889f63d23457a9e17bdb35a29",
+    "csrc/peer_qli_plan/upstream/LICENSE": "89b1c114df62cfd183004f38d18d07f186436c3b37203dd69c3e84becf9d2282",
+    "csrc/peer_qli_plan/upstream/sparse_kv_plan_config.h": "7fb324c0a162170f08f7280e2f2c3b28c8c718a02c1f53d770241cb10a2570ad",
+    "csrc/peer_qli_plan/upstream/sparse_kv_plan_fused.h": "7b32a5f76429ce053235905b6b8ab1d78612266a31f1c634ebc9e3dba9e80cde",
+    "peer_plan.py": "927cfba90ebb6802fa99f44b1df1b6917cca640aae4719ffccd719794df76001",
+    "checks/check_peer_plan.py": "ab6274e43ebc254d32e3ac6d89d1bb1f1f32d8f552a8bc152aa788bd241731a7",
+    "checks/check_peer_suite.py": "0b446e735bfb143205aae00d583cd23e5dd10d9a3af0eceea3fd6e9bb3e654b2",
+    "scripts/test_peer_plan.sh": "bf9b632f4af436676292257e4b4b661d86ce67c0557ac59b5a4bcd56ca202344",
+    "docs/28请求与同事独立Plan对照.md": "303902c9eade17ec349721ed9b394867e8efb0b1c0394f2e147ab1c87c5c0054"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -1606,5 +1621,17 @@
     "max_packet_records_per_row": 612,
     "tile_outputs_per_thread": 8,
     "status": "CPU checked, CANN/NPU pending"
+  },
+  "peer_plan": {
+    "source_commit": "9ec2110969a9e8502bf6d579c027ac4ea9572016",
+    "standalone_origin": "382819673c5b9147d992a67f77dca0786369bc99",
+    "scope": "standalone Plan, all ordered TopK from GM",
+    "default_requests": 28,
+    "implementations": [
+      "abcdf_pages",
+      "joint_mtp7_reuse_parallel_512",
+      "peer_qli_plan"
+    ],
+    "validation": "CPU only; CANN/NPU pending"
   }
 }

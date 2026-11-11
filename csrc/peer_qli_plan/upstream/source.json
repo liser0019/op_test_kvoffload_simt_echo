@@ -1,0 +1,13 @@
+{
+  "repository": "https://gitcode.com/sparse/ops-transformer.git",
+  "branch": "wzj_qli_order_fused",
+  "commit": "9ec2110969a9e8502bf6d579c027ac4ea9572016",
+  "files": {
+    "attention/quant_lightning_indexer_ordered_fused/op_kernel/plan/sparse_kv_plan_fused.h": "7b32a5f76429ce053235905b6b8ab1d78612266a31f1c634ebc9e3dba9e80cde",
+    "attention/quant_lightning_indexer_ordered_fused/op_kernel/plan/sparse_kv_plan_config.h": "7fb324c0a162170f08f7280e2f2c3b28c8c718a02c1f53d770241cb10a2570ad",
+    "LICENSE": "89b1c114df62cfd183004f38d18d07f186436c3b37203dd69c3e84becf9d2282",
+    "attention/quant_lightning_indexer_ordered_fused/tests/host_plan/fixtures/sparse_kv_plan_apt.cpp": "6131e6a9ae278c141f9f927be68eb1dbf248e3c0b47050951da0cf5d072dbe22"
+  },
+  "adaptation": "Compile exact standalone prefix before registry entry; direct wrapper copies GM tiling fields; all TopK from GM; no fusion or QLI producer emulation",
+  "standalone_origin": "https://github.com/AmourSec/vllmascend_sep_fif/commit/382819673c5b9147d992a67f77dca0786369bc99"
+}

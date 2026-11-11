@@ -194,6 +194,10 @@ def identity():
     for path, expected in manifest["file_sha256"].items():
         if hashlib.sha256((ROOT / path).read_bytes()).hexdigest() != expected:
             raise ValueError("Joint Plan source fingerprint changed: " + path)
+    peer = ROOT / "csrc/peer_qli_plan"
+    standalone = (peer / "upstream/sparse_kv_plan_apt.cpp").read_text()
+    if (peer / "standalone_body.h").read_text() != standalone[:standalone.index('extern "C" __global__')].rstrip() + '\n':
+        raise ValueError("Peer Plan body differs from pinned standalone source")
     for parent,cold,single in [('union_next_stage.h','cold_union_stage.h',True),('sorted_sweep_stage.h','cold_ac_stage.h',False)]:
         base=ROOT/'csrc/joint_variants'
         if expected_cold_stage((base/parent).read_text(),single)!=(base/cold).read_text():

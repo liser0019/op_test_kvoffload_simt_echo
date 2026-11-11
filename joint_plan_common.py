@@ -8,6 +8,7 @@ import platform
 import time
 from pathlib import Path
 import numpy as np
+import peer_plan
 from joint_variants import supports_eight_rows,supports_single_sorted,INTEGRATED_NAMES
 from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
@@ -16,11 +17,12 @@ ROOT = Path(__file__).resolve().parent
 from joint_variants import hot_config, VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS, MERGE_NAMES, SORTED_NAMES
 PAGED_NAMES = ("abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab")
 INDEPENDENT = ("abcdf", *PAGED_NAMES)
-IMPLEMENTATIONS = ("abcdf", "abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab", "private", "joint", *VARIANTS)
+IMPLEMENTATIONS = (peer_plan.NAME, "abcdf", "abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab", "private", "joint", *VARIANTS)
 KERNELS = {"abcdf_pages": "sparse_kv_plan_kernel_plan_abcdf_pages", "abcdf": "sparse_kv_plan_kernel_plan_abcdf",
            "private": "sparse_kv_plan_private_kernel", "joint": "sparse_kv_plan_joint_kernel"}
 KERNELS.update({name: "sparse_kv_plan_" + name.split("_", 1)[0] + "_kernel_" + name.split("_", 1)[1]
                 for name in VARIANTS})
+KERNELS[peer_plan.NAME] = peer_plan.KERNEL
 KERNELS.update({n: "sparse_kv_plan_kernel_plan_" + n for n in PAGED_NAMES})
 ABCDF_STATE = ("last_req_ids", "slot_to_token", "lru_slots")
 ABCDF_OUTPUT = ("current_slots", "miss_count", "miss_tokens", "miss_slots")
@@ -69,7 +71,7 @@ def upload_inputs(torch, case):
 
 
 def update_inputs(torch, bundle, case):
-    if bundle["name"] in MERGE_NAMES:
+    if bundle["name"] in MERGE_NAMES or bundle["name"] == peer_plan.NAME:
         require_sorted_topk(case)
     for key in INPUTS:
         bundle["inputs"][key].copy_(torch.from_numpy(np.ascontiguousarray(case[key])).to(bundle["inputs"][key].device))
@@ -79,15 +81,17 @@ def update_inputs(torch, bundle, case):
 def prepare(torch, case, name, inputs=None):
     if name not in IMPLEMENTATIONS:
         raise ValueError("Unknown implementation: " + name)
-    if name in MERGE_NAMES:
+    if name in MERGE_NAMES or name == peer_plan.NAME:
         require_sorted_topk(case)
     # Integrated entry groups actual tokenToReq runs even if a fixture calls it MTP0.
-    enabled = is_joint(name) and (case["mtp"] > 0 or name in INTEGRATED_NAMES)
+    enabled = name == peer_plan.NAME or (is_joint(name) and (case["mtp"] > 0 or name in INTEGRATED_NAMES))
     union_next = name.startswith("joint_union_")
     controller_enabled = enabled or supports_single_sorted(name)
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
                   name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")),mtp8=supports_eight_rows(name))
+    if name == peer_plan.NAME:
+        info = peer_plan.layout(case["topk"], case["capacity"], case["rows"], case["q_len"])
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name in INDEPENDENT:
         host = {key: case[key].copy() for key in ABCDF_STATE}
@@ -97,6 +101,7 @@ def prepare(torch, case, name, inputs=None):
         max_queries = (info["scratch_elements"] - 2 * info["joint_hash_capacity"] - case["capacity"]
                        if is_turbo and enabled else None)
         if name in SORTED_NAMES: max_queries=(8 if supports_eight_rows(name) else 4)*case["topk"] if enabled else None
+        if name == peer_plan.NAME: max_queries = case["q_len"] * case["topk"]
         host = initial_arrays(case, enabled, max_queries)
     host["workspace"] = np.full(info["workspace_elements"], np.iinfo(np.int32).max, np.int32)
     tensors, buffers, initial = {}, {}, {}
@@ -112,13 +117,13 @@ def prepare(torch, case, name, inputs=None):
     attrs = [case[key] for key in (("topk", "capacity", "max_token") if name in INDEPENDENT
                                    else ("topk", "capacity", "max_token", "block_size"))]
     context = None
-    if name not in INDEPENDENT:
+    if name not in INDEPENDENT and name != peer_plan.NAME:
         attrs.append(int(controller_enabled))
         if name in VARIANTS:
             context = torch.classes.mtp_joint_plan.PreparedVariant(ordered, attrs, is_joint(name), VARIANTS[name])
         else:
             context = torch.classes.mtp_joint_plan.Prepared(ordered, attrs, is_joint(name))
-    if name in PAGED_NAMES:
+    if name in PAGED_NAMES or name == peer_plan.NAME:
         blocks = (case["max_token"] + case["block_size"] - 1) // case["block_size"]
         host_blocks = case["requests"] * blocks
         if host_blocks > np.iinfo(np.int32).max:
@@ -126,8 +131,13 @@ def prepare(torch, case, name, inputs=None):
         table = np.random.default_rng(case["seed"] + 90001).permutation(host_blocks).astype(np.int32).reshape(case["requests"], blocks)
         device_table = torch.from_numpy(table).to(device)
         inputs = dict(inputs, block_table=device_table)
-        ordered.insert(5, device_table)
-        attrs += [case["block_size"], host_blocks]
+        if name == peer_plan.NAME:
+            ordered.append(device_table)
+            attrs += [1, case["q_len"]]
+            context = torch.classes.mtp_joint_plan.PreparedPeerQli(ordered, attrs, True)
+        else:
+            ordered.insert(5, device_table)
+            attrs += [case["block_size"], host_blocks]
     torch.npu.synchronize()
     native = json.loads(context.info()) if context is not None else {
         "joint_enabled": 0, "dynamic_ub_bytes": info["dynamic_ub_bytes"],
@@ -137,19 +147,22 @@ def prepare(torch, case, name, inputs=None):
         raise AssertionError("Python/C++ tiling模型不一致")
     if name in VARIANTS and native.get("variant_mask") != VARIANTS[name]:
         raise AssertionError("Prepared variant mask mismatch")
+    if name == peer_plan.NAME:
+        native.update(info, interface="standalone peer Plan,18tensors/6attrs",
+                      page_table_sha256=hashlib.sha256(table.tobytes()).hexdigest())
     native["logical_joint_enabled"] = bool(enabled)
-    native["single_sorted_requested"] = supports_single_sorted(name) and case["mtp"] == 0
+    native["single_sorted_requested"] = (supports_single_sorted(name) or name == peer_plan.NAME) and case["mtp"] == 0
     if name in PAGED_NAMES:
         native["interface"] = "independent ABCDF with source-page validation, 15 tensors + 5 attributes"
         native["page_table_sha256"] = hashlib.sha256(table.tobytes()).hexdigest()
     native["experiment"] = ({"family": "independent paged ABCDF", "optimization_mask":
         {"abcdf_pages": 0, "abcdf_pages_a": 1, "abcdf_pages_b": 2, "abcdf_pages_ab": 3}[name],
         "A": "warm scratch token forwarding", "B": "ping-pong register-total Scan"}
-        if name in PAGED_NAMES else description(name))
+        if name in PAGED_NAMES else peer_plan.description() if name == peer_plan.NAME else description(name))
     return {"name": name, "torch": torch, "invocation_count": 0,
             "workload": {key: case.get(key) for key in ("scenario", "overlap", "mtp", "rows", "requests", "topk", "capacity", "max_token", "seed")}, "joint_enabled": enabled, "inputs": inputs, "state": tensors,
             "buffers": buffers, "initial": initial, "host_initial": host,
-            "page_table_host": table.copy() if name in PAGED_NAMES else None, "ordered": ordered, "attrs": attrs, "context": context, "layout": info | native}
+            "page_table_host": table.copy() if name in PAGED_NAMES or name == peer_plan.NAME else None, "ordered": ordered, "attrs": attrs, "context": context, "layout": info | native}
 
 
 def restore(torch, bundle):
@@ -189,7 +202,7 @@ def _check_uncached(case, bundle, before=None):
     if cached is not None:
         _check_readback(case,bundle,cached)
     else:
-        if bundle["name"] in PAGED_NAMES:
+        if bundle["name"] in PAGED_NAMES or bundle["name"] == peer_plan.NAME:
             np.testing.assert_array_equal(bundle["inputs"]["block_table"].cpu().numpy(),bundle["page_table_host"],err_msg="read-only/block_table")
         for key, storage in bundle["buffers"].items():
             for guard in (storage[:GUARD], storage[-GUARD:]):
@@ -202,6 +215,10 @@ def _check_uncached(case, bundle, before=None):
         if bundle["name"] in PAGED_NAMES:
             result["protocol"] = "independent paged ABCDF, 15 tensors; upstream guarantees valid source pages"
         return result
+    if bundle["name"] == peer_plan.NAME:
+        return validate(case, before, snapshot(bundle), True, case["q_len"] * case["topk"],
+                        merge=True, float_keys=True, single_sorted=True,
+                        max_group_rows=case["q_len"], require_power_two_groups=False)
     layout_info = bundle.get("layout", {})
     max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                    if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
@@ -216,7 +233,7 @@ def _check_readback(case,bundle,values):
     for key in INPUTS:
         np.testing.assert_array_equal(values['input/'+key],case[key],err_msg='input write/'+key)
     np.testing.assert_array_equal(values['input/active_rows'],[case.get('active_rows',case['rows'])],err_msg='active_rows write')
-    if bundle['name'] in PAGED_NAMES:
+    if bundle['name'] in PAGED_NAMES or bundle['name'] == peer_plan.NAME:
         np.testing.assert_array_equal(values['input/block_table'],bundle['page_table_host'],err_msg='read-only/block_table')
 
 
