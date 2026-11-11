@@ -46,6 +46,8 @@
 
 ## 新服务器编译配置与时延范围
 
+同事独立计算体保留了 `#include "sparse_kv_plan_config.h"`。直调构建的公共 include 路径中也存在同名框架头，曾导致 namespace 别名与 namespace 定义冲突。接入目录现增加同名转接头，明确包含 `upstream/sparse_kv_plan_config.h`；上游快照、独立计算体、线程数和 scratch 布局均不变。回归检查按真实 kernel.cpp 的包含关系预处理，并把框架 include 路径放在前面，确认不会再选中框架同名配置。该检查不替代 CANN 编译。
+
 将服务器已验证的编译修正固化，移除 `-cce-aicore-dcci-before-kernel-end=false`，保留-O3及其余SIMT选项，三路采用同一配置。旧编译库和门禁会被源码身份检查拒绝，需要重新构建。该修改的单独性能贡献尚未测出。
 
 Profile匹配三个精确kernel名，每次轮换执行顺序，CSV核对单位、样本数和下发顺序。记录Block Num、P50/P95、实际descriptor数、共享/回退组、原始样本及源码/库身份。Plan kernel内的所有归并、同步、去重和写回均计入Duration。每次调用前恢复初态，逐样本输入、状态、输出和保护区检查保留，固定参考缓存、批量回读和ACTIVE开始1秒等待继续使用。

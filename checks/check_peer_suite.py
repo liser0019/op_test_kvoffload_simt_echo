@@ -16,6 +16,27 @@ from joint_plan_cases import make_case, sort_topk
 from checks.generate_joint_variants import generate
 
 class Checks(unittest.TestCase):
+    def test_peer_config_resolution_with_framework_include_first(self):
+        peer = ROOT / 'csrc/peer_qli_plan'
+        framework = ROOT / 'csrc/joint_plan'
+        with tempfile.TemporaryDirectory() as tmp:
+            stubs = Path(tmp)
+            for name in ('kernel_operator.h', 'simt_api/asc_simt.h',
+                         'simt_api/device_atomic_functions.h', 'simt_api/device_sync_functions.h',
+                         'simt_api/device_warp_functions.h', 'simt_api/device_functions.h'):
+                path = stubs / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('// Preprocessor-only CANN stub.\n')
+            result = subprocess.run([
+                'g++', '-std=c++17', '-E', '-H', '-I' + str(framework),
+                '-I' + str(peer), '-I' + str(stubs), str(peer / 'kernel.cpp'),
+            ], check=True, capture_output=True, text=True)
+        headers = {line.lstrip('. ').strip() for line in result.stderr.splitlines()
+                   if line.startswith('.')}
+        self.assertNotIn(str(framework / 'sparse_kv_plan_config.h'), headers)
+        self.assertIn(str(peer / 'sparse_kv_plan_config.h'), headers)
+        self.assertIn(str(peer / 'upstream/sparse_kv_plan_config.h'), headers)
+
     def test_primary_entry_defaults_and_matrix(self):
         out=subprocess.check_output([sys.executable,'-B',str(ROOT/'run_mtp8.py'),'--suite','peer','--describe-only','--output','/tmp/unused_peer'],text=True)
         report=json.loads(out)

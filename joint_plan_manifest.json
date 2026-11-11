@@ -406,9 +406,10 @@
     "csrc/peer_qli_plan/upstream/sparse_kv_plan_fused.h": "7b32a5f76429ce053235905b6b8ab1d78612266a31f1c634ebc9e3dba9e80cde",
     "peer_plan.py": "927cfba90ebb6802fa99f44b1df1b6917cca640aae4719ffccd719794df76001",
     "checks/check_peer_plan.py": "ab6274e43ebc254d32e3ac6d89d1bb1f1f32d8f552a8bc152aa788bd241731a7",
-    "checks/check_peer_suite.py": "0b446e735bfb143205aae00d583cd23e5dd10d9a3af0eceea3fd6e9bb3e654b2",
+    "checks/check_peer_suite.py": "afb1210fb7a2c7441bff8b6b32d5eda4a20aeaa73791e5521523d1ac0b14b4ce",
     "scripts/test_peer_plan.sh": "bf9b632f4af436676292257e4b4b661d86ce67c0557ac59b5a4bcd56ca202344",
-    "docs/28请求与同事独立Plan对照.md": "303902c9eade17ec349721ed9b394867e8efb0b1c0394f2e147ab1c87c5c0054"
+    "docs/28请求与同事独立Plan对照.md": "1a09459ec007d1ca42e2baf9aa87148b5f9e616ce987cd85ea2601e5a231f795",
+    "csrc/peer_qli_plan/sparse_kv_plan_config.h": "c07d1af4e2b314496fe3c66b4191629c9d9d77bbc1aa0c4ab5cdcfe1bde6b4ae"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
