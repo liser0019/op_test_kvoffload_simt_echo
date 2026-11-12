@@ -45,6 +45,7 @@ template <TPosition P>class TBuf {
 template<typename T>struct MrgSortSrcList {LocalTensor<T> src1,src2,src3,src4;};
 #ifdef JOINT_MTP8
 inline uint64_t EightCpuMergeCalls=0; // CPU-only work-count observer, absent from device sources
+inline uint64_t EightCpuTwoWayInputRecords=0;
 #endif
 template<typename T,bool Exhaust>void MrgSort(LocalTensor<T> dst,const MrgSortSrcList<T>&l,
     const uint16_t lengths[4],uint32_t used[4],uint16_t valid,int repeats){
@@ -53,6 +54,9 @@ template<typename T,bool Exhaust>void MrgSort(LocalTensor<T> dst,const MrgSortSr
   #endif
   assert(repeats==1);LocalTensor<T>s[4]={l.src1,l.src2,l.src3,l.src4};
   uint32_t n=valid==3?2:valid==7?3:valid==15?4:0;assert(n>=2);
+#ifdef JOINT_MTP8
+  if(n==2)EightCpuTwoWayInputRecords+=lengths[0]+lengths[1];
+#endif
   for(uint32_t k=0;k<n;++k){used[k]=0;assert(lengths[k]>0&&s[k].n>=2U*lengths[k]);}
   uint32_t out=0;
   while(true){uint32_t best=n;
@@ -151,5 +155,15 @@ template<typename T>void Neg(RegTensor<T>& out,RegTensor<T>& src,MaskReg& m){
 template<typename T,typename U,const CastTrait& trait>void Cast(RegTensor<T>& out,RegTensor<U>& src,MaskReg& m){
   static_assert(std::is_same_v<T,int32_t> && std::is_same_v<U,float>);
   for(int i=0;i<64;++i)out.v[i]=m.v[i]?static_cast<T>(src.v[i]):0;
+}
+}
+
+namespace AscendC::Reg {
+enum class ReduceType { SUM,MAX,MIN };
+template<ReduceType type,typename T>void Reduce(RegTensor<T>& dst,RegTensor<T> src,MaskReg mask){
+  static_assert(type==ReduceType::SUM);T total=0;
+  for(uint32_t i=0;i<256U/sizeof(T);++i)if(mask.v[i])total+=src.v[i];
+  // Only lane0 is defined for SUM; poison other lanes to reject accidental broadcasts.
+  Duplicate(dst,static_cast<T>(0x5bad));dst.v[0]=total;
 }
 }

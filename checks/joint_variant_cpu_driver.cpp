@@ -187,7 +187,8 @@ extern "C" __attribute__((visibility("default"))) void run_eight_rank(int32_t* p
 
 #ifdef JOINT_MTP8
 extern "C" __attribute__((visibility("default"))) uint64_t eight_cpu_merge_calls(){return AscendC::EightCpuMergeCalls;}
-extern "C" __attribute__((visibility("default"))) void eight_cpu_reset_merge_calls(){AscendC::EightCpuMergeCalls=0;}
+extern "C" __attribute__((visibility("default"))) void eight_cpu_reset_merge_calls(){AscendC::EightCpuMergeCalls=0;AscendC::EightCpuTwoWayInputRecords=0;}
+extern "C" __attribute__((visibility("default"))) uint64_t eight_cpu_two_way_input_records(){return AscendC::EightCpuTwoWayInputRecords;}
 #endif
 
 #if JOINT_MTP7_MAP16
@@ -201,5 +202,19 @@ extern "C" __attribute__((visibility("default"))) void run_prefix_packed_unique(
   AscendC::Reg::HotCtxHi=AscendC::Reg::HotCtxLo+4U*128U;
   RefineUniqueMapVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more,mapWords);
   AscendC::Reg::HotDataLo=0;
+}
+#endif
+
+#if JOINT_MTP7_MID_UNIQUE
+extern "C" __attribute__((visibility("default"))) void run_mid_pack(
+    int32_t* packet,int32_t* map,int32_t* ctx,uint32_t q,uint32_t chunk,uint32_t na,uint32_t nb) {
+  EightMidUniqueVf(packet,map,ctx,q,chunk,na,nb);
+}
+#endif
+#if JOINT_MTP7_FUSED_COUNT
+extern "C" __attribute__((visibility("default"))) void run_fused_unique(
+    int32_t* records,int32_t* data,int32_t* ctx,uint32_t n,uint32_t q,uint32_t capacity,
+    uint32_t initialCount,int32_t initialLast,uint32_t more,uint32_t topk) {
+  RefineFusedCountVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more,topk);
 }
 #endif

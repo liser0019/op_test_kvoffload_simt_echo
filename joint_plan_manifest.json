@@ -215,7 +215,9 @@
     "peer_qli_plan": "sparse_kv_plan_peer_qli_kernel",
     "joint_mtp7_prefix_a_512": "sparse_kv_plan_joint_kernel_mtp7_prefix_a_512",
     "joint_mtp7_prefix_b_512": "sparse_kv_plan_joint_kernel_mtp7_prefix_b_512",
-    "joint_mtp7_prefix_ab_512": "sparse_kv_plan_joint_kernel_mtp7_prefix_ab_512"
+    "joint_mtp7_prefix_ab_512": "sparse_kv_plan_joint_kernel_mtp7_prefix_ab_512",
+    "joint_mtp7_mid_unique_512": "sparse_kv_plan_joint_kernel_mtp7_mid_unique_512",
+    "joint_mtp7_fused_count_512": "sparse_kv_plan_joint_kernel_mtp7_fused_count_512"
   },
   "mtp": [
     0,
@@ -230,8 +232,8 @@
   "hardware_validation": "not_run_on_development_machine",
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
-    "build_joint_plan.sh": "61248ac04c3de7702844387fa46315dd92770e86c85b0ed906c298050258198a",
-    "joint_plan/CMakeLists.txt": "0dc4f366f9ddb6442818709a54f6536466b06dd721d893701a2397953e21b177",
+    "build_joint_plan.sh": "b9c16b7a1dc5ab364eda59e4d0a8ff9446efecb195bde7c057f54fdf167b10a1",
+    "joint_plan/CMakeLists.txt": "578adfc6c53cb025dac55c6ee40eef26c81035cf8c39ea9791268b18f75311ac",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -245,7 +247,7 @@
     "profile_joint_mtp.py": "af828d0176aed0680c4b3bd5f03d589d4d7099f4e4fe454ab8ba0d93f6db33ad",
     "run_joint_msopprof.py": "eea7d00f4a4c275ade27a1799eba933195d0899279fdec1e8adb3d5de508525f",
     "checks/check_joint_plan.py": "90cafb835272b0efb7afe72a1e361655879243403da9c7d6fad2a5cbaffe5ea0",
-    "checks/check_joint_models.py": "393231fe58d136937812fa135641fcca82f22a45150e10d287bec55bd350553a",
+    "checks/check_joint_models.py": "b9c3febd8ca13d5d4a56cc465b94722a3687e5fc67d2cb6a2ce4176de75e3643",
     "checks/joint_build_info.py": "2c60af1137a8fe17168d5aea132b94a4348f77669f1b5086b367fca3f4762bd7",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "b368b278d50c6982fd408ef2a80eb8f79e1faa7f8589922ee6f69caf66900c54",
@@ -260,13 +262,13 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "5b58829a0137451c1f7c9c2a77c090eb59281dcf04c9854aedd6e62cf8719242",
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "joint_variants.py": "0f54de21eef3ce119500fc453e8e425f63325a6d0f39f88a12a824f33e35c480",
-    "checks/generate_joint_variants.py": "9d76029c501ac13222487d25594d3160dee2c6abdb722f5ac32d7504a41588b7",
-    "checks/check_joint_variant_kernels.py": "056b11d3b2f361ba4e2f1f89c2b73b6217d2e8f7f4cce1fbe36e8e048777362e",
-    "checks/joint_variant_cpu_driver.cpp": "c300d0d0133a296c8d62345a67111db045a4a65bc48f735aef43f8d7abe5f65c",
+    "joint_variants.py": "e924bf6272ab3f875eebb6834fb503561e1c41e480e185b83a1d9354193366ce",
+    "checks/generate_joint_variants.py": "f0b0fe500e43fae7bb97d59ec8bc0aa1c64c9238ff09004a28615dedbd8ef2c7",
+    "checks/check_joint_variant_kernels.py": "9778fd12d525c47221653030411dae61a27046a7c09551172224b360085cbbf8",
+    "checks/joint_variant_cpu_driver.cpp": "271fe9bcd97271ffdedda3b71d4620b095e6774c28fe04ae994eba10d914420e",
     "checks/simt_variants/cpu_runtime.h": "e7d893c63524557c2ce3d0280a369214e834d41e56b6eca48277a54754b62356",
     "csrc/joint_variants/sparse_kv_joint_plan.h": "c49bb5a237e4d97d90744a2faa73b8e942037ac7bb36756fd9e80ad91748d1c9",
-    "csrc/joint_variants/plugin.cpp": "a5418b6ea15e2bb9e0b887b74043e92e6e016b77f29dcfe819b23baadf5dcfbb",
+    "csrc/joint_variants/plugin.cpp": "88fd5441accb56b0477a441e1b226466e84ba078387b55d61db630d85b84174e",
     "csrc/joint_variants/options.h": "4b66a8f8d25d1d71cebca1ae98bf74b70c928358c01a1626ea62f5ffee13bb18",
     "csrc/joint_variants/kernel.cpp": "33297ca2430b034dc687871009c636456b55af2b20e9485e8c58de2fe6c8f8ce",
     "csrc/joint_variants/bitmap_plan.h": "f667fe4216b90bc24eb4ce7113025e1d9ebc5a739860cdeaf170f0e12e1d3eb2",
@@ -314,8 +316,8 @@
     "scripts/test_merge_abcd.sh": "1762e5005b2fa69574c9c183e945e69294665b395a4bdd470be1a1949289f764",
     "checks/check_merge_abcd_npu.py": "fcc06c2e1695b26df37ffd9240df1fdd31825d34db36df083e259bf79c798fb7",
     "checks/check_merge_abcd.py": "e9010fcf1a465814a3f2f6b60888d2e10e215cfd5b92944d8b520fa8520a7c48",
-    "checks/check_merge_catalog.py": "3fd5450fba6382fbfb30bff4d8a0806541ba76cb4a5a0b46ff5bb4af13105903",
-    "checks/simt_variants/sorted_cann_cpu.h": "c6a96e297012b8c118ef98c5200fe5794adf367f19ace4c170940a30b9aff846",
+    "checks/check_merge_catalog.py": "62b15cd22b18a7659129be74a07655f25cf87f99dd33b658b1822906217a4df3",
+    "checks/simt_variants/sorted_cann_cpu.h": "c6d6ded8bde3ef39f63eb282d1a5732d55c379f7060d6760bf2e6445865ce54c",
     "docs/无Hash与硬件归并实验.md": "2c4c346daf1fc6c460a1bb4d245c9e32f4d19b024f98a8f08f0612bdc2d2583f",
     "csrc/joint_variants/sorted_stage.h": "4211576da32eacd78af61506a79aa76c940348ac5d4bf5c1713486480913fac6",
     "scripts/test_sorted_hardware.sh": "33e6bd4f69355a3a99b264cd1b15cc3ec0e86dff9760e6d7083c28df0b802d73",
@@ -381,9 +383,9 @@
     "run_hot_sweep.py": "1cff978178a208bf9367a863ab682987804334997a7d246a0adc228a031320eb",
     "scripts/test_hot_sweep.sh": "f9e2a0aabc48f7f0e02f71aab125810601a6476a568ed30a4dd2717455989dcb",
     "docs/ABD512热路径组合实验.md": "82c1905f58ce0b9b91c1f24b0e8dd15c1f5571a7b16915ef5f99d25a7f125c28",
-    "csrc/joint_variants/mtp8_plan_impl.h": "5ee9d8f7013eb04700f4b9a9d5eb4510c884f680d209031295ef83282428dd2e",
+    "csrc/joint_variants/mtp8_plan_impl.h": "b465efc4d6dd4132d904050effa959fe550aa9f73f61ab5cd1fa4eea36b9e689",
     "fixed_plan_check.py": "4ba808f12c059b630a8f9c8aaf20811101e03cbdb1ba08cdf5d47f59c44c22ac",
-    "run_mtp8.py": "0e1c602e71c1a12259c3d0c010008cc4871a0d8c458149eaa9578f2eced5fcb7",
+    "run_mtp8.py": "5f2d75e930143b0afe40c204484720f017f995393bbb2bb3861603ba5153132e",
     "scripts/test_mtp8.sh": "1f43748b673a8e1f607f5f929f0baebacd42b53220590a764db9cc3c4e9f0120",
     "checks/mtp8_cases.py": "248a27eb74397938a15d1d21b4483cc1676fe105899b2d86a7d0e25293d693bf",
     "checks/check_mtp8.py": "98171f9ba598b4d7661fd46b5c445cd3f48107b5fff66472d13159c2e29ca17c",
@@ -397,7 +399,7 @@
     "checks/check_mtp7_pack_suite.py": "e25177d268b00f61bb93c1e704ceef2acd8773eac87af636a3e50d00ffa8b4b6",
     "scripts/test_mtp7_sweep.sh": "f29913b2edf5a09a8215e9ba5f153041d5f2b934d9a6d56387e102d102c18269",
     "docs/MTP7缓冲复用与分段归并一轮测试.md": "1dda9a81e9f7afa9f0c90c8c33e0b8ab0f814020674ee206749d4b2fd5717b90",
-    "README.md": "79b0bd0a35bdeadfab0766fc33c1330a8a54aa81b9ba5d462dac97e52ddc7b34",
+    "README.md": "2dbb7a1da4d6de6bcf368b6ac998e9ecb142a7904a52f03a1e8ff7373d3ecbcc",
     "csrc/peer_qli_plan/standalone_body.h": "ce6a55bba7e1c9386e5d1293be556b85cbcc4d5499f089e87e04b8cf4be0e37d",
     "csrc/peer_qli_plan/plugin.cpp": "2886c7bb1c49b8fe77679fc5006a3f477ad2da993b9d29c0f2a6a12e816bc625",
     "csrc/peer_qli_plan/kernel.cpp": "d96d2555457b89b36c8ab830e2d648fc62f99816ceb964db161694b00103a2b1",
@@ -416,7 +418,12 @@
     "checks/check_mtp7_prefix_suite.py": "1fb2c024542d00a20742587ec10e71f4e041a6a18a06e5b8e3b0a846c17c3091",
     "scripts/test_mtp7_prefix.sh": "bc6fc3c6fad0ba1f44ff7195507cb1953db9e4dd4f91a2193873df21bcfb20ba",
     "docs/MTP7安全前缀与16位映射对照.md": "8a4cdcd5ea5053c15be8e800525d3c6155a72f511acb3e710253f9904b91469f",
-    "csrc/peer_qli_plan/sparse_kv_plan_config.h": "c07d1af4e2b314496fe3c66b4191629c9d9d77bbc1aa0c4ab5cdcfe1bde6b4ae"
+    "csrc/peer_qli_plan/sparse_kv_plan_config.h": "c07d1af4e2b314496fe3c66b4191629c9d9d77bbc1aa0c4ab5cdcfe1bde6b4ae",
+    "csrc/joint_variants/mtp7_merge_unique.h": "50d826660ee923b9d769b55c05518027829f3cb271c41530808bbf491f983542",
+    "checks/check_mtp7_merge_unique.py": "0b074f5e8941f88e5ea5ea9a7269e710a37817497b32b9e66daaeb04a3e5d132",
+    "checks/check_mtp7_merge_suite.py": "70ba514f70f2b2ebd9622b1b04b07bf98638e612d80eb173a66bf71edbe2bc60",
+    "scripts/test_mtp7_merge_unique.sh": "e284b0d6e9fc2605645d8a81fcb74ac969fb017aa2c349f8073a756d9e64df4a",
+    "docs/MTP7中间去重与融合统计对照.md": "dfe3149084d42b3f4ce176ef3c5e5cabaab4eaa4c001a0603f75bf7c19e02523"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -636,7 +643,9 @@
     "joint_mtp7_reuse_tile_512": 199,
     "joint_mtp7_prefix_a_512": 200,
     "joint_mtp7_prefix_b_512": 201,
-    "joint_mtp7_prefix_ab_512": 202
+    "joint_mtp7_prefix_ab_512": 202,
+    "joint_mtp7_mid_unique_512": 203,
+    "joint_mtp7_fused_count_512": 204
   },
   "joint_optimizations": {
     "a": "non-joint VF compile-time isolation (protocol retained)",
@@ -1671,5 +1680,29 @@
       "catalog_compile_link_subsets": 16
     },
     "integration_base_commit": "f2bb9695cc0023a02501dbf339025aa837fd35a0"
+  },
+  "mtp7_merge_unique_candidates": {
+    "parent_commit": "947e35e4293aeb437c10ebc783c0ea95d8d801e2",
+    "parent": "joint_mtp7_reuse_parallel_512",
+    "ids": [
+      203,
+      204
+    ],
+    "threads": 512,
+    "production_dynamic_ub_bytes": 181024,
+    "map_dtype": "int32",
+    "scope": "only actual eight-row two-level hardware merge; no safe frontier or map16",
+    "validation": "CPU only; no local CANN/NPU validation",
+    "local_checks": {
+      "controller_comparisons_each": 139,
+      "dedicated_primitives_and_wide_controller": {
+        "203": 18,
+        "204": 100
+      },
+      "existing_multiwarp_progress_each": 45,
+      "framework_unittests": 69,
+      "dispatch_build_subsets": 17,
+      "hardware": "not run: no local CANN/NPU"
+    }
   }
 }

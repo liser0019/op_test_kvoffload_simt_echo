@@ -425,3 +425,7 @@ PC样本比例不是精确阶段周期占比；SIMT VF也不能承诺通过Instr
 ## 28请求与同事独立Plan对照
 
 主MTP测试入口默认28请求。新增三路短测 `scripts/test_peer_plan.sh`，对比带页表ABCDF、当前reuse_parallel及同事分支收录的独立Plan。来源固定到ops-transformer@9ec2110，独立计算体按原文校验。三路共用合法升序输入，kernel Duration包含Plan全部归并与写回。默认120个正式样本。运行与融合/独立逻辑核对见[中文说明](docs/28请求与同事独立Plan对照.md)。本机仅完成CPU检查，CANN/NPU验证待上机。
+
+## MTP7中间去重与融合统计三路短测
+
+新增 `joint_mtp7_mid_unique_512`（四路中间结果先去重）和 `joint_mtp7_fused_count_512`（消费统计并入SIMD去重），与冻结 `joint_mtp7_reuse_parallel_512` 独立三路对照。512线程、32位映射、612条/路和181024字节生产动态UB不变。默认28请求、MTP0/1/3/7、冷/满缓存75%标签场景，共120个正式样本；一次构建→一次门禁→一次采集，无历史大矩阵。入口 `scripts/test_mtp7_merge_unique.sh`。实现、缓冲生命周期、服务器命令与验证边界见[中文说明](docs/MTP7中间去重与融合统计对照.md)。本机未执行CANN/NPU验证。
