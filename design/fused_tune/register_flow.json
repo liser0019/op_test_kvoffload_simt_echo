@@ -1,0 +1,327 @@
+{
+  "inputs": [
+    "score",
+    "qid",
+    "old_cursor"
+  ],
+  "outputs": [],
+  "pinned": [],
+  "exclusive_branches": [],
+  "steps": [
+    {
+      "id": "I0",
+      "op": "Counter state entering iteration",
+      "reads": [],
+      "writes": [
+        "counter_in0"
+      ]
+    },
+    {
+      "id": "I1",
+      "op": "Counter state entering iteration",
+      "reads": [],
+      "writes": [
+        "counter_in1"
+      ]
+    },
+    {
+      "id": "I2",
+      "op": "Counter state entering iteration",
+      "reads": [],
+      "writes": [
+        "counter_in2"
+      ]
+    },
+    {
+      "id": "I3",
+      "op": "Counter state entering iteration",
+      "reads": [],
+      "writes": [
+        "counter_in3"
+      ]
+    },
+    {
+      "id": "I4",
+      "op": "Counter state entering iteration",
+      "reads": [],
+      "writes": [
+        "counter_in4"
+      ]
+    },
+    {
+      "id": "I5",
+      "op": "Counter state entering iteration",
+      "reads": [],
+      "writes": [
+        "counter_in5"
+      ]
+    },
+    {
+      "id": "I6",
+      "op": "Counter state entering iteration",
+      "reads": [],
+      "writes": [
+        "counter_in6"
+      ]
+    },
+    {
+      "id": "I7",
+      "op": "Counter state entering iteration",
+      "reads": [],
+      "writes": [
+        "counter_in7"
+      ]
+    },
+    {
+      "id": "S1",
+      "op": "Load record pair",
+      "reads": [],
+      "writes": [
+        "score",
+        "qid"
+      ]
+    },
+    {
+      "id": "S2",
+      "op": "Compare adjacent token",
+      "reads": [
+        "score"
+      ],
+      "writes": [
+        "head"
+      ]
+    },
+    {
+      "id": "S3",
+      "op": "Prefix and UID",
+      "reads": [
+        "head"
+      ],
+      "writes": [
+        "uid"
+      ]
+    },
+    {
+      "id": "S4",
+      "op": "Write unique/query map",
+      "reads": [
+        "score",
+        "qid",
+        "uid"
+      ],
+      "writes": []
+    },
+    {
+      "id": "C0",
+      "op": "Update cumulative counter",
+      "reads": [
+        "counter_in0",
+        "qid"
+      ],
+      "writes": [
+        "counter_out0"
+      ]
+    },
+    {
+      "id": "C1",
+      "op": "Update cumulative counter",
+      "reads": [
+        "counter_in1",
+        "qid"
+      ],
+      "writes": [
+        "counter_out1"
+      ]
+    },
+    {
+      "id": "C2",
+      "op": "Update cumulative counter",
+      "reads": [
+        "counter_in2",
+        "qid"
+      ],
+      "writes": [
+        "counter_out2"
+      ]
+    },
+    {
+      "id": "C3",
+      "op": "Update cumulative counter",
+      "reads": [
+        "counter_in3",
+        "qid"
+      ],
+      "writes": [
+        "counter_out3"
+      ]
+    },
+    {
+      "id": "C4",
+      "op": "Update cumulative counter",
+      "reads": [
+        "counter_in4",
+        "qid"
+      ],
+      "writes": [
+        "counter_out4"
+      ]
+    },
+    {
+      "id": "C5",
+      "op": "Update cumulative counter",
+      "reads": [
+        "counter_in5",
+        "qid"
+      ],
+      "writes": [
+        "counter_out5"
+      ]
+    },
+    {
+      "id": "C6",
+      "op": "Update cumulative counter",
+      "reads": [
+        "counter_in6",
+        "qid"
+      ],
+      "writes": [
+        "counter_out6"
+      ]
+    },
+    {
+      "id": "C7",
+      "op": "Update cumulative counter",
+      "reads": [
+        "counter_in7",
+        "qid"
+      ],
+      "writes": [
+        "counter_out7"
+      ]
+    },
+    {
+      "id": "R0",
+      "op": "Reduce cumulative counter",
+      "reads": [
+        "counter_out0"
+      ],
+      "writes": [
+        "count0"
+      ]
+    },
+    {
+      "id": "R1",
+      "op": "Reduce cumulative counter",
+      "reads": [
+        "counter_out1"
+      ],
+      "writes": [
+        "count1"
+      ]
+    },
+    {
+      "id": "R2",
+      "op": "Reduce cumulative counter",
+      "reads": [
+        "counter_out2"
+      ],
+      "writes": [
+        "count2"
+      ]
+    },
+    {
+      "id": "R3",
+      "op": "Reduce cumulative counter",
+      "reads": [
+        "counter_out3"
+      ],
+      "writes": [
+        "count3"
+      ]
+    },
+    {
+      "id": "R4",
+      "op": "Reduce cumulative counter",
+      "reads": [
+        "counter_out4"
+      ],
+      "writes": [
+        "count4"
+      ]
+    },
+    {
+      "id": "R5",
+      "op": "Reduce cumulative counter",
+      "reads": [
+        "counter_out5"
+      ],
+      "writes": [
+        "count5"
+      ]
+    },
+    {
+      "id": "R6",
+      "op": "Reduce cumulative counter",
+      "reads": [
+        "counter_out6"
+      ],
+      "writes": [
+        "count6"
+      ]
+    },
+    {
+      "id": "R7",
+      "op": "Reduce cumulative counter",
+      "reads": [
+        "counter_out7"
+      ],
+      "writes": [
+        "count7"
+      ]
+    },
+    {
+      "id": "S7",
+      "op": "Known-count merge and difference",
+      "reads": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "count7"
+      ],
+      "writes": [
+        "delta"
+      ]
+    },
+    {
+      "id": "S8",
+      "op": "Read old cursor",
+      "reads": [],
+      "writes": [
+        "old_cursor"
+      ]
+    },
+    {
+      "id": "S9",
+      "op": "Apply deltas",
+      "reads": [
+        "old_cursor",
+        "delta"
+      ],
+      "writes": [
+        "updated_cursor"
+      ]
+    },
+    {
+      "id": "S10",
+      "op": "Write cursor and more",
+      "reads": [
+        "updated_cursor"
+      ],
+      "writes": []
+    }
+  ]
+}

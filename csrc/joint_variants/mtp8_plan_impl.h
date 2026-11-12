@@ -893,6 +893,10 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf
 #include "mtp7_merge_unique.h"
 #endif
 
+#if JOINT_MTP7_FUSED_TUNE_BITS
+#include "mtp7_fused_refine.h"
+#endif
+
 template <bool AllowJoint>
 __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
     GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
@@ -949,6 +953,9 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
 #endif
           auto floats=storage.Get<float>();auto* packet=scan+inputOffset;
           uint32_t lengths[2]={0,0}; bool allComplete[2]={true,true};
+#if (JOINT_MTP7_FUSED_TUNE_BITS & 1)
+          ctx[108]=-1; //0=completeA,1=completeB,2=both; -1=general8-row histogram
+#endif
           for(uint32_t half=0;half<2U;++half){
             const uint32_t begin=half*4U, count=(static_cast<uint32_t>(ctx[28])-begin<4U?static_cast<uint32_t>(ctx[28])-begin:4U);
             uint16_t lens[4]={0,0,0,0};uint32_t used[4]={0,0,0,0};
@@ -966,6 +973,9 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
             if(count==1U){
               asc_vf_call<EightCopyVf>(dim3(SORTED_THREADS),packet+mid,packet+2U*begin*chunk,2U*lens[0]);
               lengths[half]=lens[0];
+#if (JOINT_MTP7_FUSED_TUNE_BITS & 1)
+              if(ctx[28]==8)ctx[112+begin]=lens[0];
+#endif
               SortedVectorToScalar(pipe);
             }else{
               AscendC::MrgSortSrcList<float> lists{floats[inputOffset+2U*begin*chunk],floats[inputOffset+2U*(begin+1U)*chunk],
@@ -978,6 +988,9 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
                 if(allComplete[half])used[k]=lens[k];
                 if(used[k]>lens[k])ctx[0]=0;
                 lengths[half]+=used[k];
+#if (JOINT_MTP7_FUSED_TUNE_BITS & 1)
+                if(ctx[28]==8)ctx[112+begin+k]=static_cast<int32_t>(used[k]);
+#endif
               }
             }
           }
@@ -1019,6 +1032,15 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
             if(used[0]>lens[0]||used[1]>lens[1]||used[0]+used[1]==0U)ctx[0]=0;
             else{
               ctx[4]=used[0]+used[1];
+#if (JOINT_MTP7_FUSED_TUNE_BITS & 1)
+              // Only full8 active sources have contiguous row0..3 / row4..7 halves.
+              // A partial second-layer prefix MUST NOT inherit first-layer counts.
+              if(ctx[28]==8){
+                const bool fullA=used[0]==lens[0],fullB=used[1]==lens[1];
+                ctx[108]=fullA?(fullB?2:0):(fullB?1:-1);
+                ctx[109]=static_cast<int32_t>(used[0]);ctx[110]=static_cast<int32_t>(used[1]);
+              }
+#endif
 #if JOINT_MTP7_MID_UNIQUE || JOINT_MTP7_FUSED_COUNT
               ctx[107]=1; // the following SIMD/map stage will publish original-query consumption
 #elif JOINT_MTP7_PREFIX
@@ -1107,9 +1129,23 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
             }else
 #elif JOINT_MTP7_FUSED_COUNT
             if(ctx[107]){
+#if JOINT_MTP7_FUSED_TUNE_BITS
+#define FUSED_TUNE_CALL(KNOWN,KT,UT) asc_vf_call<RefineFusedTuneVf<JOINT_MTP7_FUSED_TUNE_BITS,KNOWN>>(records,ctx+EIGHT_CTX,ctx, \
+    static_cast<uint32_t>(ctx[4]),q,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),ctx[2],static_cast<uint32_t>(d.topk),KT,UT)
+#if (JOINT_MTP7_FUSED_TUNE_BITS & 1)
+              // Dispatch is Scalar-side: each SIMD VF has a compile-time counter layout.
+              if(ctx[108]==2){FUSED_TUNE_CALL(2,0U,0U);}
+              else if(ctx[108]==0){FUSED_TUNE_CALL(0,static_cast<uint32_t>(ctx[109]),static_cast<uint32_t>(ctx[110]));}
+              else if(ctx[108]==1){FUSED_TUNE_CALL(1,static_cast<uint32_t>(ctx[110]),static_cast<uint32_t>(ctx[109]));}
+              else
+#endif
+              {FUSED_TUNE_CALL(-1,0U,0U);}
+#undef FUSED_TUNE_CALL
+#else
               asc_vf_call<RefineFusedCountVf>(records,ctx+EIGHT_CTX,ctx,
                   static_cast<uint32_t>(ctx[4]),q,static_cast<uint32_t>(d.capacity),
                   static_cast<uint32_t>(ctx[1]),ctx[2],more,static_cast<uint32_t>(d.topk));
+#endif
             }else
 #endif
             asc_vf_call<RefineUniqueMapVf>(records,ctx+EIGHT_CTX,ctx,

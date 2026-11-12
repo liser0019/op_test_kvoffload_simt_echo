@@ -98,6 +98,7 @@ set(JOINT_FLAGS -O3 --cce-auto-sync=off -Wno-deprecated-declarations
     -mllvm -cce-vf-remove-membar=false -mllvm -cce-aicore-hoist-movemask=false)
 option(JOINT_REFINE_ONLY "Build frozen bounds512 and refinement factorial" OFF)
 option(JOINT_EXEC_ONLY "Build ABD512 execution factorial and frozen references" OFF)
+option(JOINT_FUSED_TUNE_ONLY "Build frozen FUSED and seven A/B/C refinement candidates" OFF)
 option(JOINT_MERGE_UNIQUE_ONLY "Build frozen196 plus intermediate unique and fused count candidates" OFF)
 option(JOINT_PREFIX_ONLY "Build frozen reuse_parallel and A/B/AB only" OFF)
 option(JOINT_PEER_ONLY "Build peer standalone Plan and one current candidate" OFF)
@@ -128,7 +129,7 @@ set(JOINT_INFO "${CMAKE_CURRENT_BINARY_DIR}/source_info.cpp")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_plan_manifest.json" "${JOINT_ROOT}/checks/joint_build_info.py")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${JOINT_ROOT}/checks/joint_build_info.py"
-    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY};ac_threads_only=${JOINT_AC_THREADS_ONLY};cold_compare_only=${JOINT_COLD_COMPARE_ONLY};integrated_only=${JOINT_INTEGRATED_ONLY};refine_only=${JOINT_REFINE_ONLY};exec_only=${JOINT_EXEC_ONLY};hot_only=${JOINT_HOT_ONLY};mtp8_only=${JOINT_MTP8_ONLY};mtp7_fix_only=${JOINT_MTP7_FIX_ONLY};mtp7_pack_only=${JOINT_MTP7_PACK_ONLY};peer_only=${JOINT_PEER_ONLY};prefix_only=${JOINT_PREFIX_ONLY};merge_unique_only=${JOINT_MERGE_UNIQUE_ONLY}"
+    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY};ac_threads_only=${JOINT_AC_THREADS_ONLY};cold_compare_only=${JOINT_COLD_COMPARE_ONLY};integrated_only=${JOINT_INTEGRATED_ONLY};refine_only=${JOINT_REFINE_ONLY};exec_only=${JOINT_EXEC_ONLY};hot_only=${JOINT_HOT_ONLY};mtp8_only=${JOINT_MTP8_ONLY};mtp7_fix_only=${JOINT_MTP7_FIX_ONLY};mtp7_pack_only=${JOINT_MTP7_PACK_ONLY};peer_only=${JOINT_PEER_ONLY};prefix_only=${JOINT_PREFIX_ONLY};merge_unique_only=${JOINT_MERGE_UNIQUE_ONLY};fused_tune_only=${JOINT_FUSED_TUNE_ONLY}"
     RESULT_VARIABLE _identity_result)
 if(NOT _identity_result EQUAL 0)
     message(FATAL_ERROR "Joint Plan source identity check failed")
@@ -161,7 +162,9 @@ set(JOINT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/joint_variants")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_variants.py" "${JOINT_ROOT}/checks/generate_joint_variants.py")
 set(_merge_generate_args)
-if(JOINT_MERGE_UNIQUE_ONLY)
+if(JOINT_FUSED_TUNE_ONLY)
+    list(APPEND _merge_generate_args --fused-tune-only)
+elseif(JOINT_MERGE_UNIQUE_ONLY)
     list(APPEND _merge_generate_args --merge-unique-only)
 elseif(JOINT_PREFIX_ONLY)
     list(APPEND _merge_generate_args --prefix-only)
@@ -206,6 +209,9 @@ if(NOT _catalog_result EQUAL 0)
     message(FATAL_ERROR "Cannot query variant catalog")
 endif()
 foreach(_name IN LISTS JOINT_VARIANT_NAMES)
+    if(JOINT_FUSED_TUNE_ONLY AND NOT _name MATCHES "^mtp7_fused_(count|a|b|c|ab|ac|bc|abc)_512$")
+        continue()
+    endif()
     if(JOINT_MERGE_UNIQUE_ONLY AND NOT _name MATCHES "^(mtp7_reuse_parallel_512|mtp7_mid_unique_512|mtp7_fused_count_512)$")
         continue()
     endif()
@@ -263,7 +269,7 @@ foreach(_name IN LISTS JOINT_VARIANT_NAMES)
             ${JOINT_FLAGS} ${JOINT_INCLUDES} -c "${JOINT_GENERATED}/variant_${_name}.cpp" -o "${_object}"
         DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp"
             "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h" "${JOINT_VARIANT_DIR}/bitmap_plan.h"
-            "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h" "${JOINT_VARIANT_DIR}/union_next_stage.h" "${JOINT_VARIANT_DIR}/union_next_controller.h" "${JOINT_VARIANT_DIR}/union_next_simd.h" "${JOINT_VARIANT_DIR}/cold_finish.h" "${JOINT_VARIANT_DIR}/cold_ac_stage.h" "${JOINT_VARIANT_DIR}/cold_union_stage.h" "${JOINT_VARIANT_DIR}/integrated_stage.h" "${JOINT_VARIANT_DIR}/phase0_bounds_stage.h" "${JOINT_VARIANT_DIR}/refine_options.h" "${JOINT_VARIANT_DIR}/refine_stage.h" "${JOINT_VARIANT_DIR}/refine_controller.h" "${JOINT_VARIANT_DIR}/refine_simd.h" "${JOINT_VARIANT_DIR}/exec_options.h" "${JOINT_VARIANT_DIR}/exec_stage.h" "${JOINT_VARIANT_DIR}/exec_simd.h" "${JOINT_VARIANT_DIR}/exec_controller.h" "${JOINT_VARIANT_DIR}/hot_plan_impl.h" "${JOINT_VARIANT_DIR}/mtp8_plan_impl.h" "${JOINT_VARIANT_DIR}/mtp7_merge_unique.h"
+            "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h" "${JOINT_VARIANT_DIR}/union_next_stage.h" "${JOINT_VARIANT_DIR}/union_next_controller.h" "${JOINT_VARIANT_DIR}/union_next_simd.h" "${JOINT_VARIANT_DIR}/cold_finish.h" "${JOINT_VARIANT_DIR}/cold_ac_stage.h" "${JOINT_VARIANT_DIR}/cold_union_stage.h" "${JOINT_VARIANT_DIR}/integrated_stage.h" "${JOINT_VARIANT_DIR}/phase0_bounds_stage.h" "${JOINT_VARIANT_DIR}/refine_options.h" "${JOINT_VARIANT_DIR}/refine_stage.h" "${JOINT_VARIANT_DIR}/refine_controller.h" "${JOINT_VARIANT_DIR}/refine_simd.h" "${JOINT_VARIANT_DIR}/exec_options.h" "${JOINT_VARIANT_DIR}/exec_stage.h" "${JOINT_VARIANT_DIR}/exec_simd.h" "${JOINT_VARIANT_DIR}/exec_controller.h" "${JOINT_VARIANT_DIR}/hot_plan_impl.h" "${JOINT_VARIANT_DIR}/mtp8_plan_impl.h" "${JOINT_VARIANT_DIR}/mtp7_merge_unique.h" "${JOINT_VARIANT_DIR}/mtp7_fused_refine.h"
             "${JOINT_DIR}/launch.h" "${JOINT_DIR}/sparse_kv_plan_config.h"
             "${JOINT_ROOT}/joint_plan_manifest.json"
         COMMENT "Compile Joint experiment ${_name}" VERBATIM)
@@ -283,7 +289,7 @@ set_source_files_properties("${ABCDF_PAGES_OBJECT}" PROPERTIES GENERATED TRUE EX
 set(PAGED_OPT_OBJECTS)
 set(PAGED_OPT_PLUGINS)
 foreach(_name a b ab)
-    if(JOINT_MERGE_UNIQUE_ONLY OR JOINT_PREFIX_ONLY OR JOINT_PEER_ONLY OR JOINT_MTP7_PACK_ONLY OR JOINT_MTP7_FIX_ONLY OR JOINT_MTP8_ONLY OR JOINT_UNION_ONLY OR JOINT_AC_THREADS_ONLY OR JOINT_COLD_COMPARE_ONLY)
+    if(JOINT_FUSED_TUNE_ONLY OR JOINT_MERGE_UNIQUE_ONLY OR JOINT_PREFIX_ONLY OR JOINT_PEER_ONLY OR JOINT_MTP7_PACK_ONLY OR JOINT_MTP7_FIX_ONLY OR JOINT_MTP8_ONLY OR JOINT_UNION_ONLY OR JOINT_AC_THREADS_ONLY OR JOINT_COLD_COMPARE_ONLY)
         continue()
     endif()
     set(_dir "${JOINT_ROOT}/csrc/abcdf_paged_opt")

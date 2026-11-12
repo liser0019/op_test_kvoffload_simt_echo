@@ -218,3 +218,13 @@ extern "C" __attribute__((visibility("default"))) void run_fused_unique(
   RefineFusedCountVf(records,data,ctx,n,q,capacity,initialCount,initialLast,more,topk);
 }
 #endif
+
+#if JOINT_MTP7_FUSED_TUNE_BITS
+extern "C" __attribute__((visibility("default"))) void run_tuned_unique(
+    int32_t* records,int32_t* data,int32_t* ctx,uint32_t n,uint32_t q,uint32_t capacity,
+    uint32_t initialCount,int32_t initialLast,uint32_t topk,int mode,uint32_t kt,uint32_t ut){
+#define CPU_TUNE(K) RefineFusedTuneVf<JOINT_MTP7_FUSED_TUNE_BITS,K>(records,data,ctx,n,q,capacity,initialCount,initialLast,topk,kt,ut)
+  if(mode==0){CPU_TUNE(0);}else if(mode==1){CPU_TUNE(1);}else if(mode==2){CPU_TUNE(2);}else{CPU_TUNE(-1);}
+#undef CPU_TUNE
+}
+#endif

@@ -18,7 +18,7 @@ from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
-    hot=mask if 159<=mask<=204 else None
+    hot=mask if 159<=mask<=211 else None
     execution=mask-143 if 143<=mask<=158 else None
     refine=11 if hot is not None or execution is not None else mask-127 if 127<=mask<=142 else None
     bounds = mask==126
@@ -34,7 +34,7 @@ def build(directory, mask, model_threads=64):
     config, count = re.subn(r'PLAN_THREADS = 1024U', f'PLAN_THREADS = {model_threads}U', config)
     assert count == 1
     (directory / 'sparse_kv_plan_config.h').write_text(config)
-    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h','integrated_stage.h','phase0_bounds_stage.h','refine_options.h','refine_stage.h','refine_controller.h','refine_simd.h','exec_options.h','exec_stage.h','exec_controller.h','exec_simd.h','hot_plan_impl.h','mtp8_plan_impl.h','mtp7_merge_unique.h'):
+    for name in ('sparse_kv_joint_plan.h', 'options.h', 'bitmap_plan.h', 'turbo_plan.h', 'turbo_union_experiments.h', 'merge_plan.h', 'merge_experiments.h', 'sorted_stage.h', 'sorted_controller.h', 'sorted_sweep_stage.h', 'sorted_sweep_controller.h', 'union_next_stage.h', 'union_next_controller.h', 'union_next_simd.h','cold_finish.h','cold_union_stage.h','cold_ac_stage.h','integrated_stage.h','phase0_bounds_stage.h','refine_options.h','refine_stage.h','refine_controller.h','refine_simd.h','exec_options.h','exec_stage.h','exec_controller.h','exec_simd.h','hot_plan_impl.h','mtp8_plan_impl.h','mtp7_merge_unique.h','mtp7_fused_refine.h'):
         (directory / name).write_bytes((ROOT / 'csrc/joint_variants' / name).read_bytes())
     (directory / 'launch.h').write_bytes((ROOT / 'csrc/joint_plan/launch.h').read_bytes())
     for name in ('kernel_operator.h', 'simt_api/asc_simt.h', 'simt_api/device_atomic_functions.h',
@@ -53,7 +53,7 @@ def build(directory, mask, model_threads=64):
     library = directory / 'kernel.so'
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
-                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), *(['-DJOINT_HOT=1','-DJOINT_HOT_BITS='+str(10 if 193<=hot<=204 else hot-159 if hot<=190 else 0),'-DJOINT_HOT_PART_ONLY='+str(int(hot==191)),'-DJOINT_HOT_MISS_ONLY='+str(int(hot==192))] if hot is not None else []), *(['-DJOINT_MTP7_MID_UNIQUE='+str(int(hot==203)),'-DJOINT_MTP7_FUSED_COUNT='+str(int(hot==204)),'-DJOINT_MTP7_PREFIX='+str(int(hot in (200,202))),'-DJOINT_MTP7_MAP16='+str(int(hot in (201,202))),'-DJOINT_MTP8=1','-DJOINT_MTP7_OPT='+str(mtp7_config(hot)['opt']),'-DJOINT_MTP7_REUSE='+str(int(mtp7_config(hot)['reuse'])),'-DJOINT_MTP7_TILE='+str(int(mtp7_config(hot)['tile']))] if hot is not None and 193<=hot<=204 else []), '-I' + str(directory),
+                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), *(['-DJOINT_HOT=1','-DJOINT_HOT_BITS='+str(10 if 193<=hot<=211 else hot-159 if hot<=190 else 0),'-DJOINT_HOT_PART_ONLY='+str(int(hot==191)),'-DJOINT_HOT_MISS_ONLY='+str(int(hot==192))] if hot is not None else []), *(['-DJOINT_MTP7_MID_UNIQUE='+str(int(hot==203)),'-DJOINT_MTP7_FUSED_COUNT='+str(int(hot==204 or hot>=205)),'-DJOINT_MTP7_FUSED_TUNE_BITS='+str(hot-204 if hot>=205 else 0),'-DJOINT_MTP7_PREFIX='+str(int(hot in (200,202))),'-DJOINT_MTP7_MAP16='+str(int(hot in (201,202))),'-DJOINT_MTP8=1','-DJOINT_MTP7_OPT='+str(mtp7_config(hot)['opt']),'-DJOINT_MTP7_REUSE='+str(int(mtp7_config(hot)['reuse'])),'-DJOINT_MTP7_TILE='+str(int(mtp7_config(hot)['tile']))] if hot is not None and 193<=hot<=211 else []), '-I' + str(directory),
                     '-I' + str(ROOT / 'checks/simt_variants'),
                     str(ROOT / 'checks/joint_variant_cpu_driver.cpp'), '-o', str(library)], check=True)
     return library

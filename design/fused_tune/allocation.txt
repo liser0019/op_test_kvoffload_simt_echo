@@ -1,0 +1,18 @@
+=== 贪心配槽结果（1 个变体取 max） ===
+  B0: counter_in0 → counter_out1 → count2 → old_cursor
+  B1: counter_in1 → counter_out2 → count3 → updated_cursor
+  B2: counter_in2 → counter_out3 → count4
+  B3: counter_in3 → counter_out4 → count5
+  B4: counter_in4 → counter_out5 → count6
+  B5: counter_in5 → counter_out6 → count7
+  B6: counter_in6 → counter_out7 → delta
+  B7: counter_in7 → count0
+  B8: score → counter_out0 → count1
+  B9: qid
+  B10: head
+  B11: uid
+
+槽位数 = 12，其中 pinned 独占 0 个
+P 峰值 = 12（峰值步骤 S3，physical_p 语义复算，含 pinned）
+→ 请用 --out 落盘物理流并交 physical_p.py 复核（P / WAR / 下界自检）
+物理流已写出：/tmp/mtp7_fused_refine_work/design/fused_tune/register_allocated.json

@@ -1,0 +1,322 @@
+{
+  "steps": [
+    {
+      "id": "I0",
+      "op": "Counter state entering iteration",
+      "inputs": [],
+      "outputs": [
+        "counter_in0"
+      ]
+    },
+    {
+      "id": "I1",
+      "op": "Counter state entering iteration",
+      "inputs": [],
+      "outputs": [
+        "counter_in1"
+      ]
+    },
+    {
+      "id": "I2",
+      "op": "Counter state entering iteration",
+      "inputs": [],
+      "outputs": [
+        "counter_in2"
+      ]
+    },
+    {
+      "id": "I3",
+      "op": "Counter state entering iteration",
+      "inputs": [],
+      "outputs": [
+        "counter_in3"
+      ]
+    },
+    {
+      "id": "I4",
+      "op": "Counter state entering iteration",
+      "inputs": [],
+      "outputs": [
+        "counter_in4"
+      ]
+    },
+    {
+      "id": "I5",
+      "op": "Counter state entering iteration",
+      "inputs": [],
+      "outputs": [
+        "counter_in5"
+      ]
+    },
+    {
+      "id": "I6",
+      "op": "Counter state entering iteration",
+      "inputs": [],
+      "outputs": [
+        "counter_in6"
+      ]
+    },
+    {
+      "id": "I7",
+      "op": "Counter state entering iteration",
+      "inputs": [],
+      "outputs": [
+        "counter_in7"
+      ]
+    },
+    {
+      "id": "S1",
+      "op": "Load record pair",
+      "inputs": [],
+      "outputs": [
+        "score",
+        "qid"
+      ]
+    },
+    {
+      "id": "S2",
+      "op": "Compare adjacent token",
+      "inputs": [
+        "score"
+      ],
+      "outputs": [
+        "head"
+      ]
+    },
+    {
+      "id": "S3",
+      "op": "Prefix and UID",
+      "inputs": [
+        "head"
+      ],
+      "outputs": [
+        "uid"
+      ]
+    },
+    {
+      "id": "S4",
+      "op": "Write unique/query map",
+      "inputs": [
+        "score",
+        "qid",
+        "uid"
+      ],
+      "outputs": []
+    },
+    {
+      "id": "C0",
+      "op": "Update cumulative counter",
+      "inputs": [
+        "counter_in0",
+        "qid"
+      ],
+      "outputs": [
+        "counter_out0"
+      ]
+    },
+    {
+      "id": "C1",
+      "op": "Update cumulative counter",
+      "inputs": [
+        "counter_in1",
+        "qid"
+      ],
+      "outputs": [
+        "counter_out1"
+      ]
+    },
+    {
+      "id": "C2",
+      "op": "Update cumulative counter",
+      "inputs": [
+        "counter_in2",
+        "qid"
+      ],
+      "outputs": [
+        "counter_out2"
+      ]
+    },
+    {
+      "id": "C3",
+      "op": "Update cumulative counter",
+      "inputs": [
+        "counter_in3",
+        "qid"
+      ],
+      "outputs": [
+        "counter_out3"
+      ]
+    },
+    {
+      "id": "C4",
+      "op": "Update cumulative counter",
+      "inputs": [
+        "counter_in4",
+        "qid"
+      ],
+      "outputs": [
+        "counter_out4"
+      ]
+    },
+    {
+      "id": "C5",
+      "op": "Update cumulative counter",
+      "inputs": [
+        "counter_in5",
+        "qid"
+      ],
+      "outputs": [
+        "counter_out5"
+      ]
+    },
+    {
+      "id": "C6",
+      "op": "Update cumulative counter",
+      "inputs": [
+        "counter_in6",
+        "qid"
+      ],
+      "outputs": [
+        "counter_out6"
+      ]
+    },
+    {
+      "id": "C7",
+      "op": "Update cumulative counter",
+      "inputs": [
+        "counter_in7",
+        "qid"
+      ],
+      "outputs": [
+        "counter_out7"
+      ]
+    },
+    {
+      "id": "R0",
+      "op": "Reduce cumulative counter",
+      "inputs": [
+        "counter_out0"
+      ],
+      "outputs": [
+        "count0"
+      ]
+    },
+    {
+      "id": "R1",
+      "op": "Reduce cumulative counter",
+      "inputs": [
+        "counter_out1"
+      ],
+      "outputs": [
+        "count1"
+      ]
+    },
+    {
+      "id": "R2",
+      "op": "Reduce cumulative counter",
+      "inputs": [
+        "counter_out2"
+      ],
+      "outputs": [
+        "count2"
+      ]
+    },
+    {
+      "id": "R3",
+      "op": "Reduce cumulative counter",
+      "inputs": [
+        "counter_out3"
+      ],
+      "outputs": [
+        "count3"
+      ]
+    },
+    {
+      "id": "R4",
+      "op": "Reduce cumulative counter",
+      "inputs": [
+        "counter_out4"
+      ],
+      "outputs": [
+        "count4"
+      ]
+    },
+    {
+      "id": "R5",
+      "op": "Reduce cumulative counter",
+      "inputs": [
+        "counter_out5"
+      ],
+      "outputs": [
+        "count5"
+      ]
+    },
+    {
+      "id": "R6",
+      "op": "Reduce cumulative counter",
+      "inputs": [
+        "counter_out6"
+      ],
+      "outputs": [
+        "count6"
+      ]
+    },
+    {
+      "id": "R7",
+      "op": "Reduce cumulative counter",
+      "inputs": [
+        "counter_out7"
+      ],
+      "outputs": [
+        "count7"
+      ]
+    },
+    {
+      "id": "S7",
+      "op": "Known-count merge and difference",
+      "inputs": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "count7"
+      ],
+      "outputs": [
+        "delta"
+      ]
+    },
+    {
+      "id": "S8",
+      "op": "Read old cursor",
+      "inputs": [],
+      "outputs": [
+        "old_cursor"
+      ]
+    },
+    {
+      "id": "S9",
+      "op": "Apply deltas",
+      "inputs": [
+        "old_cursor",
+        "delta"
+      ],
+      "outputs": [
+        "updated_cursor"
+      ]
+    },
+    {
+      "id": "S10",
+      "op": "Write cursor and more",
+      "inputs": [
+        "updated_cursor"
+      ],
+      "outputs": []
+    }
+  ],
+  "pinned": [],
+  "excluded": [],
+  "exclusive_branches": []
+}

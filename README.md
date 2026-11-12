@@ -429,3 +429,7 @@ PC样本比例不是精确阶段周期占比；SIMT VF也不能承诺通过Instr
 ## MTP7中间去重与融合统计三路短测
 
 新增 `joint_mtp7_mid_unique_512`（四路中间结果先去重）和 `joint_mtp7_fused_count_512`（消费统计并入SIMD去重），与冻结 `joint_mtp7_reuse_parallel_512` 独立三路对照。512线程、32位映射、612条/路和181024字节生产动态UB不变。默认28请求、MTP0/1/3/7、冷/满缓存75%标签场景，共120个正式样本；一次构建→一次门禁→一次采集，无历史大矩阵。入口 `scripts/test_mtp7_merge_unique.sh`。实现、缓冲生命周期、服务器命令与验证边界见[中文说明](docs/MTP7中间去重与融合统计对照.md)。本机未执行CANN/NPU验证。
+
+## FUSED继续优化：A/B/C与七种组合
+
+以已实测FUSED为冻结对照，增加A硬件完整中间块计数复用、B连续解交织加载、C精简计数及批量游标，构建A/B/C/AB/AC/BC/ABC七条独立候选。DCCI构建修复、512线程、181024B生产动态UB及原状态协议不变。入口 `scripts/test_mtp7_fused_tune.sh`，默认28请求、MTP0/1/3/7、冷/满缓存标签场景，共320个正式目标样本，一轮构建/门禁/采集。详见[中文教程与服务器命令](docs/MTP7_FUSED三因素优化与一轮测试.md)。本机未做CANN/NPU验证。

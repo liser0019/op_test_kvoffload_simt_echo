@@ -1,0 +1,1037 @@
+{
+  "value": 12,
+  "peak_step": "S3",
+  "mode": "L",
+  "pinned": [],
+  "trace": [
+    {
+      "id": "I0",
+      "op": "Counter state entering iteration",
+      "before": [],
+      "during": [
+        "counter_in0"
+      ],
+      "after": [
+        "counter_in0"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I1",
+      "op": "Counter state entering iteration",
+      "before": [
+        "counter_in0"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I2",
+      "op": "Counter state entering iteration",
+      "before": [
+        "counter_in0",
+        "counter_in1"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I3",
+      "op": "Counter state entering iteration",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I4",
+      "op": "Counter state entering iteration",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I5",
+      "op": "Counter state entering iteration",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I6",
+      "op": "Counter state entering iteration",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I7",
+      "op": "Counter state entering iteration",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S1",
+      "op": "Load record pair",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "qid",
+        "score"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "qid",
+        "score"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S2",
+      "op": "Compare adjacent token",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "qid",
+        "score"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "head",
+        "qid",
+        "score"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "head",
+        "qid",
+        "score"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S3",
+      "op": "Prefix and UID",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "head",
+        "qid",
+        "score"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "head",
+        "qid",
+        "score",
+        "uid"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "qid",
+        "score",
+        "uid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S4",
+      "op": "Write unique/query map",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "qid",
+        "score",
+        "uid"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "qid",
+        "score",
+        "uid"
+      ],
+      "after": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "qid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C0",
+      "op": "Update cumulative counter",
+      "before": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "qid"
+      ],
+      "during": [
+        "counter_in0",
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "qid"
+      ],
+      "after": [
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "qid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C1",
+      "op": "Update cumulative counter",
+      "before": [
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "qid"
+      ],
+      "during": [
+        "counter_in1",
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "qid"
+      ],
+      "after": [
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "qid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C2",
+      "op": "Update cumulative counter",
+      "before": [
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "qid"
+      ],
+      "during": [
+        "counter_in2",
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "qid"
+      ],
+      "after": [
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "qid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C3",
+      "op": "Update cumulative counter",
+      "before": [
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "qid"
+      ],
+      "during": [
+        "counter_in3",
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "qid"
+      ],
+      "after": [
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "qid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C4",
+      "op": "Update cumulative counter",
+      "before": [
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "qid"
+      ],
+      "during": [
+        "counter_in4",
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "qid"
+      ],
+      "after": [
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "qid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C5",
+      "op": "Update cumulative counter",
+      "before": [
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "qid"
+      ],
+      "during": [
+        "counter_in5",
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "qid"
+      ],
+      "after": [
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "qid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C6",
+      "op": "Update cumulative counter",
+      "before": [
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "qid"
+      ],
+      "during": [
+        "counter_in6",
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "qid"
+      ],
+      "after": [
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "qid"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C7",
+      "op": "Update cumulative counter",
+      "before": [
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "qid"
+      ],
+      "during": [
+        "counter_in7",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7",
+        "qid"
+      ],
+      "after": [
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R0",
+      "op": "Reduce cumulative counter",
+      "before": [
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "during": [
+        "count0",
+        "counter_out0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "after": [
+        "count0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R1",
+      "op": "Reduce cumulative counter",
+      "before": [
+        "count0",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "during": [
+        "count0",
+        "count1",
+        "counter_out1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "after": [
+        "count0",
+        "count1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R2",
+      "op": "Reduce cumulative counter",
+      "before": [
+        "count0",
+        "count1",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "during": [
+        "count0",
+        "count1",
+        "count2",
+        "counter_out2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "after": [
+        "count0",
+        "count1",
+        "count2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R3",
+      "op": "Reduce cumulative counter",
+      "before": [
+        "count0",
+        "count1",
+        "count2",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "during": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "counter_out3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "after": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R4",
+      "op": "Reduce cumulative counter",
+      "before": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "during": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "counter_out4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "after": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R5",
+      "op": "Reduce cumulative counter",
+      "before": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "during": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "counter_out5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "after": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R6",
+      "op": "Reduce cumulative counter",
+      "before": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "during": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "counter_out6",
+        "counter_out7"
+      ],
+      "after": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "counter_out7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R7",
+      "op": "Reduce cumulative counter",
+      "before": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "counter_out7"
+      ],
+      "during": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "count7",
+        "counter_out7"
+      ],
+      "after": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "count7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S7",
+      "op": "Known-count merge and difference",
+      "before": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "count7"
+      ],
+      "during": [
+        "count0",
+        "count1",
+        "count2",
+        "count3",
+        "count4",
+        "count5",
+        "count6",
+        "count7",
+        "delta"
+      ],
+      "after": [
+        "delta"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S8",
+      "op": "Read old cursor",
+      "before": [
+        "delta"
+      ],
+      "during": [
+        "delta",
+        "old_cursor"
+      ],
+      "after": [
+        "delta",
+        "old_cursor"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S9",
+      "op": "Apply deltas",
+      "before": [
+        "delta",
+        "old_cursor"
+      ],
+      "during": [
+        "delta",
+        "old_cursor",
+        "updated_cursor"
+      ],
+      "after": [
+        "updated_cursor"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S10",
+      "op": "Write cursor and more",
+      "before": [
+        "updated_cursor"
+      ],
+      "during": [
+        "updated_cursor"
+      ],
+      "after": [],
+      "pinned": []
+    }
+  ]
+}

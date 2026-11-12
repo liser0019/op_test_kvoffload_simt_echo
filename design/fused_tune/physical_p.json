@@ -1,0 +1,1044 @@
+{
+  "P": 12,
+  "peak_step": "S3",
+  "warnings": [],
+  "lower_bound_check": {
+    "P": 12,
+    "inputs": 3,
+    "outputs": 0,
+    "bound": 3,
+    "triggered": false,
+    "message": "通过（P=12 ≥ 输入3+输出0=3）"
+  },
+  "trace": [
+    {
+      "id": "I0",
+      "op": "Counter state entering iteration → B0",
+      "before": [],
+      "during": [
+        "B0"
+      ],
+      "after": [
+        "B0"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I1",
+      "op": "Counter state entering iteration → B1",
+      "before": [
+        "B0"
+      ],
+      "during": [
+        "B0",
+        "B1"
+      ],
+      "after": [
+        "B0",
+        "B1"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I2",
+      "op": "Counter state entering iteration → B2",
+      "before": [
+        "B0",
+        "B1"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I3",
+      "op": "Counter state entering iteration → B3",
+      "before": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I4",
+      "op": "Counter state entering iteration → B4",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I5",
+      "op": "Counter state entering iteration → B5",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I6",
+      "op": "Counter state entering iteration → B6",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "I7",
+      "op": "Counter state entering iteration → B7",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S1",
+      "op": "Load record pair → B8,B9",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S2",
+      "op": "Compare adjacent token → B10",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B10",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B10",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S3",
+      "op": "Prefix and UID → B11",
+      "before": [
+        "B0",
+        "B1",
+        "B10",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B10",
+        "B11",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B11",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S4",
+      "op": "Write unique/query map",
+      "before": [
+        "B0",
+        "B1",
+        "B11",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B11",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C0",
+      "op": "Update cumulative counter → B8",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C1",
+      "op": "Update cumulative counter → B0",
+      "before": [
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C2",
+      "op": "Update cumulative counter → B1",
+      "before": [
+        "B0",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C3",
+      "op": "Update cumulative counter → B2",
+      "before": [
+        "B0",
+        "B1",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C4",
+      "op": "Update cumulative counter → B3",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C5",
+      "op": "Update cumulative counter → B4",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C6",
+      "op": "Update cumulative counter → B5",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "C7",
+      "op": "Update cumulative counter → B6",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B8"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R0",
+      "op": "Reduce cumulative counter → B7",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B8"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R1",
+      "op": "Reduce cumulative counter → B8",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R2",
+      "op": "Reduce cumulative counter → B0",
+      "before": [
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B0",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R3",
+      "op": "Reduce cumulative counter → B1",
+      "before": [
+        "B0",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R4",
+      "op": "Reduce cumulative counter → B2",
+      "before": [
+        "B0",
+        "B1",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R5",
+      "op": "Reduce cumulative counter → B3",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R6",
+      "op": "Reduce cumulative counter → B4",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "R7",
+      "op": "Reduce cumulative counter → B5",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B7",
+        "B8"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S7",
+      "op": "Known-count merge and difference → B6",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B7",
+        "B8"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8"
+      ],
+      "after": [
+        "B6"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S8",
+      "op": "Read old cursor → B0",
+      "before": [
+        "B6"
+      ],
+      "during": [
+        "B0",
+        "B6"
+      ],
+      "after": [
+        "B0",
+        "B6"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S9",
+      "op": "Apply deltas → B1",
+      "before": [
+        "B0",
+        "B6"
+      ],
+      "during": [
+        "B0",
+        "B1",
+        "B6"
+      ],
+      "after": [
+        "B1"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "S10",
+      "op": "Write cursor and more",
+      "before": [
+        "B1"
+      ],
+      "during": [
+        "B1"
+      ],
+      "after": [],
+      "pinned": []
+    }
+  ]
+}

@@ -1,0 +1,326 @@
+{
+  "inputs": [
+    "score",
+    "qid",
+    "old_cursor"
+  ],
+  "outputs": [],
+  "pinned": [],
+  "steps": [
+    {
+      "id": "I0",
+      "op": "Counter state entering iteration → B0",
+      "reads": [],
+      "writes": [
+        "B0"
+      ]
+    },
+    {
+      "id": "I1",
+      "op": "Counter state entering iteration → B1",
+      "reads": [],
+      "writes": [
+        "B1"
+      ]
+    },
+    {
+      "id": "I2",
+      "op": "Counter state entering iteration → B2",
+      "reads": [],
+      "writes": [
+        "B2"
+      ]
+    },
+    {
+      "id": "I3",
+      "op": "Counter state entering iteration → B3",
+      "reads": [],
+      "writes": [
+        "B3"
+      ]
+    },
+    {
+      "id": "I4",
+      "op": "Counter state entering iteration → B4",
+      "reads": [],
+      "writes": [
+        "B4"
+      ]
+    },
+    {
+      "id": "I5",
+      "op": "Counter state entering iteration → B5",
+      "reads": [],
+      "writes": [
+        "B5"
+      ]
+    },
+    {
+      "id": "I6",
+      "op": "Counter state entering iteration → B6",
+      "reads": [],
+      "writes": [
+        "B6"
+      ]
+    },
+    {
+      "id": "I7",
+      "op": "Counter state entering iteration → B7",
+      "reads": [],
+      "writes": [
+        "B7"
+      ]
+    },
+    {
+      "id": "S1",
+      "op": "Load record pair → B8,B9",
+      "reads": [],
+      "writes": [
+        "B8",
+        "B9"
+      ]
+    },
+    {
+      "id": "S2",
+      "op": "Compare adjacent token → B10",
+      "reads": [
+        "B8"
+      ],
+      "writes": [
+        "B10"
+      ]
+    },
+    {
+      "id": "S3",
+      "op": "Prefix and UID → B11",
+      "reads": [
+        "B10"
+      ],
+      "writes": [
+        "B11"
+      ]
+    },
+    {
+      "id": "S4",
+      "op": "Write unique/query map",
+      "reads": [
+        "B8",
+        "B9",
+        "B11"
+      ],
+      "writes": []
+    },
+    {
+      "id": "C0",
+      "op": "Update cumulative counter → B8",
+      "reads": [
+        "B0",
+        "B9"
+      ],
+      "writes": [
+        "B8"
+      ]
+    },
+    {
+      "id": "C1",
+      "op": "Update cumulative counter → B0",
+      "reads": [
+        "B1",
+        "B9"
+      ],
+      "writes": [
+        "B0"
+      ]
+    },
+    {
+      "id": "C2",
+      "op": "Update cumulative counter → B1",
+      "reads": [
+        "B2",
+        "B9"
+      ],
+      "writes": [
+        "B1"
+      ]
+    },
+    {
+      "id": "C3",
+      "op": "Update cumulative counter → B2",
+      "reads": [
+        "B3",
+        "B9"
+      ],
+      "writes": [
+        "B2"
+      ]
+    },
+    {
+      "id": "C4",
+      "op": "Update cumulative counter → B3",
+      "reads": [
+        "B4",
+        "B9"
+      ],
+      "writes": [
+        "B3"
+      ]
+    },
+    {
+      "id": "C5",
+      "op": "Update cumulative counter → B4",
+      "reads": [
+        "B5",
+        "B9"
+      ],
+      "writes": [
+        "B4"
+      ]
+    },
+    {
+      "id": "C6",
+      "op": "Update cumulative counter → B5",
+      "reads": [
+        "B6",
+        "B9"
+      ],
+      "writes": [
+        "B5"
+      ]
+    },
+    {
+      "id": "C7",
+      "op": "Update cumulative counter → B6",
+      "reads": [
+        "B7",
+        "B9"
+      ],
+      "writes": [
+        "B6"
+      ]
+    },
+    {
+      "id": "R0",
+      "op": "Reduce cumulative counter → B7",
+      "reads": [
+        "B8"
+      ],
+      "writes": [
+        "B7"
+      ]
+    },
+    {
+      "id": "R1",
+      "op": "Reduce cumulative counter → B8",
+      "reads": [
+        "B0"
+      ],
+      "writes": [
+        "B8"
+      ]
+    },
+    {
+      "id": "R2",
+      "op": "Reduce cumulative counter → B0",
+      "reads": [
+        "B1"
+      ],
+      "writes": [
+        "B0"
+      ]
+    },
+    {
+      "id": "R3",
+      "op": "Reduce cumulative counter → B1",
+      "reads": [
+        "B2"
+      ],
+      "writes": [
+        "B1"
+      ]
+    },
+    {
+      "id": "R4",
+      "op": "Reduce cumulative counter → B2",
+      "reads": [
+        "B3"
+      ],
+      "writes": [
+        "B2"
+      ]
+    },
+    {
+      "id": "R5",
+      "op": "Reduce cumulative counter → B3",
+      "reads": [
+        "B4"
+      ],
+      "writes": [
+        "B3"
+      ]
+    },
+    {
+      "id": "R6",
+      "op": "Reduce cumulative counter → B4",
+      "reads": [
+        "B5"
+      ],
+      "writes": [
+        "B4"
+      ]
+    },
+    {
+      "id": "R7",
+      "op": "Reduce cumulative counter → B5",
+      "reads": [
+        "B6"
+      ],
+      "writes": [
+        "B5"
+      ]
+    },
+    {
+      "id": "S7",
+      "op": "Known-count merge and difference → B6",
+      "reads": [
+        "B7",
+        "B8",
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "writes": [
+        "B6"
+      ]
+    },
+    {
+      "id": "S8",
+      "op": "Read old cursor → B0",
+      "reads": [],
+      "writes": [
+        "B0"
+      ]
+    },
+    {
+      "id": "S9",
+      "op": "Apply deltas → B1",
+      "reads": [
+        "B0",
+        "B6"
+      ],
+      "writes": [
+        "B1"
+      ]
+    },
+    {
+      "id": "S10",
+      "op": "Write cursor and more",
+      "reads": [
+        "B1"
+      ],
+      "writes": []
+    }
+  ]
+}

@@ -11,7 +11,7 @@ from checks.check_joint_plan import context_gate
 from harness_io import preflight_args,write_json,record_failure,diagnostic_log,capture_error
 from fixed_plan_check import exact_workload_key
 from profile_joint_mtp import capture,mtp_comparison
-from joint_variants import MTP7_PACK_NAMES,MTP7_PREFIX_NAMES,MTP7_MERGE_NAMES
+from joint_variants import MTP7_PACK_NAMES,MTP7_PREFIX_NAMES,MTP7_MERGE_NAMES,MTP7_FUSED_TUNE_NAMES
 ROOT=Path(__file__).resolve().parent
 NAMES=('abcdf_pages','joint_hot_bd_512','joint_hot_bd8_512')
 FIX_NAMES=('abcdf_pages','joint_hot_bd8_512','joint_mtp7_parallel_512','joint_mtp7_rank_512')
@@ -19,6 +19,7 @@ PACK_NAMES=(*FIX_NAMES,*MTP7_PACK_NAMES)
 PEER_NAMES=('abcdf_pages','joint_mtp7_reuse_parallel_512','peer_qli_plan')
 PREFIX_NAMES=('joint_mtp7_reuse_parallel_512',*MTP7_PREFIX_NAMES)
 MERGE_UNIQUE_NAMES=('joint_mtp7_reuse_parallel_512',*MTP7_MERGE_NAMES)
+FUSED_TUNE_NAMES=('joint_mtp7_fused_count_512',*MTP7_FUSED_TUNE_NAMES)
 
 
 def workload_cases(a):
@@ -41,7 +42,7 @@ def gate(torch,a,workloads,environment,destination):
             finally:common.close(b)
         print('专项门禁:',label,'通过',flush=True)
     fixed('known_input_write',sort_topk(make_case(a.requests,2048,4096,262144,1,'full_cache_75pct','shared')),a.regression_repeat)
-    for label,c in cases(include_extreme=a.suite in ('mtp7_fix','mtp7_pack','peer','prefix','merge_unique'),include_prefix=a.suite in ('prefix','merge_unique')):fixed(label,c,1)
+    for label,c in cases(include_extreme=a.suite in ('mtp7_fix','mtp7_pack','peer','prefix','merge_unique','fused_tune'),include_prefix=a.suite in ('prefix','merge_unique','fused_tune')):fixed(label,c,1)
     continuous=[]
     for n in a.implementations:
         start=next(transitions())[1];b=common.prepare(torch,start,n)
@@ -97,7 +98,28 @@ def merge_unique_report_text(report):
     return text
 
 
+def fused_tune_report_text(report):
+    base='joint_mtp7_fused_count_512'
+    lines=['# FUSED A/B/C七组合：独立正式计时','',
+        'A=完整八路时复用最终完整接收的中间块硬件分项计数；B=完整64记录块解交织加载；C=末累计计数推导及批量游标更新。',
+        '冻结FUSED与七个组合均512线程、32位映射、612条/路、生产动态UB181024B。只测设备Plan kernel Duration，单位μs。',
+        '无初筛；全部八路正式采样。不启用MID、安全前缀或16位映射。仅8行两级归并路径启用新增优化。','',
+        '| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 实现/FUSED | 耗时下降 | 共享/回退 | descriptor数 | Block Num |',
+        '|---|---|---|---:|---:|---:|---|---:|---|']
+    for run in report['runs']:
+        w=run['workload'];reference=run['stats'][base]['p50_us']
+        for name,s in run['stats'].items():
+            c=s['correctness'];ratio=s['p50_us']/reference
+            lines.append(f"| {w['scenario']}/MTP{w['mtp']} | {name} | {s['p50_us']:.3f}/{s['p95_us']:.3f} | {s['count']} | {ratio:.3f} | {(1-ratio)*100:.1f}% | {c.get('joint_groups',0)}/{c.get('overflow_groups',0)} | {c['total_transfer_descriptors']} | {','.join(s.get('block_nums',[])) or 'CSV未导出'} |")
+    lines+=['','所有比值为候选P50/本轮冻结FUSED P50，小于1更快；不按工况拼接赢家。',
+        '每个样本恢复相同初态并完整检查输入/状态/输出/保护区。固定地址预热，不代表冷硬件缓存。',
+        '各实现相对自身MTP0、原始CSV、样本顺序及源码/库/设备身份见capture_metadata.json/data_index.json。未测Transfer/SFA。']
+    return '\n'.join(lines)+'\n'
+
+
 def report_text(report):
+    if report.get('suite')=='fused_tune' or tuple(report['implementations'])==FUSED_TUNE_NAMES:
+        return fused_tune_report_text(report)
     if all(name in report['implementations'] for name in MTP7_MERGE_NAMES):
         return merge_unique_report_text(report)
     if all(name in report['implementations'] for name in MTP7_PREFIX_NAMES):
@@ -131,7 +153,7 @@ def report_text(report):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);common.add_runtime_arguments(p);p.set_defaults(device=0,temp_dir=None)
-    p.add_argument('--suite',choices=('mtp8','mtp7_fix','mtp7_pack','peer','prefix','merge_unique'),default='mtp8')
+    p.add_argument('--suite',choices=('mtp8','mtp7_fix','mtp7_pack','peer','prefix','merge_unique','fused_tune'),default='mtp8')
     p.add_argument('--output',type=Path,required=True);p.add_argument('--skip-build',action='store_true')
     p.add_argument('--describe-only',action='store_true');p.add_argument('--formal',action='store_true')
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7])
@@ -144,8 +166,8 @@ def main():
     a.repeat=(50 if a.formal else 5) if a.repeat is None else a.repeat
     if a.warmup<0 or min(a.repeat,a.regression_repeat,a.requests)<=0 or 0 not in a.mtp:p.error('positive counts, warmup>=0, MTP list must include0')
     if len(set(a.mtp))!=len(a.mtp) or len(set(a.scenarios))!=len(a.scenarios):p.error('duplicate scenarios/MTP')
-    a.implementations=MERGE_UNIQUE_NAMES if a.suite=='merge_unique' else PREFIX_NAMES if a.suite=='prefix' else PEER_NAMES if a.suite=='peer' else PACK_NAMES if a.suite=='mtp7_pack' else FIX_NAMES if a.suite=='mtp7_fix' else NAMES
-    a.build_flag='--merge-unique-only' if a.suite=='merge_unique' else '--prefix-only' if a.suite=='prefix' else '--peer-only' if a.suite=='peer' else '--mtp7-pack-only' if a.suite=='mtp7_pack' else '--mtp7-fix-only' if a.suite=='mtp7_fix' else '--mtp8-only'
+    a.implementations=FUSED_TUNE_NAMES if a.suite=='fused_tune' else MERGE_UNIQUE_NAMES if a.suite=='merge_unique' else PREFIX_NAMES if a.suite=='prefix' else PEER_NAMES if a.suite=='peer' else PACK_NAMES if a.suite=='mtp7_pack' else FIX_NAMES if a.suite=='mtp7_fix' else NAMES
+    a.build_flag='--fused-tune-only' if a.suite=='fused_tune' else '--merge-unique-only' if a.suite=='merge_unique' else '--prefix-only' if a.suite=='prefix' else '--peer-only' if a.suite=='peer' else '--mtp7-pack-only' if a.suite=='mtp7_pack' else '--mtp7-fix-only' if a.suite=='mtp7_fix' else '--mtp8-only'
     workloads=workload_cases(a)
     if a.describe_only:
         print(json.dumps({'implementations':a.implementations,'mtp':a.mtp,'workloads':[describe(c) for c in workloads],
@@ -189,14 +211,14 @@ def main():
         report['wall_seconds']=state['wall_seconds'];report['status']='complete'
         write_json(metadata,report)
         write_json(a.output/'data_index.json',{'runs':[{'workload':r['workload'],'raw_csv':r['raw_csv'],'target_samples':r['target_samples']} for r in report['runs']]})
-        text=report_text(report)+'\n## 本轮说明\n\n'+('旧BD在MTP7只作逐行回退对照。\n' if a.suite=='mtp8' else '同场比较独立ABCDF、reuse_parallel与同事独立Plan。\n' if a.suite=='peer' else 'MID保留完整query→MID→union映射；未消费的临时映射恢复-1，消费游标按原始query数推进。FUSED用SIMD累计行计数并在包末归约。两路不启用安全前缀或16位映射；同预算/同输入，性能只看本轮CSV。\n' if a.suite=='merge_unique' else 'A=安全消费前缀，跳过事后消费统计；B=8行组16位UID映射，归并包由612扩至816条/路。四路均512线程，生产动态UB同为181024B；兼容回退未改。\n' if a.suite=='prefix' else 'A=512线程并行消费统计；B=并行rank归并+融合消费统计；reuse=缓冲复用；tile=每线程分段归并。与上轮BD8同UB预算/同输入；性能结论仅依据本轮CSV。兼容回退未改。\n')+'所有联合实现都需查看共享/回退数量，不能把容量溢出回退当成联合执行。\n'
+        text=report_text(report)+'\n## 本轮说明\n\n'+('旧BD在MTP7只作逐行回退对照。\n' if a.suite=='mtp8' else '同场比较独立ABCDF、reuse_parallel与同事独立Plan。\n' if a.suite=='peer' else 'A只复用整块完整接收的分项计数；不足八路有效源保留原FUSED计数。B尾块保留带掩码Gather；C不更改持久状态协议及尾部约定。\n' if a.suite=='fused_tune' else 'MID保留完整query→MID→union映射；未消费的临时映射恢复-1，消费游标按原始query数推进。FUSED用SIMD累计行计数并在包末归约。两路不启用安全前缀或16位映射；同预算/同输入，性能只看本轮CSV。\n' if a.suite=='merge_unique' else 'A=安全消费前缀，跳过事后消费统计；B=8行组16位UID映射，归并包由612扩至816条/路。四路均512线程，生产动态UB同为181024B；兼容回退未改。\n' if a.suite=='prefix' else 'A=512线程并行消费统计；B=并行rank归并+融合消费统计；reuse=缓冲复用；tile=每线程分段归并。与上轮BD8同UB预算/同输入；性能结论仅依据本轮CSV。兼容回退未改。\n')+'所有联合实现都需查看共享/回退数量，不能把容量溢出回退当成联合执行。\n'
         if a.suite=='peer':
             text+='\npeer_qli_plan为同事分支收录的独立Plan；读取共同GM升序TopK。QLI/TopK生成和融合producer调度不在本轮范围。上游保留112KiB scratch门槛，UB/GM路径见metadata。\n'
         text+='\n阶段墙钟秒数：'+json.dumps(state['wall_seconds'],ensure_ascii=False)+'\n'
         text+='\n每工况的恢复、校验、首次参考认证、缓存命中、采集循环及profiler导出解析耗时见metadata；这些不是设备kernel耗时。\n'
         (a.output/'report.md').write_text(text)
         state['status']='complete';write_json(status,state);write_json(a.output/'COMPLETE.json',{'status':'complete','metadata':str(metadata)})
-        print(('===== MTP7_MERGE_UNIQUE_ALL_STAGES_PASSED =====' if a.suite=='merge_unique' else '===== MTP7_PREFIX_ALL_STAGES_PASSED =====' if a.suite=='prefix' else '===== PEER_PLAN_ALL_STAGES_PASSED =====' if a.suite=='peer' else '===== MTP7_SWEEP_ALL_STAGES_PASSED =====' if a.suite=='mtp7_pack' else '===== MTP7_FIX_ALL_STAGES_PASSED =====' if a.suite=='mtp7_fix' else '===== MTP8_ALL_STAGES_PASSED =====')+'\n报告:',a.output/'report.md',flush=True)
+        print(('===== MTP7_FUSED_TUNE_ALL_STAGES_PASSED =====' if a.suite=='fused_tune' else '===== MTP7_MERGE_UNIQUE_ALL_STAGES_PASSED =====' if a.suite=='merge_unique' else '===== MTP7_PREFIX_ALL_STAGES_PASSED =====' if a.suite=='prefix' else '===== PEER_PLAN_ALL_STAGES_PASSED =====' if a.suite=='peer' else '===== MTP7_SWEEP_ALL_STAGES_PASSED =====' if a.suite=='mtp7_pack' else '===== MTP7_FIX_ALL_STAGES_PASSED =====' if a.suite=='mtp7_fix' else '===== MTP8_ALL_STAGES_PASSED =====')+'\n报告:',a.output/'report.md',flush=True)
       except BaseException as exc:
         record_failure(status,state,exc)
         print(capture_error(a.output,log,exc),file=sys.stderr,flush=True)

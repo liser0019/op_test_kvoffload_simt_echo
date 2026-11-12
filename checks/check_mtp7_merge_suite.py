@@ -23,7 +23,7 @@ class Checks(unittest.TestCase):
                 self.assertEqual(description('joint_'+name)['threads'],512)
         cmake=(ROOT/'joint_plan/CMakeLists.txt').read_text()
         self.assertIn('"${JOINT_VARIANT_DIR}/mtp7_merge_unique.h"',cmake)
-        self.assertIn('if(JOINT_MERGE_UNIQUE_ONLY OR JOINT_PREFIX_ONLY',cmake)
+        self.assertIn('JOINT_MERGE_UNIQUE_ONLY OR JOINT_PREFIX_ONLY',cmake)
 
     def test_frozen196_unchanged(self):
         manifest=json.loads((ROOT/'joint_plan_manifest.json').read_text())
