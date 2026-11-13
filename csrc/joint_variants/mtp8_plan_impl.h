@@ -11,9 +11,16 @@
 #define JOINT_MTP7_TILE 0
 #endif
 static_assert(JOINT_MTP7_OPT>=0 && JOINT_MTP7_OPT<=2,"MTP7 candidate selector");
+#if JOINT_MTP7_CAPACITY8K
+// Capacity8192 adapter only. No algorithm or thread-layout change.
+constexpr uint64_t EIGHT_UB_WORDS=196U*1024U/4U;
+constexpr uint32_t EIGHT_CTX=128U;
+static_assert(196U*1024U+288U+8U*1024U+32U*1024U<=256U*1024U,"reserve compiler area and minimum DCache");
+#else
 constexpr uint64_t EIGHT_UB_WORDS=192U*1024U/4U;
 constexpr uint32_t EIGHT_CTX=128U;
 static_assert(192U*1024U+288U+8U*1024U+32U*1024U<=256U*1024U,"reserve compiler area and minimum DCache");
+#endif
 static_assert(JOINT_HOT_BITS>=0 && JOINT_HOT_BITS<32,"hot factor bits");
 constexpr bool HOT_FILTER=(JOINT_HOT_BITS&1U)!=0;
 constexpr bool HOT_PART=(JOINT_HOT_BITS&2U)!=0 || JOINT_HOT_PART_ONLY;

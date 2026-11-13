@@ -11,7 +11,7 @@ from checks.check_joint_plan import context_gate
 from harness_io import preflight_args,write_json,record_failure,diagnostic_log,capture_error
 from fixed_plan_check import exact_workload_key
 from profile_joint_mtp import capture,mtp_comparison
-from joint_variants import MTP7_PACK_NAMES,MTP7_PREFIX_NAMES,MTP7_MERGE_NAMES,MTP7_FUSED_TUNE_NAMES
+from joint_variants import MTP7_PACK_NAMES,MTP7_PREFIX_NAMES,MTP7_MERGE_NAMES,MTP7_FUSED_TUNE_NAMES,CAPACITY8K_NAMES
 ROOT=Path(__file__).resolve().parent
 NAMES=('abcdf_pages','joint_hot_bd_512','joint_hot_bd8_512')
 FIX_NAMES=('abcdf_pages','joint_hot_bd8_512','joint_mtp7_parallel_512','joint_mtp7_rank_512')
@@ -23,7 +23,8 @@ FUSED_TUNE_NAMES=('joint_mtp7_fused_count_512',*MTP7_FUSED_TUNE_NAMES)
 
 
 def workload_cases(a):
-    return [sort_topk(make_case(a.requests,a.topk,a.capacity,a.max_token,m,s,'overlap40',2026,64))
+    extra={"history_pool_tokens":a.query_pool_tokens} if a.suite=="capacity8k" else {}
+    return [sort_topk(make_case(a.requests,a.topk,a.capacity,a.max_token,m,s,'overlap40',2026,64,**extra))
             for s in a.scenarios for m in a.mtp]
 
 
@@ -43,6 +44,9 @@ def gate(torch,a,workloads,environment,destination):
         print('专项门禁:',label,'通过',flush=True)
     fixed('known_input_write',sort_topk(make_case(a.requests,2048,4096,262144,1,'full_cache_75pct','shared')),a.regression_repeat)
     for label,c in cases(include_extreme=a.suite in ('mtp7_fix','mtp7_pack','peer','prefix','merge_unique','fused_tune'),include_prefix=a.suite in ('prefix','merge_unique','fused_tune')):fixed(label,c,1)
+    if a.suite=='capacity8k':
+        from checks.capacity8k_cases import capacity_cases
+        for label,c in capacity_cases():fixed(label,c,1)
     continuous=[]
     for n in a.implementations:
         start=next(transitions())[1];b=common.prepare(torch,start,n)
@@ -55,10 +59,24 @@ def gate(torch,a,workloads,environment,destination):
                 except BaseException:common.dump_failure(c,b,failed);raise
                 continuous.append({'case':label,'implementation':n,'audit':r})
         finally:common.close(b)
+    if a.suite=='capacity8k':
+        from checks.capacity8k_cases import capacity_transitions
+        for n in a.implementations:
+            start=next(capacity_transitions())[1];b=common.prepare(torch,start,n)
+            try:
+                for label,c in capacity_transitions():
+                    common.update_inputs(torch,b,c);common.poison(b);torch.npu.synchronize()
+                    before=common.snapshot(b);b['phase']=label
+                    try:
+                        common.invoke(b);torch.npu.synchronize();r=common.check(c,b,before)
+                    except BaseException:common.dump_failure(c,b,failed);raise
+                    continuous.append({'case':label,'implementation':n,'audit':r})
+            finally:common.close(b)
     for c in workloads:fixed(f"performance/{c['scenario']}/mtp{c['mtp']}",c,a.regression_repeat)
     result={'status':'passed','environment':environment,'gate':{'status':'passed','implementations':list(a.implementations),
         'validation_scope':'mtp8_v1: exact8 group + packet seams + duplicate/causality + capacity fallback +10-step actual continuations',
         'input_write_regression':{'status':'passed','checked_iterations':a.regression_repeat,'per_implementation':regression,'input_restore':False},
+        'capacity8k_boundary':'passed' if a.suite=='capacity8k' else None,
         'cases':records,'continuous':continuous,'context':context_gate(torch,a.implementations)},'exact_workloads':evidence}
     write_json(destination/'gate.json',result)
     return result
@@ -117,7 +135,28 @@ def fused_tune_report_text(report):
     return '\n'.join(lines)+'\n'
 
 
+def capacity8k_report_text(report):
+    base=CAPACITY8K_NAMES[0]
+    lines=['# capacity8192：FUSED参考与AB候选同场对照','',
+        '两路均为8K适配版：只放宽指定形状的scratch预算至196KiB；总动态UB197408B。原提交原样拒绝8K，不能提供原样8K延时。',
+        '参考沿用FUSED计算；候选沿用AB计算。512线程、32位映射、612条/源、完整尾部及回退协议不变。',
+        '仅设备Plan kernel Duration（含归并），单位μs；不含Transfer/SFA。所有候选使用同一输入和初态，逐样本完整校验。',
+        '75%仅标记首行名义命中率；后续draft实际命中率、并集大小及每行miss见metadata。','',
+        '| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 实现/FUSED8K | 耗时下降 | 共享/回退 | descriptor数 | Block Num |',
+        '|---|---|---|---:|---:|---:|---|---:|---|']
+    for run in report['runs']:
+        w=run['workload'];reference=run['stats'][base]['p50_us']
+        for name,stats in run['stats'].items():
+            check=stats['correctness'];ratio=stats['p50_us']/reference
+            lines.append(f"| {w['scenario']}/MTP{w['mtp']} | {name} | {stats['p50_us']:.3f}/{stats['p95_us']:.3f} | {stats['count']} | {ratio:.3f} | {(1-ratio)*100:.1f}% | {check.get('joint_groups',0)}/{check.get('overflow_groups',0)} | {check['total_transfer_descriptors']} | {','.join(stats.get('block_nums',[])) or 'CSV未导出'} |")
+    lines+=['','小于1表示候选更快。未修改并集容量检查，union>8192仍严格逐行回退。',
+        '两路均使用相同历史候选池；默认8192 token，draft与首行至少40%重合，保留因果可见性。',
+        '原始CSV、样本顺序、输入/源码/库/设备身份、实际命中与miss及墙钟统计见capture_metadata.json/data_index.json。']
+    return '\n'.join(lines)+'\n'
+
+
 def report_text(report):
+    if report.get('suite')=='capacity8k':return capacity8k_report_text(report)
     if report.get('suite')=='fused_tune' or tuple(report['implementations'])==FUSED_TUNE_NAMES:
         return fused_tune_report_text(report)
     if all(name in report['implementations'] for name in MTP7_MERGE_NAMES):
@@ -153,21 +192,28 @@ def report_text(report):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);common.add_runtime_arguments(p);p.set_defaults(device=0,temp_dir=None)
-    p.add_argument('--suite',choices=('mtp8','mtp7_fix','mtp7_pack','peer','prefix','merge_unique','fused_tune'),default='mtp8')
+    p.add_argument('--suite',choices=('mtp8','mtp7_fix','mtp7_pack','peer','prefix','merge_unique','fused_tune','capacity8k'),default='mtp8')
     p.add_argument('--output',type=Path,required=True);p.add_argument('--skip-build',action='store_true')
     p.add_argument('--describe-only',action='store_true');p.add_argument('--formal',action='store_true')
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7])
     p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
     p.add_argument('--requests',type=int,default=28);p.add_argument('--topk',type=int,default=2048)
-    p.add_argument('--capacity',type=int,default=4096);p.add_argument('--max-token',type=int,default=262144)
+    p.add_argument('--capacity',type=int)
+    p.add_argument('--query-pool-tokens',type=int,help='capacity8k专项历史候选池；默认8192，其余用例生成保持原样');p.add_argument('--max-token',type=int,default=262144)
     p.add_argument('--warmup',type=int);p.add_argument('--repeat',type=int);p.add_argument('--regression-repeat',type=int,default=5)
     p.add_argument('--correctness-report',type=Path,help='仅复用同源码/库/设备、同输入且包含本轮专项门禁的报告')
     a=p.parse_args();a.warmup=(10 if a.formal else 2) if a.warmup is None else a.warmup
     a.repeat=(50 if a.formal else 5) if a.repeat is None else a.repeat
+    a.capacity=(8192 if a.suite=='capacity8k' else 4096) if a.capacity is None else a.capacity
+    if a.suite=='capacity8k':
+        if a.capacity!=8192 or a.topk!=2048:p.error('capacity8k suite requires TopK2048/capacity8192')
+        a.query_pool_tokens=8192 if a.query_pool_tokens is None else a.query_pool_tokens
+        if a.query_pool_tokens not in (4096,8192):p.error('query-pool-tokens must be4096 or8192')
+    elif a.query_pool_tokens is not None:p.error('query-pool-tokens is specific to capacity8k')
     if a.warmup<0 or min(a.repeat,a.regression_repeat,a.requests)<=0 or 0 not in a.mtp:p.error('positive counts, warmup>=0, MTP list must include0')
     if len(set(a.mtp))!=len(a.mtp) or len(set(a.scenarios))!=len(a.scenarios):p.error('duplicate scenarios/MTP')
-    a.implementations=FUSED_TUNE_NAMES if a.suite=='fused_tune' else MERGE_UNIQUE_NAMES if a.suite=='merge_unique' else PREFIX_NAMES if a.suite=='prefix' else PEER_NAMES if a.suite=='peer' else PACK_NAMES if a.suite=='mtp7_pack' else FIX_NAMES if a.suite=='mtp7_fix' else NAMES
-    a.build_flag='--fused-tune-only' if a.suite=='fused_tune' else '--merge-unique-only' if a.suite=='merge_unique' else '--prefix-only' if a.suite=='prefix' else '--peer-only' if a.suite=='peer' else '--mtp7-pack-only' if a.suite=='mtp7_pack' else '--mtp7-fix-only' if a.suite=='mtp7_fix' else '--mtp8-only'
+    a.implementations=CAPACITY8K_NAMES if a.suite=='capacity8k' else FUSED_TUNE_NAMES if a.suite=='fused_tune' else MERGE_UNIQUE_NAMES if a.suite=='merge_unique' else PREFIX_NAMES if a.suite=='prefix' else PEER_NAMES if a.suite=='peer' else PACK_NAMES if a.suite=='mtp7_pack' else FIX_NAMES if a.suite=='mtp7_fix' else NAMES
+    a.build_flag='--capacity8k-only' if a.suite=='capacity8k' else '--fused-tune-only' if a.suite=='fused_tune' else '--merge-unique-only' if a.suite=='merge_unique' else '--prefix-only' if a.suite=='prefix' else '--peer-only' if a.suite=='peer' else '--mtp7-pack-only' if a.suite=='mtp7_pack' else '--mtp7-fix-only' if a.suite=='mtp7_fix' else '--mtp8-only'
     workloads=workload_cases(a)
     if a.describe_only:
         print(json.dumps({'implementations':a.implementations,'mtp':a.mtp,'workloads':[describe(c) for c in workloads],
@@ -192,6 +238,7 @@ def main():
             from checks.check_joint_plan import validate_gate_report
             validate_gate_report(a.correctness_report,env,a.regression_repeat,a.implementations)
             g=json.loads(a.correctness_report.read_text())
+            if a.suite=='capacity8k' and g['gate'].get('capacity8k_boundary')!='passed':raise RuntimeError('gate lacks8K capacity boundary/continuation checks')
             if not g['gate'].get('validation_scope','').startswith('mtp8_v1:'):raise RuntimeError('not an MTP8 targeted gate')
             if any(g.get('exact_workloads',{}).get(n,{}).get(exact_workload_key(c))!='passed' for c in workloads for n in a.implementations):raise RuntimeError('gate lacks exact workload inputs')
             write_json(a.output/'gate.json',g)
@@ -201,6 +248,7 @@ def main():
         report={'status':'running','environment':env,'storage':storage,'runs':[],'mtp_comparison':[],
             'implementations':a.implementations,'suite':a.suite,'mtp':a.mtp,'warmup':a.warmup,'repeat':a.repeat,
             'scope':f'Plan kernel Duration only; same{a.requests}requests; fixed-address warmup; no Transfer/SFA',
+            'capacity':a.capacity,'query_pool_tokens':a.query_pool_tokens,
             'gate':str(a.output/'gate.json'),'validation':'strict each sample, fixed certified reference cache, batchedD2H; continuous gate uncached'}
         metadata=a.output/'capture_metadata.json';state['phase']='profile';write_json(status,state);t=time.monotonic()
         for c in workloads:
@@ -211,14 +259,14 @@ def main():
         report['wall_seconds']=state['wall_seconds'];report['status']='complete'
         write_json(metadata,report)
         write_json(a.output/'data_index.json',{'runs':[{'workload':r['workload'],'raw_csv':r['raw_csv'],'target_samples':r['target_samples']} for r in report['runs']]})
-        text=report_text(report)+'\n## 本轮说明\n\n'+('旧BD在MTP7只作逐行回退对照。\n' if a.suite=='mtp8' else '同场比较独立ABCDF、reuse_parallel与同事独立Plan。\n' if a.suite=='peer' else 'A只复用整块完整接收的分项计数；不足八路有效源保留原FUSED计数。B尾块保留带掩码Gather；C不更改持久状态协议及尾部约定。\n' if a.suite=='fused_tune' else 'MID保留完整query→MID→union映射；未消费的临时映射恢复-1，消费游标按原始query数推进。FUSED用SIMD累计行计数并在包末归约。两路不启用安全前缀或16位映射；同预算/同输入，性能只看本轮CSV。\n' if a.suite=='merge_unique' else 'A=安全消费前缀，跳过事后消费统计；B=8行组16位UID映射，归并包由612扩至816条/路。四路均512线程，生产动态UB同为181024B；兼容回退未改。\n' if a.suite=='prefix' else 'A=512线程并行消费统计；B=并行rank归并+融合消费统计；reuse=缓冲复用；tile=每线程分段归并。与上轮BD8同UB预算/同输入；性能结论仅依据本轮CSV。兼容回退未改。\n')+'所有联合实现都需查看共享/回退数量，不能把容量溢出回退当成联合执行。\n'
+        text=report_text(report)+'\n## 本轮说明\n\n'+('两路仅为8K预算适配；原FUSED/AB192KiB限制仍保留。\n' if a.suite=='capacity8k' else '旧BD在MTP7只作逐行回退对照。\n' if a.suite=='mtp8' else '同场比较独立ABCDF、reuse_parallel与同事独立Plan。\n' if a.suite=='peer' else 'A只复用整块完整接收的分项计数；不足八路有效源保留原FUSED计数。B尾块保留带掩码Gather；C不更改持久状态协议及尾部约定。\n' if a.suite=='fused_tune' else 'MID保留完整query→MID→union映射；未消费的临时映射恢复-1，消费游标按原始query数推进。FUSED用SIMD累计行计数并在包末归约。两路不启用安全前缀或16位映射；同预算/同输入，性能只看本轮CSV。\n' if a.suite=='merge_unique' else 'A=安全消费前缀，跳过事后消费统计；B=8行组16位UID映射，归并包由612扩至816条/路。四路均512线程，生产动态UB同为181024B；兼容回退未改。\n' if a.suite=='prefix' else 'A=512线程并行消费统计；B=并行rank归并+融合消费统计；reuse=缓冲复用；tile=每线程分段归并。与上轮BD8同UB预算/同输入；性能结论仅依据本轮CSV。兼容回退未改。\n')+'所有联合实现都需查看共享/回退数量，不能把容量溢出回退当成联合执行。\n'
         if a.suite=='peer':
             text+='\npeer_qli_plan为同事分支收录的独立Plan；读取共同GM升序TopK。QLI/TopK生成和融合producer调度不在本轮范围。上游保留112KiB scratch门槛，UB/GM路径见metadata。\n'
         text+='\n阶段墙钟秒数：'+json.dumps(state['wall_seconds'],ensure_ascii=False)+'\n'
         text+='\n每工况的恢复、校验、首次参考认证、缓存命中、采集循环及profiler导出解析耗时见metadata；这些不是设备kernel耗时。\n'
         (a.output/'report.md').write_text(text)
         state['status']='complete';write_json(status,state);write_json(a.output/'COMPLETE.json',{'status':'complete','metadata':str(metadata)})
-        print(('===== MTP7_FUSED_TUNE_ALL_STAGES_PASSED =====' if a.suite=='fused_tune' else '===== MTP7_MERGE_UNIQUE_ALL_STAGES_PASSED =====' if a.suite=='merge_unique' else '===== MTP7_PREFIX_ALL_STAGES_PASSED =====' if a.suite=='prefix' else '===== PEER_PLAN_ALL_STAGES_PASSED =====' if a.suite=='peer' else '===== MTP7_SWEEP_ALL_STAGES_PASSED =====' if a.suite=='mtp7_pack' else '===== MTP7_FIX_ALL_STAGES_PASSED =====' if a.suite=='mtp7_fix' else '===== MTP8_ALL_STAGES_PASSED =====')+'\n报告:',a.output/'report.md',flush=True)
+        print(('===== CAPACITY8K_ALL_STAGES_PASSED =====' if a.suite=='capacity8k' else '===== MTP7_FUSED_TUNE_ALL_STAGES_PASSED =====' if a.suite=='fused_tune' else '===== MTP7_MERGE_UNIQUE_ALL_STAGES_PASSED =====' if a.suite=='merge_unique' else '===== MTP7_PREFIX_ALL_STAGES_PASSED =====' if a.suite=='prefix' else '===== PEER_PLAN_ALL_STAGES_PASSED =====' if a.suite=='peer' else '===== MTP7_SWEEP_ALL_STAGES_PASSED =====' if a.suite=='mtp7_pack' else '===== MTP7_FIX_ALL_STAGES_PASSED =====' if a.suite=='mtp7_fix' else '===== MTP8_ALL_STAGES_PASSED =====')+'\n报告:',a.output/'report.md',flush=True)
       except BaseException as exc:
         record_failure(status,state,exc)
         print(capture_error(a.output,log,exc),file=sys.stderr,flush=True)

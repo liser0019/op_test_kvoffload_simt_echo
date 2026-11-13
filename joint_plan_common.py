@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 import numpy as np
 import peer_plan
-from joint_variants import supports_eight_rows,supports_single_sorted,INTEGRATED_NAMES
+from joint_variants import is_capacity8k,supports_eight_rows,supports_single_sorted,INTEGRATED_NAMES
 from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
@@ -89,7 +89,7 @@ def prepare(torch, case, name, inputs=None):
     controller_enabled = enabled or supports_single_sorted(name)
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
-                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")),mtp8=supports_eight_rows(name))
+                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")),mtp8=supports_eight_rows(name),mtp8_capacity8k=is_capacity8k(name))
     if name == peer_plan.NAME:
         info = peer_plan.layout(case["topk"], case["capacity"], case["rows"], case["q_len"])
     inputs = upload_inputs(torch, case) if inputs is None else inputs

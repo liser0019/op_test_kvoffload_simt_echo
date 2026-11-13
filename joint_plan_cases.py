@@ -11,7 +11,7 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint", "overlap40")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False,mtp8=False):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False,mtp8=False,mtp8_capacity8k=False):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
@@ -23,11 +23,12 @@ def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=Fals
         scratch=max(row,(128 if union_next else 64)+((4*topk+capacity+7)&~7)+max(3*capacity,64))
     if hot_packet and joint and topk==2048 and capacity==4096 and scratch<=112*1024//4:
         scratch=112*1024//4
+    eight_limit_kib=196 if mtp8_capacity8k and topk==2048 and capacity==8192 else 192
     if mtp8 and joint:
         scratch=max(row,128+((8*topk+capacity+7)&~7)+max(3*capacity,24576))
-        if scratch*4>192*1024:raise ValueError("MTP8 UB layout exceeds192KiB; unsupported shape")
+        if scratch*4>eight_limit_kib*1024:raise ValueError(f"MTP8 UB layout exceeds{eight_limit_kib}KiB; unsupported shape")
     aligned = (scratch * 4 + 31) & ~31
-    ub = aligned <= (192 if mtp8 else 112) * 1024
+    ub = aligned <= (eight_limit_kib if mtp8 else 112) * 1024
     return {"hash_capacity": h, "joint_hash_capacity": j, "scratch_elements": scratch,
             "workspace_elements": rows * (scratch + max_token) if bitmap else (1 if ub else rows * scratch),
             "dynamic_ub_bytes": 288 + (aligned if ub else (((128 if union_next else 64)+16*(min(768,max(64,3*capacity)//16)//4*4))*4 if sorted_union else 0)), "scratch_path": "UB" if ub else "GM"}
@@ -57,7 +58,7 @@ def valid_sets(case):
 
 
 def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
-              scenario="full_cache_75pct", overlap="shared", seed=2026, block_size=64):
+              scenario="full_cache_75pct", overlap="shared", seed=2026, block_size=64, history_pool_tokens=None):
     if mtp not in (0, 1, 3, 7) or scenario not in SCENARIOS or overlap not in OVERLAPS:
         raise ValueError("MTP只取0/1/3/7，工况/重合模式必须在目录内")
     if requests <= 0 or not 0 < topk <= capacity or block_size <= 0 or capacity % block_size:
@@ -70,6 +71,9 @@ def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
     rows = requests * width
     req = np.repeat(np.arange(requests, dtype=np.int32), width)
     positions = np.tile(np.arange(width, dtype=np.int32), requests)
+    history_pool=2*topk if history_pool_tokens is None else int(history_pool_tokens)
+    if history_pool < topk or max(4*topk,history_pool)+capacity > context-1:
+        raise ValueError("history pool must cover TopK and leave enough disjoint resident tokens")
     query, base = np.empty((rows, topk), np.int32), np.empty((requests, capacity), np.int32)
     percentage = {"cold_reset": 0, "full_cache_75pct": 75, "full_cache_90pct": 90,
                   "full_cache_stable_hit": 100}[scenario]
@@ -81,7 +85,7 @@ def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
         rng = np.random.default_rng(seed + request * 101)
         pool = (rng.permutation(context - 1) + 1).astype(np.int32)
         base[request, :hits] = pool[:hits]
-        base[request, hits:] = pool[4 * topk:4 * topk + capacity - hits]
+        base[request, hits:] = pool[max(4*topk,history_pool):max(4*topk,history_pool) + capacity - hits]
         # 相同旧投机后缀，三种MTP均失效；不把旧答案当作本轮新KV。
         stale = min(3, capacity - hits)
         base[request, hits:hits + stale] = context + 1 + np.arange(stale, dtype=np.int32)
@@ -96,7 +100,7 @@ def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
                 common = (2 * topk + 4) // 5
                 new = min(p + 1, topk - (common - 1))
                 select = np.random.default_rng(seed + 300001 + request * 17 + p)
-                chosen = select.choice(pool[:2 * topk], topk - new, replace=False)
+                chosen = select.choice(pool[:history_pool], topk - new, replace=False)
                 same = np.isin(chosen, pool[:topk - 1])
                 deficit = common - 1 - int(same.sum())  # context 也与首行共享
                 if deficit > 0:
@@ -106,7 +110,7 @@ def make_case(requests=32, topk=2048, capacity=4096, max_token=262144, mtp=0,
             elif overlap == "independent" and p > 0:
                 # Indexer 的每条 query 独立选择历史 token；不要求相同前缀/有序。
                 select = np.random.default_rng(seed + 300001 + request * 17 + p)
-                query[row, :topk - new] = select.choice(pool[:2 * topk], topk - new, replace=False)
+                query[row, :topk - new] = select.choice(pool[:history_pool], topk - new, replace=False)
             else:
                 query[row, :topk - new] = pool[p * shift:p * shift + topk - new]
             query[row, topk - new:] = (np.arange(context, context + new) if overlap == "overlap40"

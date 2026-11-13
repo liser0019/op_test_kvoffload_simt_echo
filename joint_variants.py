@@ -78,12 +78,17 @@ MTP7_MERGE_NAMES=tuple("joint_"+n for n in MTP7_MERGE_MASKS)
 MTP7_FUSED_TUNE_MASKS={"mtp7_fused_"+letters+"_512":204+bits for bits,letters in
     ((1,"a"),(2,"b"),(3,"ab"),(4,"c"),(5,"ac"),(6,"bc"),(7,"abc"))}
 MASKS.update(MTP7_FUSED_TUNE_MASKS)
+CAPACITY8K_MASKS={"mtp7_fused_8k_ref_512":212,"mtp7_fused_ab_8k_512":213}
+MASKS.update(CAPACITY8K_MASKS)
+CAPACITY8K_NAMES=tuple("joint_"+n for n in CAPACITY8K_MASKS)
+def is_capacity8k(name): return name in CAPACITY8K_NAMES
+def fused_tune_bits(mask): return 3 if mask==213 else mask-204 if 205<=mask<=211 else 0
 MTP7_FUSED_TUNE_NAMES=tuple("joint_"+n for n in MTP7_FUSED_TUNE_MASKS)
 def mtp7_config(mask):
-    if not 193<=mask<=211:return None
-    return {'opt':0 if mask==193 else 1 if mask in (194,196,200,201,202,203,204) or 205<=mask<=211 else 2,
-            'reuse':mask in (196,197,199,200,201,202,203,204) or 205<=mask<=211,'tile':mask in (198,199)}
-def supports_eight_rows(name):return name==MTP8_NAME or name in (*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES)
+    if not 193<=mask<=213:return None
+    return {'opt':0 if mask==193 else 1 if mask in (194,196,200,201,202,203,204) or 205<=mask<=213 else 2,
+            'reuse':mask in (196,197,199,200,201,202,203,204) or 205<=mask<=213,'tile':mask in (198,199)}
+def supports_eight_rows(name):return name==MTP8_NAME or name in (*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES)
 HOT_NAMES=tuple("joint_"+n for n in HOT_SWEEP)
 HOT_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_abd_512","joint_refine_bd_512","joint_hot_base_512")
 def hot_config(name):
@@ -92,7 +97,7 @@ def hot_config(name):
     bits=value-159 if value<=190 else 0
     return {"bits":bits,"filter":bool(bits&1),"partition":bool(bits&2) or value==191,
             "miss":bool(bits&2) or value==192,"packet":bool(bits&4),"reuse":bool(bits&8),"fixed":bool(bits&16)}
-INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES,MTP8_NAME,*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES)
+INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES,MTP8_NAME,*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES)
 INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",INTEGRATED_NAME,BOUNDS_NAME)
 def supports_single_sorted(name):
     return name.startswith("joint_union_") or name in INTEGRATED_NAMES
@@ -109,14 +114,14 @@ def union_config(name):
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 212))
+TURBO_MASKS = tuple(range(17, 214))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return 72 if 127<=mask<=211 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
+    return 72 if 127<=mask<=213 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -125,6 +130,13 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if mask in (212,213):
+        parent="joint_mtp7_fused_count_512" if mask==212 else "joint_mtp7_fused_ab_512"
+        return description(parent) | {"mask":mask,"parent":parent,"capacity8k_adapter":True,
+            "UB_limit_bytes":196*1024,"original_UB_limit_bytes":192*1024,
+            "budget_exception_shape":{"topk":2048,"capacity":8192},
+            "dynamic_ub_bytes_8k":197408,"status":"CPU candidate; CANN/NPU verification required",
+            "scope":"parent compute unchanged; bounded UB adapter only, all unsupported shapes reject"}
     if 205<=mask<=211:
         bits=mask-204
         return description("joint_mtp7_fused_count_512") | {

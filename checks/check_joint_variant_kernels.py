@@ -12,13 +12,13 @@ import tempfile
 import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,mtp7_config
+from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,mtp7_config,fused_tune_bits
 from joint_plan_cases import make_case, initial_arrays, validate, layout, INPUTS, OUTPUTS, validate_abcdf
 from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
-    hot=mask if 159<=mask<=211 else None
+    hot=mask if 159<=mask<=213 else None
     execution=mask-143 if 143<=mask<=158 else None
     refine=11 if hot is not None or execution is not None else mask-127 if 127<=mask<=142 else None
     bounds = mask==126
@@ -53,14 +53,14 @@ def build(directory, mask, model_threads=64):
     library = directory / 'kernel.so'
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
-                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), *(['-DJOINT_HOT=1','-DJOINT_HOT_BITS='+str(10 if 193<=hot<=211 else hot-159 if hot<=190 else 0),'-DJOINT_HOT_PART_ONLY='+str(int(hot==191)),'-DJOINT_HOT_MISS_ONLY='+str(int(hot==192))] if hot is not None else []), *(['-DJOINT_MTP7_MID_UNIQUE='+str(int(hot==203)),'-DJOINT_MTP7_FUSED_COUNT='+str(int(hot==204 or hot>=205)),'-DJOINT_MTP7_FUSED_TUNE_BITS='+str(hot-204 if hot>=205 else 0),'-DJOINT_MTP7_PREFIX='+str(int(hot in (200,202))),'-DJOINT_MTP7_MAP16='+str(int(hot in (201,202))),'-DJOINT_MTP8=1','-DJOINT_MTP7_OPT='+str(mtp7_config(hot)['opt']),'-DJOINT_MTP7_REUSE='+str(int(mtp7_config(hot)['reuse'])),'-DJOINT_MTP7_TILE='+str(int(mtp7_config(hot)['tile']))] if hot is not None and 193<=hot<=211 else []), '-I' + str(directory),
+                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), *(['-DJOINT_HOT=1','-DJOINT_HOT_BITS='+str(10 if 193<=hot<=213 else hot-159 if hot<=190 else 0),'-DJOINT_HOT_PART_ONLY='+str(int(hot==191)),'-DJOINT_HOT_MISS_ONLY='+str(int(hot==192))] if hot is not None else []), *(['-DJOINT_MTP7_CAPACITY8K='+str(int(hot in (212,213))),'-DJOINT_MTP7_MID_UNIQUE='+str(int(hot==203)),'-DJOINT_MTP7_FUSED_COUNT='+str(int(hot==204 or hot>=205)),'-DJOINT_MTP7_FUSED_TUNE_BITS='+str(fused_tune_bits(hot)),'-DJOINT_MTP7_PREFIX='+str(int(hot in (200,202))),'-DJOINT_MTP7_MAP16='+str(int(hot in (201,202))),'-DJOINT_MTP8=1','-DJOINT_MTP7_OPT='+str(mtp7_config(hot)['opt']),'-DJOINT_MTP7_REUSE='+str(int(mtp7_config(hot)['reuse'])),'-DJOINT_MTP7_TILE='+str(int(mtp7_config(hot)['tile']))] if hot is not None and 193<=hot<=213 else []), '-I' + str(directory),
                     '-I' + str(ROOT / 'checks/simt_variants'),
                     str(ROOT / 'checks/joint_variant_cpu_driver.cpp'), '-o', str(library)], check=True)
     return library
 
 
-def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False, single_sorted=False,hot_packet=False,mtp8=False):
-    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next or single_sorted, case['max_token'], bitmap, turbo, sorted_union, union_next,hot_packet=hot_packet,mtp8=mtp8)
+def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False, single_sorted=False,hot_packet=False,mtp8=False,capacity8k=False):
+    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next or single_sorted, case['max_token'], bitmap, turbo, sorted_union, union_next,hot_packet=hot_packet,mtp8=mtp8,mtp8_capacity8k=capacity8k)
     scratch = max(info['scratch_elements'], 112 * 1024 // 4 + 1) if force_gm else info['scratch_elements']
     max_queries = (scratch - 2 * info['joint_hash_capacity'] - case['capacity']
                    if turbo and enabled else None)

@@ -16,7 +16,9 @@ extern "C" __attribute__((visibility("default"))) void run_variant(void** p, con
   const uint64_t chunk=(std::min(uint64_t{768},std::max(uint64_t{64},uint64_t{3}*d[5])/16U)/4U)*4U;
   const uint32_t ctxWords=JOINT_OPT_MASK>=74?128U:64U;
   tiling.localMemoryBytes=288U+ (d[10]<=
-#ifdef JOINT_MTP8
+#if JOINT_MTP7_CAPACITY8K
+196*1024/4
+#elif defined(JOINT_MTP8)
 192*1024/4
 #else
 112*1024/4
