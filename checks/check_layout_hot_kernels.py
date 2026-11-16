@@ -4,13 +4,13 @@ import sys,ctypes,tempfile,argparse
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from checks.check_capacity16 import cases
 from checks.check_joint_variant_kernels import build,execute
-from joint_variants import LAYOUT_HOT_MASKS,layout_hot_bits
+from joint_variants import LAYOUT_HOT_MASKS,layout_hot_bits,layout16_mode
 from joint_plan_cases import make_case,sort_topk,initial_arrays
 
 def run(masks,model_threads=64,smoke=False):
  count=0
  for name,mask in masks:
-  mode=1+(mask-216)//6;bits=layout_hot_bits(mask)
+  mode=layout16_mode("joint_"+name);bits=layout_hot_bits(mask)
   with tempfile.TemporaryDirectory(prefix='layout_hot_cpu_') as tmp:
    lib=ctypes.CDLL(str(build(Path(tmp),mask,model_threads=model_threads)))
    def check(c,before=None):

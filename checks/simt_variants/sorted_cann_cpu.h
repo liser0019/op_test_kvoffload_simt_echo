@@ -89,7 +89,8 @@ struct CastTrait {RegLayout layoutMode;SatMode satMode;MaskMergeMode mrgMode;Rou
 template<typename T>struct RegTensor { T v[256/sizeof(T)]{}; };
 struct MaskReg { bool v[64]{}; };
 enum class MaskPattern { ALL };
-enum class LoadDist { DIST_DINTLV_B32 };
+enum class LoadDist { DIST_NORM, DIST_DINTLV_B32, DIST_UNPACK_B16 };
+enum class StoreDist { DIST_NORM_B32 };
 template<typename T,LoadDist dist>void LoadAlign(RegTensor<T>& a,RegTensor<T>& b,T* p){
   static_assert(sizeof(T)==4 && dist==LoadDist::DIST_DINTLV_B32);
   assert(reinterpret_cast<uintptr_t>(p)%32U==0U);
@@ -97,7 +98,17 @@ template<typename T,LoadDist dist>void LoadAlign(RegTensor<T>& a,RegTensor<T>& b
 }
 template<typename T,MaskPattern P=MaskPattern::ALL>MaskReg CreateMask(){MaskReg m;for(auto&v:m.v)v=true;return m;}
 template<typename T>MaskReg UpdateMask(uint32_t& n){MaskReg m;for(uint32_t i=0;i<64;++i)m.v[i]=i<n;n=n>64?n-64:0;return m;}
-template<typename T>void LoadAlign(RegTensor<T>&o,T*p){assert(reinterpret_cast<uintptr_t>(p)%4==0);for(int i=0;i<64;++i)o.v[i]=p[i];}
+template<typename T,LoadDist dist=LoadDist::DIST_NORM,typename U>void LoadAlign(RegTensor<U>&o,T*p){
+  assert(reinterpret_cast<uintptr_t>(p)%32==0);
+  if constexpr(dist==LoadDist::DIST_UNPACK_B16){
+    static_assert(std::is_same_v<T,uint16_t> && std::is_same_v<U,uint32_t>);
+    for(int i=0;i<64;++i)o.v[i]=p[i];
+  }else{static_assert(dist==LoadDist::DIST_NORM && sizeof(T)==sizeof(U));for(int i=0;i<64;++i)o.v[i]=p[i];}
+}
+template<typename T,StoreDist dist=StoreDist::DIST_NORM_B32,typename U>void StoreAlign(T*p,RegTensor<U>&v,MaskReg&m){
+  static_assert(dist==StoreDist::DIST_NORM_B32 && sizeof(T)==4 && sizeof(U)==4);
+  assert(reinterpret_cast<uintptr_t>(p)%32==0);for(int i=0;i<64;++i)if(m.v[i])std::memcpy(p+i,v.v+i,4);
+}
 template<typename T,typename S>void Duplicate(RegTensor<T>&o,S v){for(auto&x:o.v)x=static_cast<T>(v);}
 template<typename T,typename S>void Adds(RegTensor<T>&o,const RegTensor<T>&a,S b,const MaskReg&m){auto c=a;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=c.v[i]+static_cast<T>(b);}
 template<typename T,typename S>void ShiftLefts(RegTensor<T>&o,const RegTensor<T>&a,S b,const MaskReg&m){static_assert(std::is_same_v<S,int16_t>,"CANN ShiftLefts scalar must be int16_t");assert(b>=0&&b<int(sizeof(T)*8));auto c=a;for(int i=0;i<64;++i)if(m.v[i])o.v[i]=c.v[i]<<b;}

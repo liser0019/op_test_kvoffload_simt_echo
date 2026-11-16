@@ -435,3 +435,14 @@ PC样本比例不是精确阶段周期占比；SIMT VF也不能承诺通过Instr
 以已实测FUSED为冻结对照，增加A硬件完整中间块计数复用、B连续解交织加载、C精简计数及批量游标，构建A/B/C/AB/AC/BC/ABC七条独立候选。DCCI构建修复、512线程、181024B生产动态UB及原状态协议不变。入口 `scripts/test_mtp7_fused_tune.sh`，默认28请求、MTP0/1/3/7、冷/满缓存标签场景，共320个正式目标样本，一轮构建/门禁/采集。详见[中文教程与服务器命令](docs/MTP7_FUSED三因素优化与一轮测试.md)。本机未做CANN/NPU验证。
 
 本轮动态容量热路径实验（基于408174f）：保留ABCDF、stage16和全UB三条冻结参考，新增两种布局各A/AB/AC/ABC/ACD/ABCD六条候选，默认32请求。服务器入口为 `bash scripts/test_layout_hot_sweep.sh --device 0 --output /workspace/layout_hot_results`；默认一次构建、15路短测、同库5路独立复测。布局、因素含义、本地验证范围与完整服务器命令见 [动态容量热路径ABCD对照](docs/动态容量热路径ABCD对照.md)。本地无CANN/NPU，候选尚需硬件验证。
+
+## Stage512 执行优化四因素（新分支）
+
+以 `joint_layout_stage_abcd_512` 为冻结父版，增加连续加载/写回、单hit前缀、清理合入LRU、容量自适应目录四个因素及15种全组合；另有control与原ABCDF。32请求、MTP0/1/3/7对应4K/4K/8K/16K，512线程和归并/UB预算保持父版。
+
+```bash
+bash scripts/test_stage_exec_sweep.sh --device 0 --requests 32 \
+  --output /workspace/stage_exec_results --temp-dir /workspace/stage_exec_tmp
+```
+
+一次构建，18路初筛后固定选两路，同库独立20样本复测；保留完整初筛表和条件效应表。详见 [中文说明与完整上机命令](docs/Stage512执行优化ABCD对照.md)。新候选仅完成本地CPU检查，尚未执行CANN/NPU验证。

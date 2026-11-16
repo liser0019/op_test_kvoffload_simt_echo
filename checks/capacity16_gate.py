@@ -9,11 +9,18 @@ from harness_io import write_json
 def gate(torch,a,workloads,environment,destination):
  records=[];evidence={n:{} for n in a.implementations};failed=destination/'failure_state';regression={}
  extra=[]
- if a.suite=='layout_hot':
+ if a.suite in ('layout_hot','stage_exec'):
   for cap,m in ((4096,1),(8192,3),(16384,7)):
    c=sort_topk(make_case(1,2048,cap,262144,m,'full_cache_75pct','overlap40',history_pool_tokens=cap))
    c['slot_to_token'][:,:2]=int(c['topk_indices'][0,0])
    extra.append((f'duplicate_resident/{cap}',c))
+ if a.suite=='stage_exec':
+  # 新连续加载：真正进入多行热路径的63/64/65 UID尾块，全命中兼顾C的miss=0。
+  for unique in (63,64,65):
+   c=sort_topk(make_case(1,2048,4096,262144,1,'full_cache_75pct','shared',history_pool_tokens=4096))
+   c['topk_indices'][:]=-1;c['topk_indices'][:,-unique:]=100000+np.arange(unique,dtype=np.int32)
+   c['stable_prefix_lens'][:]=c['max_token'];c['slot_to_token'][0,:unique]=100000+np.arange(unique,dtype=np.int32)
+   extra.append((f'stage_tail_allhit/{unique}',c))
  for label,c in [*cases(),*extra,*((f"performance/{c['scenario']}/mtp{c['mtp']}",c) for c in workloads)]:
   for name in a.implementations:
    b=common.prepare(torch,c,name);b['fast_fixed_check']=True
@@ -25,7 +32,7 @@ def gate(torch,a,workloads,environment,destination):
   print('16K门禁:',label,'通过',flush=True)
  continuous=[]
  for name in a.implementations:
-  for cap,m in (((4096,1),(8192,3),(16384,7)) if a.suite=='layout_hot' else ((16384,7),)):
+  for cap,m in (((4096,1),(8192,3),(16384,7)) if a.suite in ('layout_hot','stage_exec') else ((16384,7),)):
    c=sort_topk(make_case(1,2048,cap,262144,m,'cold_reset','overlap40',history_pool_tokens=cap))
    b=common.prepare(torch,c,name)
    try:
@@ -43,7 +50,8 @@ def gate(torch,a,workloads,environment,destination):
  result={'status':'passed','environment':environment,'exact_workloads':evidence,'gate':{
   'status':'passed','implementations':list(a.implementations),'validation_scope':'mtp8_v1: capacity16 exact boundary, duplicate, invalidation, continuous mode switch',
   'input_write_regression':{'status':'passed','checked_iterations':a.regression_repeat,'per_implementation':regression,'input_restore':False},
-  'layout_hot_boundary':'passed' if a.suite=='layout_hot' else None,'capacity16_boundary':'passed','cases':records,'continuous':continuous}}
+  'stage_exec_boundary':'passed' if a.suite=='stage_exec' else None,
+  'layout_hot_boundary':'passed' if a.suite in ('layout_hot','stage_exec') else None,'capacity16_boundary':'passed','cases':records,'continuous':continuous}}
  write_json(destination/'gate.json',result);return result
 
 def report_text(report):

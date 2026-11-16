@@ -112,7 +112,11 @@ __simt_callee__ __aicore__ inline uint32_t SortedLower(P p, uint32_t n, int32_t 
   return lo;
 }
 
+#if JOINT_STAGE_EXEC
+#include "stage_exec_plan.h"
+#else
 #include "layout_hot_plan.h"
+#endif
 
 template <int Phase, bool Fixed, typename P>
 __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
@@ -782,7 +786,11 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf
 
 #if JOINT_MTP7_FUSED_TUNE_BITS
 #include "layout_hot_fused.h"
+#if JOINT_STAGE_EXEC
+#include "stage_exec_simd.h"
+#else
 #include "layout_hot_simd.h"
+#endif
 #endif
 
 template <bool AllowJoint>
