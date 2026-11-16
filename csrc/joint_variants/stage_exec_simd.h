@@ -22,7 +22,7 @@ __simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32
   for(uint32_t base=0;base<c;base+=64U){
 #if (JOINT_STAGE_EXEC_BITS & 1)
     // 每轮64个连续u16，128B加载后零扩展至64个u32；基址32B对齐。
-    Reg::LoadAlign<uint16_t,Reg::LoadDist::DIST_UNPACK_B16>(f,reinterpret_cast<__ubuf__ uint16_t*>(data)+base);
+    Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_UNPACK_B16>(f,reinterpret_cast<__ubuf__ uint32_t*>(data)+(base/2U));
 #else
     Reg::ShiftRights(idx,lane,int16_t{1},full);Reg::Adds(idx,idx,base/2U,full);
     Reg::Gather<uint32_t,uint32_t,uint32_t>(packed,reinterpret_cast<__ubuf__ uint32_t*>(data),idx,full);

@@ -470,7 +470,7 @@
     "scripts/test_layout_hot_sweep.sh": "cd0327856456af9bd943f312502e1e6051340f61bc0a80687539cbe936c638d7",
     "docs/动态容量热路径ABCD对照.md": "54aca3685a41b5301efc8755c418deaadce6f82f117dfb42c9944b430c5b15d7",
     "checks/check_stage_exec_suite.py": "cc1874b1bf030f6df3c7643e44fabe5bdb766901b55623a1cbd2d745d204eb94",
-    "csrc/joint_variants/stage_exec_simd.h": "fb762c9bb3a94e1763f3888c344c2b1558fcce9286b262e66c1ddf7846d5d141",
+    "csrc/joint_variants/stage_exec_simd.h": "1f99eec070b2fcde88a843fd57c353a43bbf760f399816cdbe4ddbe8a1827525",
     "design/stage_exec/notes.md": "515be5a9ebb8ab5dee2e9fe75e69d39eee6ebd05ec0ccc37a4ac5cd60b93f9c9",
     "checks/check_stage_exec_kernels.py": "8c08f9436e373eb5f9b0b6bdc83d89ad46b9489443230a9f0cd04407e8be5ee9",
     "design/stage_exec/stage.allocate.txt": "5b7fc363ee1cf7e52aea6bfe68ea4210a6eea607c53693d2c96d31e43bcb8188",
