@@ -28,7 +28,7 @@ class Checks(unittest.TestCase):
                 for flag,value in (('JOINT_OPT_MASK',72),('JOINT_MTP7_CAPACITY8K',1),('JOINT_MTP7_FUSED_COUNT',1),('JOINT_MTP7_FUSED_TUNE_BITS',bits),('JOINT_MTP7_REUSE',1),('JOINT_MTP7_TILE',0)):
                     self.assertIn(f'#define {flag} {value}\n',source)
                 self.assertEqual(description(name)['threads'],512)
-            d=(p/'variant_dispatch.h').read_text();self.assertIn('mask <= 213',d)
+            d=(p/'variant_dispatch.h').read_text();self.assertIn(f'mask <= {max(__import__("joint_variants").MASKS.values())}',d)
 
     def test_old_selected_compute_unchanged(self):
         # The old source must preprocess exactly as pinned FUSED204; don't rewrite its frozen hash.

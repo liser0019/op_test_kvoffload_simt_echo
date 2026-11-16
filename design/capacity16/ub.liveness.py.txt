@@ -1,0 +1,138 @@
+{
+  "value": 6,
+  "peak_step": "merge",
+  "mode": "P_baseline",
+  "pinned": [
+    "unique0",
+    "unique1"
+  ],
+  "trace": [
+    {
+      "id": "merge",
+      "op": "merge",
+      "before": [],
+      "during": [
+        "map",
+        "merge0",
+        "merge1",
+        "merge2"
+      ],
+      "after": [
+        "map",
+        "merge0",
+        "merge1",
+        "merge2",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "consume_merge",
+      "op": "finish merge",
+      "before": [
+        "map",
+        "merge0",
+        "merge1",
+        "merge2",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "merge0",
+        "merge1",
+        "merge2"
+      ],
+      "after": [
+        "map",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "classify",
+      "op": "init owner / classify",
+      "before": [
+        "map",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "owner0",
+        "owner1"
+      ],
+      "after": [
+        "map",
+        "owner0",
+        "owner1",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "partition",
+      "before": [
+        "map",
+        "owner0",
+        "owner1",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "owner0",
+        "owner1",
+        "partition"
+      ],
+      "after": [
+        "map",
+        "owner0",
+        "owner1",
+        "partition",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "before": [
+        "map",
+        "owner0",
+        "owner1",
+        "partition",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "owner0",
+        "owner1",
+        "partition"
+      ],
+      "after": [],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    }
+  ]
+}

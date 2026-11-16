@@ -1,0 +1,69 @@
+{
+  "inputs": [],
+  "outputs": [],
+  "pinned": [
+    "B1",
+    "B2"
+  ],
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge → B0,B1,B2,B3,B4,B5",
+      "reads": [],
+      "writes": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ]
+    },
+    {
+      "id": "consume_merge",
+      "op": "finish merge",
+      "reads": [
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "writes": []
+    },
+    {
+      "id": "classify",
+      "op": "init owner / classify → B3,B4",
+      "reads": [
+        "B1",
+        "B2"
+      ],
+      "writes": [
+        "B3",
+        "B4"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "partition → B5",
+      "reads": [
+        "B3",
+        "B4"
+      ],
+      "writes": [
+        "B5"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "reads": [
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B0"
+      ],
+      "writes": []
+    }
+  ]
+}

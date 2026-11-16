@@ -1,0 +1,142 @@
+{
+  "P": 6,
+  "peak_step": "merge",
+  "warnings": [],
+  "lower_bound_check": {
+    "P": 6,
+    "inputs": 0,
+    "outputs": 0,
+    "bound": 0,
+    "triggered": false,
+    "message": "通过（P=6 ≥ 输入0+输出0=0）"
+  },
+  "trace": [
+    {
+      "id": "merge",
+      "op": "merge → B0,B1,B2,B3,B4,B5",
+      "before": [],
+      "during": [
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "consume_merge",
+      "op": "finish merge",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "classify",
+      "op": "init owner / classify → B3,B4",
+      "before": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "partition → B5",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    }
+  ]
+}

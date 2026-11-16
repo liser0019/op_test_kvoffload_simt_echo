@@ -1,0 +1,12 @@
+=== 贪心配槽结果（1 个变体取 max） ===
+  B0: map
+  B1: unique0（pinned 独占）
+  B2: unique1（pinned 独占）
+  B3: merge0 → owner0
+  B4: merge1 → owner1
+  B5: merge2 → partition
+
+槽位数 = 6，其中 pinned 独占 2 个
+P 峰值 = 6（峰值步骤 merge，physical_p 语义复算，含 pinned）
+→ 请用 --out 落盘物理流并交 physical_p.py 复核（P / WAR / 下界自检）
+物理流已写出：/home/welt/workspace/kvoffload/single_op_test/capacity16k_plan/design/capacity16/ub.allocated.json

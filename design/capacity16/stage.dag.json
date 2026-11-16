@@ -1,0 +1,85 @@
+{
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge",
+      "inputs": [],
+      "outputs": [
+        "map",
+        "unique0",
+        "unique1",
+        "merge0",
+        "merge1",
+        "merge2"
+      ]
+    },
+    {
+      "id": "consume_merge",
+      "op": "finish merge",
+      "inputs": [
+        "merge0",
+        "merge1",
+        "merge2"
+      ],
+      "outputs": []
+    },
+    {
+      "id": "save_map",
+      "op": "CopyOut map to GM",
+      "inputs": [
+        "map"
+      ],
+      "outputs": []
+    },
+    {
+      "id": "classify",
+      "op": "init owner / classify",
+      "inputs": [
+        "unique0",
+        "unique1"
+      ],
+      "outputs": [
+        "owner0",
+        "owner1"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "partition",
+      "inputs": [
+        "owner0",
+        "owner1"
+      ],
+      "outputs": [
+        "partition"
+      ]
+    },
+    {
+      "id": "flags",
+      "op": "flags reused then miss ranks",
+      "inputs": [
+        "partition"
+      ],
+      "outputs": [
+        "flags"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "inputs": [
+        "unique0",
+        "unique1",
+        "owner0",
+        "owner1",
+        "partition",
+        "flags"
+      ],
+      "outputs": []
+    }
+  ],
+  "pinned": [
+    "unique0",
+    "unique1"
+  ]
+}

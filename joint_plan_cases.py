@@ -11,7 +11,7 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint", "overlap40")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False,mtp8=False,mtp8_capacity8k=False):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False,mtp8=False,mtp8_capacity8k=False,layout16=0):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
@@ -24,13 +24,17 @@ def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=Fals
     if hot_packet and joint and topk==2048 and capacity==4096 and scratch<=112*1024//4:
         scratch=112*1024//4
     eight_limit_kib=196 if mtp8_capacity8k and topk==2048 and capacity==8192 else 192
-    if mtp8 and joint:
+    if mtp8 and joint and not layout16:
         scratch=max(row,128+((8*topk+capacity+7)&~7)+max(3*capacity,24576))
         if scratch*4>eight_limit_kib*1024:raise ValueError(f"MTP8 UB layout exceeds{eight_limit_kib}KiB; unsupported shape")
+    if layout16:
+        if topk!=2048 or capacity!=16384:raise ValueError("16K candidates require TopK2048/capacity16384")
+        scratch=128+49152+(1536 if layout16==2 else 0)
+        eight_limit_kib=204
     aligned = (scratch * 4 + 31) & ~31
     ub = aligned <= (eight_limit_kib if mtp8 else 112) * 1024
     return {"hash_capacity": h, "joint_hash_capacity": j, "scratch_elements": scratch,
-            "workspace_elements": rows * (scratch + max_token) if bitmap else (1 if ub else rows * scratch),
+            "workspace_elements": rows*topk//2 if layout16==1 else rows * (scratch + max_token) if bitmap else (1 if ub else rows * scratch),
             "dynamic_ub_bytes": 288 + (aligned if ub else (((128 if union_next else 64)+16*(min(768,max(64,3*capacity)//16)//4*4))*4 if sorted_union else 0)), "scratch_path": "UB" if ub else "GM"}
 
 

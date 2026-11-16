@@ -1,0 +1,69 @@
+{
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge",
+      "reads": [],
+      "writes": [
+        "map",
+        "unique0",
+        "unique1",
+        "merge0",
+        "merge1",
+        "merge2"
+      ]
+    },
+    {
+      "id": "consume_merge",
+      "op": "finish merge",
+      "reads": [
+        "merge0",
+        "merge1",
+        "merge2"
+      ],
+      "writes": []
+    },
+    {
+      "id": "classify",
+      "op": "init owner / classify",
+      "reads": [
+        "unique0",
+        "unique1"
+      ],
+      "writes": [
+        "owner0",
+        "owner1"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "partition",
+      "reads": [
+        "owner0",
+        "owner1"
+      ],
+      "writes": [
+        "partition"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "reads": [
+        "unique0",
+        "unique1",
+        "owner0",
+        "owner1",
+        "partition",
+        "map"
+      ],
+      "writes": []
+    }
+  ],
+  "pinned": [
+    "unique0",
+    "unique1"
+  ],
+  "inputs": [],
+  "outputs": []
+}

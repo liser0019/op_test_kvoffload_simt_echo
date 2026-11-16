@@ -1,0 +1,87 @@
+{
+  "inputs": [],
+  "outputs": [],
+  "pinned": [
+    "B1",
+    "B2"
+  ],
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge → B0,B1,B2,B3,B4,B5",
+      "reads": [],
+      "writes": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ]
+    },
+    {
+      "id": "consume_merge",
+      "op": "finish merge",
+      "reads": [
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "writes": []
+    },
+    {
+      "id": "save_map",
+      "op": "CopyOut map to GM",
+      "reads": [
+        "B0"
+      ],
+      "writes": []
+    },
+    {
+      "id": "classify",
+      "op": "init owner / classify → B0,B3",
+      "reads": [
+        "B1",
+        "B2"
+      ],
+      "writes": [
+        "B0",
+        "B3"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "partition → B4",
+      "reads": [
+        "B0",
+        "B3"
+      ],
+      "writes": [
+        "B4"
+      ]
+    },
+    {
+      "id": "flags",
+      "op": "flags reused then miss ranks → B5",
+      "reads": [
+        "B4"
+      ],
+      "writes": [
+        "B5"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "reads": [
+        "B1",
+        "B2",
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "writes": []
+    }
+  ]
+}
