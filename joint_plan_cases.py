@@ -28,7 +28,7 @@ def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=Fals
         scratch=max(row,128+((8*topk+capacity+7)&~7)+max(3*capacity,24576))
         if scratch*4>eight_limit_kib*1024:raise ValueError(f"MTP8 UB layout exceeds{eight_limit_kib}KiB; unsupported shape")
     if layout16:
-        if topk!=2048 or capacity!=16384:raise ValueError("16K candidates require TopK2048/capacity16384")
+        if topk!=2048 or capacity not in (4096,8192,16384):raise ValueError("layout16 candidates require TopK2048 and capacity4096/8192/16384")
         scratch=128+49152+(1536 if layout16==2 else 0)
         eight_limit_kib=204
     aligned = (scratch * 4 + 31) & ~31

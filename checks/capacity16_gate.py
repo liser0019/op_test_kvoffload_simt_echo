@@ -40,10 +40,10 @@ def gate(torch,a,workloads,environment,destination):
  write_json(destination/'gate.json',result);return result
 
 def report_text(report):
- lines=['# 16K容量：ABCDF / 映射暂存 / 全UB','',
- '固定32请求（实际请求数以每个workload为准）；TopK2048，capacity16384，MTP0/1/3/7。仅设备Plan kernel Duration，含映射暂存。',
+ lines=['# MTP动态容量：ABCDF / 映射暂存 / 全UB','',
+ '固定32请求（实际请求数以每个workload为准）；TopK2048。容量按MTP动态选择：MTP0/1=4096，MTP3=8192，MTP7=16384。仅设备Plan kernel Duration，含映射暂存。',
  '两候选保留硬件归并与AB消费计数；热收尾使用压缩布局的SIMT Scan，非原BD的32位SIMD压缩。GM版197408B，全UB版203552B。',
- '', '| 工况/MTP | 实现 | P50/P95 μs | 样本数 | 实现/ABCDF | 共享/回退 | descriptor |','|---|---|---|---:|---:|---|---:|']
+ '', '| 工况/MTP/容量 | 实现 | P50/P95 μs | 样本数 | 实现/ABCDF | 共享/回退 | descriptor |','|---|---|---|---:|---:|---|---:|']
  for run in report['runs']:
   w=run['workload'];base=run['stats']['abcdf_pages']['p50_us']
   for n,s in run['stats'].items():

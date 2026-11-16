@@ -22,7 +22,11 @@ MERGE_UNIQUE_NAMES=('joint_mtp7_reuse_parallel_512',*MTP7_MERGE_NAMES)
 FUSED_TUNE_NAMES=('joint_mtp7_fused_count_512',*MTP7_FUSED_TUNE_NAMES)
 
 
+def capacity16_for_mtp(m): return {0:4096,1:4096,3:8192,7:16384}[m]
 def workload_cases(a):
+    if a.suite=='capacity16k':
+        return [sort_topk(make_case(a.requests,a.topk,capacity16_for_mtp(m),a.max_token,m,s,'overlap40',2026,64,history_pool_tokens=capacity16_for_mtp(m)))
+                for s in a.scenarios for m in a.mtp]
     extra={"history_pool_tokens":a.query_pool_tokens} if a.suite in ("capacity8k","capacity16k") else {}
     return [sort_topk(make_case(a.requests,a.topk,a.capacity,a.max_token,m,s,'overlap40',2026,64,**extra))
             for s in a.scenarios for m in a.mtp]
@@ -211,10 +215,10 @@ def main():
     a=p.parse_args();a.warmup=(10 if a.formal else 2) if a.warmup is None else a.warmup
     a.repeat=(50 if a.formal else 5) if a.repeat is None else a.repeat
     a.requests=(32 if a.suite=='capacity16k' else 28) if a.requests is None else a.requests
-    a.capacity=(16384 if a.suite=='capacity16k' else 8192 if a.suite=='capacity8k' else 4096) if a.capacity is None else a.capacity
+    a.capacity=(None if a.suite=='capacity16k' else 8192 if a.suite=='capacity8k' else 4096) if a.capacity is None else a.capacity
     if a.suite=='capacity16k':
-        if a.capacity!=16384 or a.topk!=2048:p.error('16K requires TopK2048/capacity16384')
-        a.query_pool_tokens=16384 if a.query_pool_tokens is None else a.query_pool_tokens
+        if a.capacity is not None or a.topk!=2048:p.error('capacity16k uses dynamic capacity by MTP; do not set --capacity')
+        a.query_pool_tokens=None
     elif a.suite=='capacity8k':
         if a.capacity!=8192 or a.topk!=2048:p.error('capacity8k suite requires TopK2048/capacity8192')
         a.query_pool_tokens=8192 if a.query_pool_tokens is None else a.query_pool_tokens

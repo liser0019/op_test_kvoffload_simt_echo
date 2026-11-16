@@ -9,10 +9,14 @@ import numpy as np
 def cases():
  for m in (0,1,3,7):
   for s in ('cold_reset','full_cache_75pct'):
-   yield f'{s}/{m}',sort_topk(make_case(1,2048,16384,262144,m,s,'overlap40',history_pool_tokens=16384))
+   yield f'{s}/{m}',sort_topk(make_case(1,2048,{0:4096,1:4096,3:8192,7:16384}[m],262144,m,s,'overlap40',history_pool_tokens={0:4096,1:4096,3:8192,7:16384}[m]))
  c=sort_topk(make_case(1,2048,16384,262144,7,'cold_reset','disjoint'))
  for row in range(8):c['topk_indices'][row]=100000+2048*row+np.arange(2048,dtype=np.int32)
  yield 'exact16384',c
+ for cap,m in ((4096,1),(8192,3)):
+  c=sort_topk(make_case(1,2048,cap,262144,m,'cold_reset','disjoint'))
+  for row in range(m+1):c['topk_indices'][row]=100000+2048*row+np.arange(2048,dtype=np.int32)
+  yield f'exact{cap}',c
  c={k:v.copy() if isinstance(v,np.ndarray) else v for k,v in c.items()};c['topk_indices'][:]=100000
  yield 'duplicates',c
  c=sort_topk(make_case(1,2048,16384,262144,7,'full_cache_75pct','overlap40',history_pool_tokens=16384))

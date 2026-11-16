@@ -132,7 +132,7 @@ class Prepared : public torch::CustomClassHolder {
       // 8T map + C unique + max(3C owner/flags/partition, 3 merge buffers).
       d.scratchElements=std::max(d.workspaceRowElements,uint64_t{128}+((8U*t+c+7U)&~uint64_t{7U})+std::max(uint64_t{3}*c,uint64_t{24576}));
       if(layout16){
-        TORCH_CHECK(t==2048 && c==16384,"16K candidates require TopK2048/capacity16384");
+        TORCH_CHECK(t==2048 && (c==4096U||c==8192U||c==16384U),"layout16 candidates require TopK2048 and capacity4096/8192/16384");
         d.scratchElements=128U+49152U+(variantMask==215?1536U:0U);
       }
       TORCH_CHECK(d.scratchElements*4U<=eightUbLimit,

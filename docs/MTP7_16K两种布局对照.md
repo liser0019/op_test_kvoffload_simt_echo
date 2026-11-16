@@ -1,11 +1,11 @@
-# 16K共享缓存：映射暂存与全UB两条候选
+# MTP动态容量：映射暂存与全UB两条候选
 
-本分支以FUSED AB为归并基础，针对TopK=2048、capacity=16384提供两种独立实现。
-默认32个请求，MTP0/1/3/7，对应32/64/128/256条query行。所有MTP档位固定16K容量，保证同容量比较；不是动态按MTP切换容量。
+本分支以FUSED AB为归并基础，针对TopK=2048提供两种独立实现。
+默认32个请求，MTP0/1/3/7，对应32/64/128/256条query行。容量按MTP动态选择：MTP0/1=4096，MTP3=8192，MTP7=16384。同一kernel使用最大16K UB布局，低容量只缩小owner/partition的实际范围。
 
 | 实现 | 编号 | 动态UB | GM临时映射 |
 |---|---:|---:|---:|
-| abcdf_pages | 原独立基线 | 按原tiling | 原实现 |
+| abcdf_pages | 原独立基线 | 按每档容量tiling | 原实现 |
 | joint_mtp7_stage16_512 | 214 | 197408 B（192.78125 KiB） | 每query位置2B |
 | joint_mtp7_ub16_512 | 215 | 203552 B（198.78125 KiB） | 无 |
 
@@ -16,7 +16,7 @@
 两候选保留硬件MrgSort、AB硬件消费量复用和完整64记录块解交织加载；主路径512线程，八路上限612记录/路，fallback1024线程。
 映射区域固定32KiB（即便单行），unique64KiB，归并区96KiB。每阶段均使用同一段UB。
 
-stage16：热规划前按32位打包将query→UID写入独立GM workspace。随后旧映射区作为32KiB uint16 flags；旧归并区分作owner64KiB与partition32KiB。最后由写入该GM word的同一线程读回两个UID，输出两个currentSlots；不涉及Scalar/DMA读取该GM中间值。MTP7、32请求时GM映射分配1MiB，逻辑新增写+读2MiB/调用；实际物理HBM流量取决于cache。冷reset直接使用UB映射，不做这笔暂存。
+stage16：热规划前按32位打包将query→UID写入独立GM workspace。该映射大小只随query数变化，低容量MTP仍按最大布局预留UB。随后旧映射区作为32KiB uint16 flags；旧归并区分作owner64KiB与partition32KiB。最后由写入该GM word的同一线程读回两个UID，输出两个currentSlots；不涉及Scalar/DMA读取该GM中间值。MTP7、32请求时GM映射分配1MiB，逻辑新增写+读2MiB/调用；实际物理HBM流量取决于cache。冷reset直接使用UB映射，不做这笔暂存。
 
 ub16：query→UID一直留在UB；owner64KiB及partition32KiB复用归并区，后面增加6KiB位图（三份：hit、invalid、valid）。每warp ballot产出一个32bit word，lane0独占写，不做逐bit非原子更新。partition按LRU重读槽号；miss rank写到owner的空闲位（bit30标记新miss，bits16..29存rank），严格在原子owner仲裁结束之后。
 
@@ -30,7 +30,7 @@ unique中的token位置保持int32。owner保留int32原子max以维持重复res
 
 限定TopK2048/capacity16384，其他形状由host明确拒绝。1/2/4/8行按原协议，超出支持条件仍走原private回退；不是扩大UB门禁后允许任意形状。正常八行最多16384项，因此合法query的并集不会超过16384，但回退检查保留。
 
-CPU检查执行真实VF/controller，经C++桩模拟硬件API，使用UBSan、输入不变性及缓冲保护区；覆盖四档MTP、冷/热、精确16384并集、重复token、无效区间、重复resident及连续状态。CPU通过不代表CANN编译、缓存一致性或NPU性能通过。
+CPU检查执行真实VF/controller，经C++桩模拟硬件API，使用UBSan、输入不变性及缓冲保护区；覆盖四档MTP、动态容量、精确4096/8192/16384并集、重复token、无效区间、重复resident及连续状态。CPU通过不代表CANN编译、缓存一致性或NPU性能通过。
 
 上机先专项门禁，再单轮三路profiler；每个样本恢复相同初态并完整检查。门禁与性能使用预期结果缓存；默认warmup2/repeat5/regression5，无38路初筛。正式重复采集可复用同源码/库/设备/输入的gate.json。失败保留现场并停止，不产生成功结论。
 
