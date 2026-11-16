@@ -97,21 +97,30 @@ STAGE_EXEC_MASKS={"stage_exec_"+("".join(c for i,c in enumerate(STAGE_EXEC_OPTIO
 MASKS.update(STAGE_EXEC_MASKS)
 STAGE_EXEC_NAMES=tuple("joint_"+n for n in STAGE_EXEC_MASKS)
 STAGE_EXEC_REFS=("abcdf_pages","joint_layout_stage_abcd_512",STAGE_EXEC_NAMES[0])
-def stage_exec_bits(mask): return mask-228 if 228<=mask<=243 else 0
+# 本轮三因素：在exec ABCD之上进行精确查询/块前缀/输出流水组合。
+RANKPIPE_OPTIONS={"a":"exact UB word bitmap and first UID instead of binary search (max_token<=262144)",
+                  "b":"32-position word counts, cross-warp prefix and local popcount ranks",
+                  "c":"stage full LRU and descriptor tails then MTE3 copies; cold and hot"}
+RANKPIPE_MASKS={"rankpipe_"+("".join(c for i,c in enumerate(RANKPIPE_OPTIONS) if bits&(1<<i)) or "base")+"_512":244+bits for bits in range(8)}
+MASKS.update(RANKPIPE_MASKS)
+RANKPIPE_NAMES=tuple("joint_"+n for n in RANKPIPE_MASKS)
+RANKPIPE_REFS=("abcdf_pages","joint_stage_exec_abcd_512",RANKPIPE_NAMES[0])
+def rankpipe_bits(mask):return mask-244 if 244<=mask<=251 else 0
+def stage_exec_bits(mask): return 15 if 244<=mask<=251 else mask-228 if 228<=mask<=243 else 0
 def layout_hot_bits(mask):
-    return 15 if 228<=mask<=243 else sum({"a":1,"b":2,"c":4,"d":8}[x] for x in LAYOUT_HOT_COMBOS[(mask-216)%6]) if 216<=mask<=227 else 0
+    return 15 if 228<=mask<=251 else sum({"a":1,"b":2,"c":4,"d":8}[x] for x in LAYOUT_HOT_COMBOS[(mask-216)%6]) if 216<=mask<=227 else 0
 def layout16_mode(name):
-    if name in STAGE_EXEC_NAMES:return 1
+    if name in (*STAGE_EXEC_NAMES,*RANKPIPE_NAMES):return 1
     if name in LAYOUT_HOT_NAMES:return 1+(LAYOUT_HOT_MASKS[name[6:]]-216)//6
     return {CAPACITY16_NAMES[0]:1,CAPACITY16_NAMES[1]:2}.get(name,0)
 def is_capacity8k(name): return name in CAPACITY8K_NAMES
-def fused_tune_bits(mask): return 3 if mask in (213,214,215) or 216<=mask<=243 else mask-204 if 205<=mask<=211 else 0
+def fused_tune_bits(mask): return 3 if mask in (213,214,215) or 216<=mask<=251 else mask-204 if 205<=mask<=211 else 0
 MTP7_FUSED_TUNE_NAMES=tuple("joint_"+n for n in MTP7_FUSED_TUNE_MASKS)
 def mtp7_config(mask):
-    if not 193<=mask<=243:return None
-    return {'opt':0 if mask==193 else 1 if mask in (194,196,200,201,202,203,204) or 205<=mask<=243 else 2,
-            'reuse':mask in (196,197,199,200,201,202,203,204) or 205<=mask<=243,'tile':mask in (198,199)}
-def supports_eight_rows(name):return name==MTP8_NAME or name in (*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES,*CAPACITY16_NAMES,*LAYOUT_HOT_NAMES,*STAGE_EXEC_NAMES)
+    if not 193<=mask<=251:return None
+    return {'opt':0 if mask==193 else 1 if mask in (194,196,200,201,202,203,204) or 205<=mask<=251 else 2,
+            'reuse':mask in (196,197,199,200,201,202,203,204) or 205<=mask<=251,'tile':mask in (198,199)}
+def supports_eight_rows(name):return name==MTP8_NAME or name in (*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES,*CAPACITY16_NAMES,*LAYOUT_HOT_NAMES,*STAGE_EXEC_NAMES,*RANKPIPE_NAMES)
 HOT_NAMES=tuple("joint_"+n for n in HOT_SWEEP)
 HOT_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_abd_512","joint_refine_bd_512","joint_hot_base_512")
 def hot_config(name):
@@ -120,7 +129,7 @@ def hot_config(name):
     bits=value-159 if value<=190 else 0
     return {"bits":bits,"filter":bool(bits&1),"partition":bool(bits&2) or value==191,
             "miss":bool(bits&2) or value==192,"packet":bool(bits&4),"reuse":bool(bits&8),"fixed":bool(bits&16)}
-INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES,MTP8_NAME,*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES,*CAPACITY16_NAMES,*LAYOUT_HOT_NAMES,*STAGE_EXEC_NAMES)
+INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES,MTP8_NAME,*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES,*CAPACITY16_NAMES,*LAYOUT_HOT_NAMES,*STAGE_EXEC_NAMES,*RANKPIPE_NAMES)
 INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",INTEGRATED_NAME,BOUNDS_NAME)
 def supports_single_sorted(name):
     return name.startswith("joint_union_") or name in INTEGRATED_NAMES
@@ -137,14 +146,14 @@ def union_config(name):
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 244))
+TURBO_MASKS = tuple(range(17, 252))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return 72 if 127<=mask<=243 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
+    return 72 if 127<=mask<=251 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -153,6 +162,13 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if 244<=mask<=251:
+        bits=rankpipe_bits(mask)
+        return description("joint_stage_exec_abcd_512") | {"mask":mask,"parent":"joint_stage_exec_abcd_512",
+          "rankpipe_bits":bits,"factors":[v for i,v in enumerate(RANKPIPE_OPTIONS.values()) if bits&(1<<i)],
+          "scope":"A/B hot path; C cold/hot full-output producer and kernel-side MTE3 consumer; sameUB budget",
+          "bitmap_words":8192 if bits&1 else 0,"bitmap_base_uid_bits":32 if bits&1 else 0,
+          "max_dynamic_ub_bytes":197408,"status":"CPU candidate; CANN/NPU pending"}
     if 228<=mask<=243:
         bits=stage_exec_bits(mask)
         return description("joint_layout_stage_abcd_512") | {"mask":mask,"parent":"joint_layout_stage_abcd_512",

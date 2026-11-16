@@ -1,0 +1,110 @@
+{
+  "inputs": [],
+  "outputs": [],
+  "pinned": [
+    "unique0",
+    "unique1"
+  ],
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge",
+      "reads": [],
+      "writes": [
+        "map",
+        "unique0",
+        "unique1",
+        "packet0",
+        "packet1",
+        "packet2"
+      ]
+    },
+    {
+      "id": "drain_merge",
+      "op": "consume packet",
+      "reads": [
+        "packet0",
+        "packet1",
+        "packet2"
+      ],
+      "writes": []
+    },
+    {
+      "id": "stage_map",
+      "op": "CopyOut map",
+      "reads": [
+        "map"
+      ],
+      "writes": []
+    },
+    {
+      "id": "lookup",
+      "op": "A: exact word masks + first UID + physical slot UID",
+      "reads": [
+        "unique0",
+        "unique1"
+      ],
+      "writes": [
+        "word_masks",
+        "word_uid_bases",
+        "slot_uid"
+      ]
+    },
+    {
+      "id": "end_lookup",
+      "op": "all index readers complete before owner init",
+      "reads": [
+        "word_masks",
+        "word_uid_bases"
+      ],
+      "writes": []
+    },
+    {
+      "id": "classify",
+      "op": "owner arbitration",
+      "reads": [
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "writes": [
+        "owner0",
+        "owner1"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "stable partition",
+      "reads": [
+        "owner0",
+        "owner1"
+      ],
+      "writes": [
+        "partition"
+      ]
+    },
+    {
+      "id": "flags",
+      "op": "classification flags / miss ranks",
+      "reads": [
+        "partition"
+      ],
+      "writes": [
+        "flags"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "consume tokens/owner then C stages LRU/ones, MTE3 drains before reuse",
+      "reads": [
+        "unique0",
+        "unique1",
+        "owner0",
+        "owner1",
+        "partition",
+        "flags"
+      ],
+      "writes": []
+    }
+  ]
+}

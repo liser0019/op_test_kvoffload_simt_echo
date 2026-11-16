@@ -1,0 +1,110 @@
+{
+  "inputs": [],
+  "outputs": [],
+  "pinned": [
+    "B1",
+    "B2"
+  ],
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge → B0,B1,B2,B3,B4,B5",
+      "reads": [],
+      "writes": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ]
+    },
+    {
+      "id": "drain_merge",
+      "op": "consume packet",
+      "reads": [
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "writes": []
+    },
+    {
+      "id": "stage_map",
+      "op": "CopyOut map",
+      "reads": [
+        "B0"
+      ],
+      "writes": []
+    },
+    {
+      "id": "lookup",
+      "op": "A: exact word masks + first UID + physical slot UID → B0,B3,B4",
+      "reads": [
+        "B1",
+        "B2"
+      ],
+      "writes": [
+        "B0",
+        "B3",
+        "B4"
+      ]
+    },
+    {
+      "id": "end_lookup",
+      "op": "all index readers complete before owner init",
+      "reads": [
+        "B0",
+        "B3"
+      ],
+      "writes": []
+    },
+    {
+      "id": "classify",
+      "op": "owner arbitration → B0,B3",
+      "reads": [
+        "B4",
+        "B1",
+        "B2"
+      ],
+      "writes": [
+        "B0",
+        "B3"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "stable partition → B4",
+      "reads": [
+        "B0",
+        "B3"
+      ],
+      "writes": [
+        "B4"
+      ]
+    },
+    {
+      "id": "flags",
+      "op": "classification flags / miss ranks → B5",
+      "reads": [
+        "B4"
+      ],
+      "writes": [
+        "B5"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "consume tokens/owner then C stages LRU/ones, MTE3 drains before reuse",
+      "reads": [
+        "B1",
+        "B2",
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "writes": []
+    }
+  ]
+}

@@ -131,7 +131,7 @@ class Checks(unittest.TestCase):
             p.joinpath('probe.cpp').write_text('''#include "sorted_cann_cpu.h"
 int main(){using namespace AscendC;alignas(32) uint16_t f[64];alignas(32) uint32_t out[64];
 for(int i=0;i<64;++i){f[i]=uint16_t(0x8000U+i);out[i]=12345;}
-Reg::RegTensor<uint32_t> v;Reg::LoadAlign<uint16_t,Reg::LoadDist::DIST_UNPACK_B16>(v,f);
+Reg::RegTensor<uint32_t> v;Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_UNPACK_B16>(v,reinterpret_cast<uint32_t*>(f));
 auto m=Reg::CreateMask<uint32_t>();for(int i=0;i<64;++i){assert(v.v[i]==f[i]);m.v[i]=i%2;}
 Reg::StoreAlign<uint32_t,Reg::StoreDist::DIST_NORM_B32>(out,v,m);
 for(int i=0;i<64;++i)assert(out[i]==(i%2?f[i]:12345));}''')

@@ -112,7 +112,11 @@ __simt_callee__ __aicore__ inline uint32_t SortedLower(P p, uint32_t n, int32_t 
   return lo;
 }
 
-#if JOINT_STAGE_EXEC
+#if JOINT_RANKPIPE
+#include "rankpipe_cold.h"
+#include "rankpipe_plan.h"
+#include "rankpipe_compact.h"
+#elif JOINT_STAGE_EXEC
 #include "stage_exec_plan.h"
 #else
 #include "layout_hot_plan.h"
@@ -137,6 +141,9 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
   const int64_t qb=first*static_cast<int64_t>(topk),cb=first*static_cast<int64_t>(capacity);
   if constexpr(Phase==0) {
     if(t==0U){
+#if JOINT_RANKPIPE
+      ctx[120]=0;
+#endif
       ctx[0]=1;ctx[1]=0;ctx[2]=-1;ctx[4]=0;ctx[6]=0;ctx[7]=0;ctx[28]=0;ctx[29]=0;
       uint32_t chunk=(3U*capacity>64U?3U*capacity:64U)/16U;
       if(chunk>768U)chunk=768U;ctx[3]=static_cast<int32_t>(chunk&~3U);
@@ -793,6 +800,10 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf
 #endif
 #endif
 
+#if JOINT_RANKPIPE
+#include "rankpipe_output.h"
+#endif
+
 template <bool AllowJoint>
 __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
     GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
@@ -1057,12 +1068,22 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
         if constexpr(JOINT_LAYOUT16==1 && (JOINT_LAYOUT_HOT_BITS&2U)){
           SORTED_CALL(6);SortedVectorToScalar(pipe);
           if(ctx[0]==1){
+#if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 2)
+            asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
+#else
             asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
+#endif
             SortedVectorToScalar(pipe);
             if(ctx[0]==1){SORTED_CALL(9);SortedVectorToScalar(pipe);}
           }
         }else{SORTED_CALL(5);SortedVectorToScalar(pipe);}
       }
+#if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 4)
+      // Inspect completion BEFORE fallback: the private path reuses the entire
+      // ctx/scratch region, so its bytes are no longer rank-pipeline metadata.
+      if(ctx[0]==2 && ctx[120]==1)
+        RankPipeCopyOutputs(pipe,local,ctx,first,static_cast<uint32_t>(d.topk),static_cast<uint32_t>(d.capacity),lruSlots,missTokens,missSlots);
+#endif
       if(ctx[0]!=2){SORTED_CALL(4);}
     }
     ++group;first=end;

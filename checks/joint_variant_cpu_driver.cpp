@@ -232,3 +232,8 @@ extern "C" __attribute__((visibility("default"))) void run_tuned_unique(
 #undef CPU_TUNE
 }
 #endif
+
+#if JOINT_RANKPIPE
+// CPU-only observer; absent from every device translation unit.
+extern "C" __attribute__((visibility("default"))) uint64_t cpu_mte_copies(){return AscendC::CpuMteCopies;}
+#endif

@@ -8,6 +8,7 @@
 #include <limits>
 #include <cmath>
 #include <type_traits>
+#include <functional>
 #include "cpu_runtime.h"
 inline uint32_t ColdCpuCalls=0;
 inline uint32_t SortedCpuBlock=0,SortedCpuBlocks=1;
@@ -20,21 +21,28 @@ template <auto F,typename... A> inline void asc_vf_call(dim3 d,A...a){
   SortedWorkers->Run([&]{F(a...);});
 }
 namespace AscendC {
-enum class HardEvent { V_S,S_V };
+enum class HardEvent { V_S,S_V,V_MTE3,MTE3_V };
+inline std::vector<std::function<void()>> CpuMtePending;
+inline bool CpuEventFlags[4]={false,false,false,false};
+inline bool CpuMteSourceReady=false;
+inline uint64_t CpuMteCopies=0;
 enum class TPosition { VECCALC };
 inline uint32_t GetBlockIdx(){return SortedCpuBlock;}
 inline uint32_t GetBlockNum(){return SortedCpuBlocks;}
-template <HardEvent E>inline void SetFlag(event_t){}
-template <HardEvent E>inline void WaitFlag(event_t){}
+template <HardEvent E>inline void SetFlag(event_t){auto i=static_cast<unsigned>(E);assert(!CpuEventFlags[i]);CpuEventFlags[i]=true;}
+template <HardEvent E>inline void WaitFlag(event_t){auto i=static_cast<unsigned>(E);assert(CpuEventFlags[i]);CpuEventFlags[i]=false;
+ if constexpr(E==HardEvent::V_MTE3)CpuMteSourceReady=true;
+ if constexpr(E==HardEvent::MTE3_V){for(auto& copy:CpuMtePending)copy();CpuMtePending.clear();CpuMteSourceReady=false;}
+}
 template <typename T>struct LocalTensor {
   T* p=nullptr;uint32_t n=0;
   void* GetPhyAddr(){return p;}
   LocalTensor operator[](uint32_t off)const {assert(off<=n && off%8U==0U);return {p+off,n-off};}
 };
-class TPipe {public:template<typename B>void InitBuffer(B&b,uint32_t n){b.Init(n);}bool allocated[2]={false,false};
+class TPipe {public:template<typename B>void InitBuffer(B&b,uint32_t n){b.Init(n);}bool allocated[4]={false,false,false,false};
   template<HardEvent E>uint32_t AllocEventID(){auto i=static_cast<unsigned>(E);assert(!allocated[i]);allocated[i]=true;return 0;}
   template<HardEvent E>void ReleaseEventID(uint32_t id){auto i=static_cast<unsigned>(E);assert(id==0&&allocated[i]);allocated[i]=false;}
-  ~TPipe(){assert(!allocated[0]&&!allocated[1]);}};
+  ~TPipe(){for(bool v:allocated)assert(!v);assert(CpuMtePending.empty());}};
 template <TPosition P>class TBuf {
   std::vector<int32_t> backing;uint32_t bytes=0,offset=16;
  public:
@@ -42,6 +50,20 @@ template <TPosition P>class TBuf {
   template<typename T>LocalTensor<T> Get(){return {reinterpret_cast<T*>(backing.data()+offset),static_cast<uint32_t>(bytes/sizeof(T))};}
   ~TBuf(){for(int i=0;i<16;++i){assert(backing[i]==0x1234567);assert(backing[backing.size()-1-i]==0x1234567);}}
 };
+template<typename T>struct GlobalTensor {
+ T* p=nullptr;uint64_t n=0;
+ void SetGlobalBuffer(T* ptr,uint64_t size){p=ptr;n=size;}
+};
+struct DataCopyExtParams {
+ uint16_t blockCount;uint32_t blockLen,srcStride,dstStride,reserved;
+ DataCopyExtParams(uint16_t n,uint32_t bytes,uint32_t src,uint32_t dst,uint32_t r):blockCount(n),blockLen(bytes),srcStride(src),dstStride(dst),reserved(r){}
+};
+template<typename T>void DataCopyPad(const GlobalTensor<T>& dst,const LocalTensor<T>& src,const DataCopyExtParams& p){
+ assert(CpuMteSourceReady && p.blockCount==1 && p.srcStride==0 && p.dstStride==0);
+ assert(p.blockLen%sizeof(T)==0 && p.blockLen/sizeof(T)<=src.n && p.blockLen/sizeof(T)<=dst.n);
+ assert(reinterpret_cast<uintptr_t>(src.p)%32U==0U);
+ CpuMtePending.emplace_back([=]{std::memcpy(dst.p,src.p,p.blockLen);});++CpuMteCopies;
+}
 template<typename T>struct MrgSortSrcList {LocalTensor<T> src1,src2,src3,src4;};
 #ifdef JOINT_MTP8
 inline uint64_t EightCpuMergeCalls=0; // CPU-only work-count observer, absent from device sources
@@ -101,8 +123,8 @@ template<typename T>MaskReg UpdateMask(uint32_t& n){MaskReg m;for(uint32_t i=0;i
 template<typename T,LoadDist dist=LoadDist::DIST_NORM,typename U>void LoadAlign(RegTensor<U>&o,T*p){
   assert(reinterpret_cast<uintptr_t>(p)%32==0);
   if constexpr(dist==LoadDist::DIST_UNPACK_B16){
-    static_assert(std::is_same_v<T,uint16_t> && std::is_same_v<U,uint32_t>);
-    for(int i=0;i<64;++i)o.v[i]=p[i];
+    static_assert(std::is_same_v<T,uint32_t> && std::is_same_v<U,uint32_t>,"CANN9.2.1 unpack uses uint32 source/register types");
+    for(int i=0;i<64;++i){uint16_t v;std::memcpy(&v,reinterpret_cast<const uint8_t*>(p)+2*i,2);o.v[i]=v;}
   }else{static_assert(dist==LoadDist::DIST_NORM && sizeof(T)==sizeof(U));for(int i=0;i<64;++i)o.v[i]=p[i];}
 }
 template<typename T,StoreDist dist=StoreDist::DIST_NORM_B32,typename U>void StoreAlign(T*p,RegTensor<U>&v,MaskReg&m){

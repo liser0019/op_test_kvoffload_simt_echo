@@ -446,3 +446,14 @@ bash scripts/test_stage_exec_sweep.sh --device 0 --requests 32 \
 ```
 
 一次构建，18路初筛后固定选两路，同库独立20样本复测；保留完整初筛表和条件效应表。详见 [中文说明与完整上机命令](docs/Stage512执行优化ABCD对照.md)。新候选仅完成本地CPU检查，尚未执行CANN/NPU验证。
+
+## Rank-pipeline三因素全组合
+
+冻结服务器已验证的`joint_stage_exec_abcd_512`，新增A精确UB位图排名、B分块两级前缀、C完整LRU/miss尾部MTE3输出及七种组合；control与独立ABCDF保留。512线程，32请求，MTP0/1/3/7对应4K/4K/8K/16K，UB申请不增加。
+
+```bash
+bash scripts/test_rankpipe_sweep.sh --device 0 --requests 32 \
+  --output /workspace/rankpipe_results --temp-dir /workspace/rankpipe_tmp
+```
+
+10路初筛后固定选两路独立复测，保留完整初筛与条件对照表。[中文设计、约束及完整服务器命令](docs/RankPipeline三因素对照.md)。新候选仅完成本地CPU验证，CANN编译及设备性能待验证。

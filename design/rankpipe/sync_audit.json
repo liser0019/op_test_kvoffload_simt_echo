@@ -1,0 +1,112 @@
+{
+  "files_scanned": [
+    "csrc/joint_variants/layout_hot_impl.h",
+    "csrc/joint_variants/rankpipe_cold.h",
+    "csrc/joint_variants/rankpipe_compact.h",
+    "csrc/joint_variants/rankpipe_output.h",
+    "csrc/joint_variants/rankpipe_plan.h"
+  ],
+  "event_count": 9,
+  "findings": [],
+  "events": [
+    {
+      "kind": "reg_membar",
+      "event_type": "V_V",
+      "flag_id": "",
+      "line": 586,
+      "file": "csrc/joint_variants/layout_hot_impl.h",
+      "func": "__simd_vf__ inline void HotCompactVf",
+      "raw": "Reg::LocalMemBar<Reg::MemType::VEC_ALL,Reg::MemType::VEC_ALL>",
+      "side": "",
+      "pipe_param": ""
+    },
+    {
+      "kind": "set",
+      "event_type": "V_S",
+      "flag_id": "id",
+      "line": 629,
+      "file": "csrc/joint_variants/layout_hot_impl.h",
+      "func": "__aicore__ inline void SortedVectorToScalar",
+      "raw": "SetFlag<AscendC::HardEvent::V_S>(",
+      "side": "",
+      "pipe_param": ""
+    },
+    {
+      "kind": "wait",
+      "event_type": "V_S",
+      "flag_id": "id",
+      "line": 629,
+      "file": "csrc/joint_variants/layout_hot_impl.h",
+      "func": "__aicore__ inline void SortedVectorToScalar",
+      "raw": "WaitFlag<AscendC::HardEvent::V_S>(",
+      "side": "",
+      "pipe_param": ""
+    },
+    {
+      "kind": "set",
+      "event_type": "S_V",
+      "flag_id": "id",
+      "line": 634,
+      "file": "csrc/joint_variants/layout_hot_impl.h",
+      "func": "__aicore__ inline void SortedScalarToVector",
+      "raw": "SetFlag<AscendC::HardEvent::S_V>(",
+      "side": "",
+      "pipe_param": ""
+    },
+    {
+      "kind": "wait",
+      "event_type": "S_V",
+      "flag_id": "id",
+      "line": 634,
+      "file": "csrc/joint_variants/layout_hot_impl.h",
+      "func": "__aicore__ inline void SortedScalarToVector",
+      "raw": "WaitFlag<AscendC::HardEvent::S_V>(",
+      "side": "",
+      "pipe_param": ""
+    },
+    {
+      "kind": "set",
+      "event_type": "V_MTE3",
+      "flag_id": "ready",
+      "line": 18,
+      "file": "csrc/joint_variants/rankpipe_output.h",
+      "func": "__aicore__ inline void RankPipeCopyOutputs",
+      "raw": "SetFlag<AscendC::HardEvent::V_MTE3>(",
+      "side": "",
+      "pipe_param": ""
+    },
+    {
+      "kind": "wait",
+      "event_type": "V_MTE3",
+      "flag_id": "ready",
+      "line": 19,
+      "file": "csrc/joint_variants/rankpipe_output.h",
+      "func": "__aicore__ inline void RankPipeCopyOutputs",
+      "raw": "WaitFlag<AscendC::HardEvent::V_MTE3>(",
+      "side": "",
+      "pipe_param": ""
+    },
+    {
+      "kind": "set",
+      "event_type": "MTE3_V",
+      "flag_id": "done",
+      "line": 31,
+      "file": "csrc/joint_variants/rankpipe_output.h",
+      "func": "__aicore__ inline void RankPipeCopyOutputs",
+      "raw": "SetFlag<AscendC::HardEvent::MTE3_V>(",
+      "side": "",
+      "pipe_param": ""
+    },
+    {
+      "kind": "wait",
+      "event_type": "MTE3_V",
+      "flag_id": "done",
+      "line": 32,
+      "file": "csrc/joint_variants/rankpipe_output.h",
+      "func": "__aicore__ inline void RankPipeCopyOutputs",
+      "raw": "WaitFlag<AscendC::HardEvent::MTE3_V>(",
+      "side": "",
+      "pipe_param": ""
+    }
+  ]
+}

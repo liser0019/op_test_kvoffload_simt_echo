@@ -73,7 +73,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 243, "joint variant mask must be 1..243");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 251, "joint variant mask must be 1..251");
     TORCH_CHECK(JointVariantLaunch(variantMask) != nullptr, "joint variant not compiled in this build");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
@@ -129,7 +129,7 @@ class Prepared : public torch::CustomClassHolder {
     const bool capacity8kAdapter = variantMask==212 || variantMask==213;
     const bool layout16=variantMask>=214;
     const uint64_t eightUbLimit = layout16 ? 204U*1024U : capacity8kAdapter && t==2048 && c==8192 ? 196U*1024U : 192U*1024U;
-    if((variantMask>=193 && variantMask<=243)){
+    if((variantMask>=193 && variantMask<=251)){
       // 8T map + C unique + max(3C owner/flags/partition, 3 merge buffers).
       d.scratchElements=std::max(d.workspaceRowElements,uint64_t{128}+((8U*t+c+7U)&~uint64_t{7U})+std::max(uint64_t{3}*c,uint64_t{24576}));
       if(layout16){
@@ -143,7 +143,7 @@ class Prepared : public torch::CustomClassHolder {
           "MTP8 UB layout exceeds budget (",eightUbLimit," bytes); only capacity8k adapters permit TopK2048/capacity8192 above192KiB; no silent GM fallback");
     }
     const uint64_t alignedBytes = (d.scratchElements * 4U + 31U) & ~uint64_t{31U};
-    const bool ub = alignedBytes <= ((variantMask>=193 && variantMask<=243)?eightUbLimit:sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_BYTES);
+    const bool ub = alignedBytes <= ((variantMask>=193 && variantMask<=251)?eightUbLimit:sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_BYTES);
     uint64_t stageBytes=0;
     if(algorithmMask>=37) {
       const uint64_t chunk=(std::min(uint64_t{768}, std::max(uint64_t{64},uint64_t{3}*c)/16U)/4U)*4U;

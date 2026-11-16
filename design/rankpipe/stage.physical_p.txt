@@ -1,0 +1,236 @@
+{
+  "P": 6,
+  "peak_step": "merge",
+  "warnings": [],
+  "lower_bound_check": {
+    "P": 6,
+    "inputs": 0,
+    "outputs": 0,
+    "bound": 0,
+    "triggered": false,
+    "message": "通过（P=6 ≥ 输入0+输出0=0）"
+  },
+  "trace": [
+    {
+      "id": "merge",
+      "op": "merge → B0,B1,B2,B3,B4,B5",
+      "before": [],
+      "during": [
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "drain_merge",
+      "op": "consume packet",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "stage_map",
+      "op": "CopyOut map",
+      "before": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "during": [
+        "B0"
+      ],
+      "after": [
+        "B1",
+        "B2"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "lookup",
+      "op": "A: exact word masks + first UID + physical slot UID → B0,B3,B4",
+      "before": [
+        "B1",
+        "B2"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "end_lookup",
+      "op": "all index readers complete before owner init",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4"
+      ],
+      "after": [
+        "B1",
+        "B2",
+        "B4"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "classify",
+      "op": "owner arbitration → B0,B3",
+      "before": [
+        "B1",
+        "B2",
+        "B4"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "stable partition → B4",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "flags",
+      "op": "classification flags / miss ranks → B5",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "consume tokens/owner then C stages LRU/ones, MTE3 drains before reuse",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "during": [
+        "B0",
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "after": [],
+      "pinned": [
+        "B1",
+        "B2"
+      ]
+    }
+  ]
+}

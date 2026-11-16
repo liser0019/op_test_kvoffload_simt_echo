@@ -1,0 +1,232 @@
+{
+  "value": 6,
+  "peak_step": "merge",
+  "mode": "P_baseline",
+  "pinned": [
+    "unique0",
+    "unique1"
+  ],
+  "trace": [
+    {
+      "id": "merge",
+      "op": "merge",
+      "before": [],
+      "during": [
+        "map",
+        "packet0",
+        "packet1",
+        "packet2"
+      ],
+      "after": [
+        "map",
+        "packet0",
+        "packet1",
+        "packet2",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "drain_merge",
+      "op": "consume packet",
+      "before": [
+        "map",
+        "packet0",
+        "packet1",
+        "packet2",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "packet0",
+        "packet1",
+        "packet2"
+      ],
+      "after": [
+        "map",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "stage_map",
+      "op": "CopyOut map",
+      "before": [
+        "map",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map"
+      ],
+      "after": [
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "lookup",
+      "op": "A: exact word masks + first UID + physical slot UID",
+      "before": [
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "slot_uid",
+        "word_masks",
+        "word_uid_bases"
+      ],
+      "after": [
+        "slot_uid",
+        "unique0",
+        "unique1",
+        "word_masks",
+        "word_uid_bases"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "end_lookup",
+      "op": "all index readers complete before owner init",
+      "before": [
+        "slot_uid",
+        "unique0",
+        "unique1",
+        "word_masks",
+        "word_uid_bases"
+      ],
+      "during": [
+        "slot_uid",
+        "word_masks",
+        "word_uid_bases"
+      ],
+      "after": [
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "classify",
+      "op": "owner arbitration",
+      "before": [
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "owner0",
+        "owner1",
+        "slot_uid"
+      ],
+      "after": [
+        "owner0",
+        "owner1",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "stable partition",
+      "before": [
+        "owner0",
+        "owner1",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "owner0",
+        "owner1",
+        "partition"
+      ],
+      "after": [
+        "owner0",
+        "owner1",
+        "partition",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "flags",
+      "op": "classification flags / miss ranks",
+      "before": [
+        "owner0",
+        "owner1",
+        "partition",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "flags",
+        "owner0",
+        "owner1",
+        "partition"
+      ],
+      "after": [
+        "flags",
+        "owner0",
+        "owner1",
+        "partition",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "consume tokens/owner then C stages LRU/ones, MTE3 drains before reuse",
+      "before": [
+        "flags",
+        "owner0",
+        "owner1",
+        "partition",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "flags",
+        "owner0",
+        "owner1",
+        "partition"
+      ],
+      "after": [],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    }
+  ]
+}
