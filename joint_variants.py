@@ -83,15 +83,24 @@ MASKS.update(CAPACITY8K_MASKS)
 CAPACITY8K_NAMES=tuple("joint_"+n for n in CAPACITY8K_MASKS)
 CAPACITY16_NAMES=("joint_mtp7_stage16_512","joint_mtp7_ub16_512")
 MASKS.update({"mtp7_stage16_512":214,"mtp7_ub16_512":215})
-def layout16_mode(name): return {CAPACITY16_NAMES[0]:1,CAPACITY16_NAMES[1]:2}.get(name,0)
+LAYOUT_HOT_COMBOS=("a","ab","ac","abc","acd","abcd")
+LAYOUT_HOT_MASKS={f"layout_{family}_{combo}_512":216+f*6+i for f,family in enumerate(("stage","ub")) for i,combo in enumerate(LAYOUT_HOT_COMBOS)}
+MASKS.update(LAYOUT_HOT_MASKS)
+LAYOUT_HOT_NAMES=tuple("joint_"+n for n in LAYOUT_HOT_MASKS)
+LAYOUT_HOT_REFS=("abcdf_pages",*CAPACITY16_NAMES)
+def layout_hot_bits(mask):
+    return sum({"a":1,"b":2,"c":4,"d":8}[x] for x in LAYOUT_HOT_COMBOS[(mask-216)%6]) if 216<=mask<=227 else 0
+def layout16_mode(name):
+    if name in LAYOUT_HOT_NAMES:return 1+(LAYOUT_HOT_MASKS[name[6:]]-216)//6
+    return {CAPACITY16_NAMES[0]:1,CAPACITY16_NAMES[1]:2}.get(name,0)
 def is_capacity8k(name): return name in CAPACITY8K_NAMES
-def fused_tune_bits(mask): return 3 if mask in (213,214,215) else mask-204 if 205<=mask<=211 else 0
+def fused_tune_bits(mask): return 3 if mask in (213,214,215) or 216<=mask<=227 else mask-204 if 205<=mask<=211 else 0
 MTP7_FUSED_TUNE_NAMES=tuple("joint_"+n for n in MTP7_FUSED_TUNE_MASKS)
 def mtp7_config(mask):
-    if not 193<=mask<=215:return None
-    return {'opt':0 if mask==193 else 1 if mask in (194,196,200,201,202,203,204) or 205<=mask<=215 else 2,
-            'reuse':mask in (196,197,199,200,201,202,203,204) or 205<=mask<=215,'tile':mask in (198,199)}
-def supports_eight_rows(name):return name==MTP8_NAME or name in (*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES,*CAPACITY16_NAMES)
+    if not 193<=mask<=227:return None
+    return {'opt':0 if mask==193 else 1 if mask in (194,196,200,201,202,203,204) or 205<=mask<=227 else 2,
+            'reuse':mask in (196,197,199,200,201,202,203,204) or 205<=mask<=227,'tile':mask in (198,199)}
+def supports_eight_rows(name):return name==MTP8_NAME or name in (*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES,*CAPACITY16_NAMES,*LAYOUT_HOT_NAMES)
 HOT_NAMES=tuple("joint_"+n for n in HOT_SWEEP)
 HOT_REFS=("abcdf_pages",BOUNDS_NAME,"joint_refine_abd_512","joint_refine_bd_512","joint_hot_base_512")
 def hot_config(name):
@@ -100,7 +109,7 @@ def hot_config(name):
     bits=value-159 if value<=190 else 0
     return {"bits":bits,"filter":bool(bits&1),"partition":bool(bits&2) or value==191,
             "miss":bool(bits&2) or value==192,"packet":bool(bits&4),"reuse":bool(bits&8),"fixed":bool(bits&16)}
-INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES,MTP8_NAME,*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES,*CAPACITY16_NAMES)
+INTEGRATED_NAMES=(INTEGRATED_NAME,BOUNDS_NAME,*REFINE_NAMES,*EXEC_NAMES,*HOT_NAMES,MTP8_NAME,*MTP7_FIX_NAMES,*MTP7_PACK_NAMES,*MTP7_PREFIX_NAMES,*MTP7_MERGE_NAMES,*MTP7_FUSED_TUNE_NAMES,*CAPACITY8K_NAMES,*CAPACITY16_NAMES,*LAYOUT_HOT_NAMES)
 INTEGRATED_COMPARE_NAMES=("abcdf_pages","joint_union_cold_512","joint_hw_ac_cold_512",INTEGRATED_NAME,BOUNDS_NAME)
 def supports_single_sorted(name):
     return name.startswith("joint_union_") or name in INTEGRATED_NAMES
@@ -117,14 +126,14 @@ def union_config(name):
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 216))
+TURBO_MASKS = tuple(range(17, 228))
 VARIANTS = {"private_a": 1, "private_turbo": 17} | {"joint_" + letters: mask for letters, mask in MASKS.items()}
 DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return 72 if 127<=mask<=215 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
+    return 72 if 127<=mask<=227 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -133,6 +142,9 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
+    if 216<=mask<=227:
+        mode=1+(mask-216)//6;bits=layout_hot_bits(mask)
+        return description(CAPACITY16_NAMES[mode-1]) | {"mask":mask,"capacity":"4096/8192/16384","scope":"capacity layout and hot classification factors; merge algorithm retained","layout_hot_bits":bits,"factors":LAYOUT_HOT_COMBOS[(mask-216)%6],"right_sized_UB":True,"max_query_positions": "capacity", "hot_compaction":"SIMD packed32 load" if mode==1 and bits&2 else "bitmap word prefix" if bits&2 else "parent SIMT Scan","physical_slot_staging":bool(bits&4),"directory_bins":1024 if bits&8 else 0,"UB_limit_bytes":204*1024,"dynamic_ub_bytes":"runtime capacity-specific; see layout metadata"}
     if mask in (214,215):
         return description("joint_mtp7_fused_ab_512") | {"mask":mask,"layout16":mask-213,"capacity":16384,"map_bits":16,"hot_compaction":"SIMT Scan","dynamic_ub_bytes":197408 if mask==214 else 203552,"map_staging_GM":mask==214,"status":"CPU candidate; NPU pending"}
     if mask in (212,213):

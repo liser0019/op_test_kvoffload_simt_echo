@@ -1,0 +1,88 @@
+{
+  "pinned": [
+    "unique0",
+    "unique1"
+  ],
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge",
+      "inputs": [],
+      "outputs": [
+        "map",
+        "unique0",
+        "unique1",
+        "packet0",
+        "packet1",
+        "packet2"
+      ]
+    },
+    {
+      "id": "drain_merge",
+      "op": "consume packet",
+      "inputs": [
+        "packet0",
+        "packet1",
+        "packet2"
+      ],
+      "outputs": []
+    },
+    {
+      "id": "lookup",
+      "op": "directory temporary / slot UID temporary",
+      "inputs": [
+        "unique0",
+        "unique1"
+      ],
+      "outputs": [
+        "directory",
+        "slot_uid"
+      ]
+    },
+    {
+      "id": "end_lookup",
+      "op": "finish directory consumers",
+      "inputs": [
+        "directory"
+      ],
+      "outputs": []
+    },
+    {
+      "id": "classify",
+      "op": "owner arbitration",
+      "inputs": [
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "outputs": [
+        "owner0",
+        "owner1"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "stable partition",
+      "inputs": [
+        "owner0",
+        "owner1"
+      ],
+      "outputs": [
+        "partition"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "inputs": [
+        "unique0",
+        "unique1",
+        "owner0",
+        "owner1",
+        "partition",
+        "map"
+      ],
+      "outputs": []
+    }
+  ]
+}

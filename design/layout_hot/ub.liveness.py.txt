@@ -1,0 +1,191 @@
+{
+  "value": 6,
+  "peak_step": "merge",
+  "mode": "P_baseline",
+  "pinned": [
+    "unique0",
+    "unique1"
+  ],
+  "trace": [
+    {
+      "id": "merge",
+      "op": "merge",
+      "before": [],
+      "during": [
+        "map",
+        "packet0",
+        "packet1",
+        "packet2"
+      ],
+      "after": [
+        "map",
+        "packet0",
+        "packet1",
+        "packet2",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "drain_merge",
+      "op": "consume packet",
+      "before": [
+        "map",
+        "packet0",
+        "packet1",
+        "packet2",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "packet0",
+        "packet1",
+        "packet2"
+      ],
+      "after": [
+        "map",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "lookup",
+      "op": "directory temporary / slot UID temporary",
+      "before": [
+        "map",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "directory",
+        "map",
+        "slot_uid"
+      ],
+      "after": [
+        "directory",
+        "map",
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "end_lookup",
+      "op": "finish directory consumers",
+      "before": [
+        "directory",
+        "map",
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "directory",
+        "map",
+        "slot_uid"
+      ],
+      "after": [
+        "map",
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "classify",
+      "op": "owner arbitration",
+      "before": [
+        "map",
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "owner0",
+        "owner1",
+        "slot_uid"
+      ],
+      "after": [
+        "map",
+        "owner0",
+        "owner1",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "stable partition",
+      "before": [
+        "map",
+        "owner0",
+        "owner1",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "owner0",
+        "owner1",
+        "partition"
+      ],
+      "after": [
+        "map",
+        "owner0",
+        "owner1",
+        "partition",
+        "unique0",
+        "unique1"
+      ],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "before": [
+        "map",
+        "owner0",
+        "owner1",
+        "partition",
+        "unique0",
+        "unique1"
+      ],
+      "during": [
+        "map",
+        "owner0",
+        "owner1",
+        "partition"
+      ],
+      "after": [],
+      "pinned": [
+        "unique0",
+        "unique1"
+      ]
+    }
+  ]
+}

@@ -8,7 +8,13 @@ from harness_io import write_json
 
 def gate(torch,a,workloads,environment,destination):
  records=[];evidence={n:{} for n in a.implementations};failed=destination/'failure_state';regression={}
- for label,c in [*cases(),*((f"performance/{c['scenario']}/mtp{c['mtp']}",c) for c in workloads)]:
+ extra=[]
+ if a.suite=='layout_hot':
+  for cap,m in ((4096,1),(8192,3),(16384,7)):
+   c=sort_topk(make_case(1,2048,cap,262144,m,'full_cache_75pct','overlap40',history_pool_tokens=cap))
+   c['slot_to_token'][:,:2]=int(c['topk_indices'][0,0])
+   extra.append((f'duplicate_resident/{cap}',c))
+ for label,c in [*cases(),*extra,*((f"performance/{c['scenario']}/mtp{c['mtp']}",c) for c in workloads)]:
   for name in a.implementations:
    b=common.prepare(torch,c,name);b['fast_fixed_check']=True
    try:
@@ -19,24 +25,25 @@ def gate(torch,a,workloads,environment,destination):
   print('16K门禁:',label,'通过',flush=True)
  continuous=[]
  for name in a.implementations:
-  c=sort_topk(make_case(1,2048,16384,262144,7,'cold_reset','overlap40',history_pool_tokens=16384))
-  b=common.prepare(torch,c,name)
-  try:
-   for step in range(7):
-    if step==2:c['req_ids']+=99
-    if step==3:c['stable_prefix_lens'][:]=1000
-    if step==4:c['active_rows']=1
-    if step==5:c['active_rows']=8
-    common.update_inputs(torch,b,c);common.poison(b);torch.npu.synchronize()
-    before=common.snapshot(b);b['phase']=f'continuous-{step}'
-    try:common.invoke(b);torch.npu.synchronize();result=common.check(c,b,before)
-    except BaseException:common.dump_failure(c,b,failed);raise
-    continuous.append({'implementation':name,'step':step,'result':result})
-  finally:common.close(b)
+  for cap,m in (((4096,1),(8192,3),(16384,7)) if a.suite=='layout_hot' else ((16384,7),)):
+   c=sort_topk(make_case(1,2048,cap,262144,m,'cold_reset','overlap40',history_pool_tokens=cap))
+   b=common.prepare(torch,c,name)
+   try:
+    for step in range(7):
+     if step==2:c['req_ids']+=99
+     if step==3:c['stable_prefix_lens'][:]=1000
+     if step==4:c['active_rows']=1
+     if step==5:c['active_rows']=m+1
+     common.update_inputs(torch,b,c);common.poison(b);torch.npu.synchronize()
+     before=common.snapshot(b);b['phase']=f'continuous-{step}'
+     try:common.invoke(b);torch.npu.synchronize();result=common.check(c,b,before)
+     except BaseException:common.dump_failure(c,b,failed);raise
+     continuous.append({'implementation':name,'step':step,'capacity':cap,'result':result})
+   finally:common.close(b)
  result={'status':'passed','environment':environment,'exact_workloads':evidence,'gate':{
   'status':'passed','implementations':list(a.implementations),'validation_scope':'mtp8_v1: capacity16 exact boundary, duplicate, invalidation, continuous mode switch',
   'input_write_regression':{'status':'passed','checked_iterations':a.regression_repeat,'per_implementation':regression,'input_restore':False},
-  'capacity16_boundary':'passed','cases':records,'continuous':continuous}}
+  'layout_hot_boundary':'passed' if a.suite=='layout_hot' else None,'capacity16_boundary':'passed','cases':records,'continuous':continuous}}
  write_json(destination/'gate.json',result);return result
 
 def report_text(report):
@@ -47,6 +54,6 @@ def report_text(report):
  for run in report['runs']:
   w=run['workload'];base=run['stats']['abcdf_pages']['p50_us']
   for n,s in run['stats'].items():
-   c=s['correctness'];lines.append(f"| {w['scenario']}/{w['mtp']} | {n} | {s['p50_us']:.3f}/{s['p95_us']:.3f} | {s['count']} | {s['p50_us']/base:.3f} | {c.get('joint_groups',0)}/{c.get('overflow_groups',0)} | {c['total_transfer_descriptors']} |")
+   c=s['correctness'];lines.append(f"| {w['scenario']}/{w['mtp']}/{w['capacity']} | {n} | {s['p50_us']:.3f}/{s['p95_us']:.3f} | {s['count']} | {s['p50_us']/base:.3f} | {c.get('joint_groups',0)}/{c.get('overflow_groups',0)} | {c['total_transfer_descriptors']} |")
  lines+=['','实际miss、路径计数、原始CSV、逐样本数据、身份和墙钟时间见capture_metadata.json/data_index.json。固定地址预热；未测Transfer/SFA。']
  return '\n'.join(lines)+'\n'

@@ -1,0 +1,90 @@
+{
+  "inputs": [],
+  "outputs": [],
+  "pinned": [
+    "unique0",
+    "unique1"
+  ],
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge",
+      "reads": [],
+      "writes": [
+        "map",
+        "unique0",
+        "unique1",
+        "packet0",
+        "packet1",
+        "packet2"
+      ]
+    },
+    {
+      "id": "drain_merge",
+      "op": "consume packet",
+      "reads": [
+        "packet0",
+        "packet1",
+        "packet2"
+      ],
+      "writes": []
+    },
+    {
+      "id": "lookup",
+      "op": "directory temporary / slot UID temporary",
+      "reads": [
+        "unique0",
+        "unique1"
+      ],
+      "writes": [
+        "directory",
+        "slot_uid"
+      ]
+    },
+    {
+      "id": "end_lookup",
+      "op": "finish directory consumers",
+      "reads": [
+        "directory"
+      ],
+      "writes": []
+    },
+    {
+      "id": "classify",
+      "op": "owner arbitration",
+      "reads": [
+        "slot_uid",
+        "unique0",
+        "unique1"
+      ],
+      "writes": [
+        "owner0",
+        "owner1"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "stable partition",
+      "reads": [
+        "owner0",
+        "owner1"
+      ],
+      "writes": [
+        "partition"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "reads": [
+        "unique0",
+        "unique1",
+        "owner0",
+        "owner1",
+        "partition",
+        "map"
+      ],
+      "writes": []
+    }
+  ]
+}

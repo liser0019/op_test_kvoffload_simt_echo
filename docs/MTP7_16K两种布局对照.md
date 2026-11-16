@@ -14,7 +14,7 @@
 ## 数据流与空间
 
 两候选保留硬件MrgSort、AB硬件消费量复用和完整64记录块解交织加载；主路径512线程，八路上限612记录/路，fallback1024线程。
-映射区域固定32KiB（即便单行），unique64KiB，归并区96KiB。每阶段均使用同一段UB。
+映射区域固定32KiB（即便单行），unique按capacity占16/32/64KiB；以下空间说明以最大16K容量举例，归并区96KiB。每阶段均使用同一段UB。
 
 stage16：热规划前按32位打包将query→UID写入独立GM workspace。该映射大小只随query数变化，低容量MTP仍按最大布局预留UB。随后旧映射区作为32KiB uint16 flags；旧归并区分作owner64KiB与partition32KiB。最后由写入该GM word的同一线程读回两个UID，输出两个currentSlots；不涉及Scalar/DMA读取该GM中间值。MTP7、32请求时GM映射分配1MiB，逻辑新增写+读2MiB/调用；实际物理HBM流量取决于cache。冷reset直接使用UB映射，不做这笔暂存。
 
@@ -28,7 +28,7 @@ unique中的token位置保持int32。owner保留int32原子max以维持重复res
 
 ## 语义和门禁
 
-限定TopK2048/capacity16384，其他形状由host明确拒绝。1/2/4/8行按原协议，超出支持条件仍走原private回退；不是扩大UB门禁后允许任意形状。正常八行最多16384项，因此合法query的并集不会超过16384，但回退检查保留。
+限定TopK2048，capacity取4096/8192/16384，其他形状由host明确拒绝。1/2/4/8行按原协议，超出支持条件仍走原private回退；不是扩大UB门禁后允许任意形状。正常八行最多16384项，因此合法query的并集不会超过16384，但回退检查保留。
 
 CPU检查执行真实VF/controller，经C++桩模拟硬件API，使用UBSan、输入不变性及缓冲保护区；覆盖四档MTP、动态容量、精确4096/8192/16384并集、重复token、无效区间、重复resident及连续状态。CPU通过不代表CANN编译、缓存一致性或NPU性能通过。
 

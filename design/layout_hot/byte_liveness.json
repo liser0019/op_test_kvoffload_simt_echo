@@ -1,0 +1,2779 @@
+{
+  "status": "passed",
+  "count": 36,
+  "scope": "source byte intervals; excludes compiler spill and hardware cache effects",
+  "records": [
+    {
+      "name": "layout_stage_a_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_a_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_a_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 197408,
+      "maximum_live_end_in_data_bytes": 196608,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_ab_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_ab_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_ab_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 197408,
+      "maximum_live_end_in_data_bytes": 196608,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_ac_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_ac_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_ac_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 197408,
+      "maximum_live_end_in_data_bytes": 196608,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_abc_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_abc_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_abc_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 197408,
+      "maximum_live_end_in_data_bytes": 196608,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_acd_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_acd_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_acd_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 197408,
+      "maximum_live_end_in_data_bytes": 196608,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_abcd_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_abcd_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_stage_abcd_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 197408,
+      "maximum_live_end_in_data_bytes": 196608,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "flags",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "flags"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_a_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_a_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_a_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 203552,
+      "maximum_live_end_in_data_bytes": 202752,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_ab_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_ab_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_ab_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 205600,
+      "maximum_live_end_in_data_bytes": 204800,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_ac_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_ac_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_ac_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 203552,
+      "maximum_live_end_in_data_bytes": 202752,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_abc_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_abc_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_abc_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 205600,
+      "maximum_live_end_in_data_bytes": 204800,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_acd_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_acd_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_acd_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 203552,
+      "maximum_live_end_in_data_bytes": 202752,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_abcd_512",
+      "capacity": 4096,
+      "dynamic_ub_bytes": 123680,
+      "maximum_live_end_in_data_bytes": 122880,
+      "regions": {
+        "map": [
+          0,
+          8192
+        ],
+        "flags": [
+          0,
+          8192
+        ],
+        "unique": [
+          8192,
+          24576
+        ],
+        "owner": [
+          24576,
+          40960
+        ],
+        "directory": [
+          24576,
+          28676
+        ],
+        "slot_uid": [
+          40960,
+          49152
+        ],
+        "partition": [
+          40960,
+          49152
+        ],
+        "packet": [
+          24576,
+          122880
+        ],
+        "bitmaps": [
+          49152,
+          50688
+        ],
+        "prefix": [
+          50688,
+          51200
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_abcd_512",
+      "capacity": 8192,
+      "dynamic_ub_bytes": 148256,
+      "maximum_live_end_in_data_bytes": 147456,
+      "regions": {
+        "map": [
+          0,
+          16384
+        ],
+        "flags": [
+          0,
+          16384
+        ],
+        "unique": [
+          16384,
+          49152
+        ],
+        "owner": [
+          49152,
+          81920
+        ],
+        "directory": [
+          49152,
+          53252
+        ],
+        "slot_uid": [
+          81920,
+          98304
+        ],
+        "partition": [
+          81920,
+          98304
+        ],
+        "packet": [
+          49152,
+          147456
+        ],
+        "bitmaps": [
+          98304,
+          101376
+        ],
+        "prefix": [
+          101376,
+          102400
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map",
+          "directory"
+        ]
+      }
+    },
+    {
+      "name": "layout_ub_abcd_512",
+      "capacity": 16384,
+      "dynamic_ub_bytes": 205600,
+      "maximum_live_end_in_data_bytes": 204800,
+      "regions": {
+        "map": [
+          0,
+          32768
+        ],
+        "flags": [
+          0,
+          32768
+        ],
+        "unique": [
+          32768,
+          98304
+        ],
+        "owner": [
+          98304,
+          163840
+        ],
+        "directory": [
+          98304,
+          102404
+        ],
+        "slot_uid": [
+          163840,
+          196608
+        ],
+        "partition": [
+          163840,
+          196608
+        ],
+        "packet": [
+          98304,
+          196608
+        ],
+        "bitmaps": [
+          196608,
+          202752
+        ],
+        "prefix": [
+          202752,
+          204800
+        ]
+      },
+      "phases": {
+        "merge": [
+          "map",
+          "unique",
+          "packet"
+        ],
+        "classify": [
+          "unique",
+          "owner",
+          "map",
+          "bitmaps",
+          "slot_uid"
+        ],
+        "partition": [
+          "unique",
+          "owner",
+          "partition",
+          "map",
+          "bitmaps",
+          "prefix"
+        ],
+        "commit": [
+          "unique",
+          "owner",
+          "partition",
+          "map"
+        ],
+        "physical_lookup": [
+          "unique",
+          "slot_uid",
+          "map",
+          "directory"
+        ]
+      }
+    }
+  ]
+}

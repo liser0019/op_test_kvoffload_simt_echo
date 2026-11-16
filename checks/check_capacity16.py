@@ -17,7 +17,7 @@ def cases():
   c=sort_topk(make_case(1,2048,cap,262144,m,'cold_reset','disjoint'))
   for row in range(m+1):c['topk_indices'][row]=100000+2048*row+np.arange(2048,dtype=np.int32)
   yield f'exact{cap}',c
- c={k:v.copy() if isinstance(v,np.ndarray) else v for k,v in c.items()};c['topk_indices'][:]=100000
+ c=sort_topk(make_case(1,2048,16384,262144,7,'cold_reset','shared'));c['topk_indices'][:]=100000
  yield 'duplicates',c
  c=sort_topk(make_case(1,2048,16384,262144,7,'full_cache_75pct','overlap40',history_pool_tokens=16384))
  c['stable_prefix_lens'][:]=1000

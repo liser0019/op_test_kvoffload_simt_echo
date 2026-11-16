@@ -628,7 +628,11 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(PLAN_THREADS) inline void SparseKvPlanRuntim
 #include "refine_options.h"
 #ifdef JOINT_MTP8
 #if JOINT_LAYOUT16
+#if JOINT_LAYOUT_HOT_BITS
+#include "layout_hot_impl.h"
+#else
 #include "capacity16_impl.h"
+#endif
 #else
 #include "mtp8_plan_impl.h"
 #endif

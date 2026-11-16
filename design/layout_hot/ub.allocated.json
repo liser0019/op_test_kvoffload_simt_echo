@@ -1,0 +1,90 @@
+{
+  "inputs": [],
+  "outputs": [],
+  "pinned": [
+    "B1",
+    "B2"
+  ],
+  "steps": [
+    {
+      "id": "merge",
+      "op": "merge → B0,B1,B2,B3,B4,B5",
+      "reads": [],
+      "writes": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5"
+      ]
+    },
+    {
+      "id": "drain_merge",
+      "op": "consume packet",
+      "reads": [
+        "B3",
+        "B4",
+        "B5"
+      ],
+      "writes": []
+    },
+    {
+      "id": "lookup",
+      "op": "directory temporary / slot UID temporary → B3,B4",
+      "reads": [
+        "B1",
+        "B2"
+      ],
+      "writes": [
+        "B3",
+        "B4"
+      ]
+    },
+    {
+      "id": "end_lookup",
+      "op": "finish directory consumers",
+      "reads": [
+        "B3"
+      ],
+      "writes": []
+    },
+    {
+      "id": "classify",
+      "op": "owner arbitration → B3,B5",
+      "reads": [
+        "B4",
+        "B1",
+        "B2"
+      ],
+      "writes": [
+        "B3",
+        "B5"
+      ]
+    },
+    {
+      "id": "partition",
+      "op": "stable partition → B4",
+      "reads": [
+        "B3",
+        "B5"
+      ],
+      "writes": [
+        "B4"
+      ]
+    },
+    {
+      "id": "commit",
+      "op": "CopyOut",
+      "reads": [
+        "B1",
+        "B2",
+        "B3",
+        "B5",
+        "B4",
+        "B0"
+      ],
+      "writes": []
+    }
+  ]
+}
