@@ -68,12 +68,14 @@ def read_csvs(paths,orders,repeat,exact=None):
             if not indexer or len(plan)!=1:raise RuntimeError('split Indexer/Plan cardinality mismatch')
             finish=max(r['start_us']+r['duration_us'] for r in indexer)
             gap=plan[0]['start_us']-finish
-            if gap < -0.05:raise RuntimeError('Plan starts before ordered Indexer finishes')
+            tolerance=max(0.05,4*math.ulp(max(abs(finish),abs(plan[0]['start_us']))))
+            if gap < -tolerance:raise RuntimeError('Plan starts before ordered Indexer finishes')
             result.update(indexer_span_us=finish-start,plan_us=plan[0]['duration_us'],between_kernel_gap_us=max(0.,gap))
         if pairs:
             prev=pairs[-1]
             prev_end=max(r['start_us']+r['duration_us'] for r in prev['components'])
-            if start<prev_end-0.05:raise RuntimeError('different invocations overlap unexpectedly')
+            tolerance=max(0.05,4*math.ulp(max(abs(start),abs(prev_end))))
+            if start<prev_end-tolerance:raise RuntimeError('different invocations overlap unexpectedly')
         pairs.append(result)
     if position!=len(records):raise RuntimeError('unconsumed target records')
     return pairs,sorted(inventory)

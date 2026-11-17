@@ -14,7 +14,7 @@ import traceback
 import numpy as np
 from compare import summary
 import joint_plan_common as common
-from joint_plan_cases import make_case,describe,initial_arrays
+from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
 from fusion.metrics import read_csvs
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
 from scripts.prepare_qli_fusion import NAMES,source_id
@@ -41,8 +41,10 @@ def load_operators(manifest):
     if manifest['source_id']!=source_id():raise RuntimeError('fusion source/manifest mismatch; rebuild required')
     operators={};identities={}
     for mode,name in NAMES.items():
-        module=importlib.import_module('cann_ops_transformer_qlifusion.ops.attention.'+name)
-        native=getattr(module,name+'_op_builder').load()
+        package='cann_ops_transformer_qlifusion.ops.attention.'+name
+        module=importlib.import_module(package)
+        binding=importlib.import_module(package+'.'+name)
+        native=getattr(binding,name+'_op_builder').load()
         if native._fusion_identity()!=manifest['source_id']:raise RuntimeError(name+': stale compiled torch extension')
         path=Path(native.__file__)
         identities[name]={'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -126,11 +128,18 @@ def operator_kwargs(inputs,bundle,ready,workspace=None):
 
 
 def main_run(args,report):
-    torch,torch_npu,device=common.load_runtime(args)
     build=Path(args.fusion_build).resolve();manifest=json.loads((build/'manifest.json').read_text())
-    custom=os.environ.get('ASCEND_CUSTOM_OPP_PATH','')
-    if not custom or not Path(custom.split(':')[0]).resolve().is_relative_to(build/'install'):
-        raise RuntimeError('source this build\'s env.sh; its dedicated vendor must be first in ASCEND_CUSTOM_OPP_PATH')
+    vendor=(build/'install'/'vendors'/'qlifusion_transformer').resolve()
+    def prefer_vendor():
+        parts=[p for p in os.environ.get('ASCEND_CUSTOM_OPP_PATH','').split(':') if p]
+        parts=[p for p in parts if Path(p).resolve()!=vendor]
+        custom=':'.join([str(vendor),*parts]);os.environ['ASCEND_CUSTOM_OPP_PATH']=custom
+        return custom
+    # Global sitecustomize/backend autoload can prepend fla_npu during imports.
+    # Restore this dedicated vendor immediately before and after runtime loading.
+    prefer_vendor();torch,torch_npu,device=common.load_runtime(args);custom=prefer_vendor()
+    if Path(custom.split(':')[0]).resolve()!=vendor:
+        raise RuntimeError('failed to place dedicated vendor first in ASCEND_CUSTOM_OPP_PATH')
     if not manifest.get('installed_files'):raise RuntimeError('installed package identity missing; rebuild with scripts/build_qli_fusion.sh')
     for name,digest in manifest['installed_files'].items():
         f=build/'install'/name
@@ -153,7 +162,7 @@ def main_run(args,report):
         readonly={k:v.clone() for k,v in inputs.qli.items() if torch.is_tensor(v)}
         host_table_before=inputs.plan_metadata['host_block_table'].clone()
         qli_hash=fingerprint_qli(torch,inputs.qli|{'plan_host_block_table':inputs.plan_metadata['host_block_table']})
-        dummy_case=make_case(args.requests,2048,capacity,max(262144,context),mtp,'cold_reset','shared',seed=args.seed,block_size=128)
+        dummy_case=sort_topk(make_case(args.requests,2048,capacity,max(262144,context),mtp,'cold_reset','shared',seed=args.seed,block_size=128))
         dummy=common.prepare(torch,dummy_case,BASE);common.close(dummy)
         for key in ('req_ids','stable_prefix_lens','visible_seq_lens','token_to_req'):
             dummy['inputs'][key].copy_(inputs.plan_metadata[key])

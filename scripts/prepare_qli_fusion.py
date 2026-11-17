@@ -34,7 +34,8 @@ def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
 def overlay(folder,mode):
-    op=NAMES[mode];kernel=folder/'op_kernel';host=folder/'op_host'
+    op=NAMES[mode];suffix='Split' if mode==0 else 'ABC'[mode-1]
+    kernel=folder/'op_kernel';host=folder/'op_host'
     for name in ('plan.h','storage.h','resources.h'):
         shutil.copy2(ROOT/'csrc/qli_fusion'/name,kernel/'plan'/name)
     config=(ROOT/'csrc/joint_plan/sparse_kv_plan_config.h').read_text()
@@ -59,8 +60,10 @@ def overlay(folder,mode):
     resource=f'#define QLI_PLAN_STORAGE {mode}\n'+(ROOT/'csrc/qli_fusion/resources.h').read_text()
     (host/'qli_plan_resources.h').write_text(resource)
     binding=folder/'torch_extension/csrc'/f'{op}.cpp'
-    (binding.parent/'qli_plan_resources.h').write_text(resource)
-    s=binding.read_text();s='#include "qli_plan_resources.h"\n'+s
+    resource_name=f'qli_plan_resources_{suffix.lower()}.h'
+    common=folder.parent.parent/'torch_extension/cann_ops_transformer/common';common.mkdir(parents=True,exist_ok=True)
+    (common/resource_name).write_text(resource)
+    s=binding.read_text();s=f'#include "{resource_name}"\n'+s
     start=s.index('    const uint64_t scratch = PlanScratchElements(')
     end=s.index('\n    char *layoutQueryPtr',start)
     s=s[:start]+'''    TORCH_CHECK(sparseCount==2048 && (capacity==4096 || capacity==8192 || capacity==16384), "fusion experiment shape unsupported");

@@ -220,9 +220,11 @@ def _check_uncached(case, bundle, before=None):
                         merge=True, float_keys=True, single_sorted=True,
                         max_group_rows=case["q_len"], require_power_two_groups=False)
     layout_info = bundle.get("layout", {})
-    max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
-                   if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
-    if bundle["name"] in SORTED_NAMES: max_queries=(8 if supports_eight_rows(bundle["name"]) else 4)*case["topk"] if bundle["joint_enabled"] else None
+    if bundle["name"] in SORTED_NAMES:
+        max_queries=(8 if supports_eight_rows(bundle["name"]) else 4)*case["topk"] if bundle["joint_enabled"] else None
+    else:
+        max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
+                       if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
     return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=supports_single_sorted(bundle["name"]),max_group_rows=8 if supports_eight_rows(bundle["name"]) else 4)
 
 

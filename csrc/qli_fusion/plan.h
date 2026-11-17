@@ -40,6 +40,9 @@
 #define JOINT_RANKPIPE 1
 #define JOINT_RANKPIPE_BITS 5
 #define EIGHT_MAP_ARGUMENT(q,t) , (d.capacity/2U)
+#define QLI_OWNER_OFFSET(value) ((static_cast<uint32_t>(value)/2U)+(QLI_PLAN_STORAGE==3?2048U:static_cast<uint32_t>(value)/2U))
+#define QLI_MAP_WORDS(requests,topk) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(topk)/2U)
+#define QLI_UNIQUE_GM_WORDS(requests,capacity) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(capacity))
 namespace qli_fused_plan {
 using sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_ELEMENTS;
 using sparse_kv_plan_config::PLAN_SCAN_STORAGE_ELEMENTS;
@@ -804,8 +807,8 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
     __ubuf__ int32_t* scan,__gm__ int32_t* workspace) {
   const uint32_t t=threadIdx.x,c=a.capacity,topk=a.topk,q=(end-first)*topk,u=ctx[1];
   auto* map=reinterpret_cast<__ubuf__ uint16_t*>(data);
-  auto unique=FusionUnique{data,workspace+qli_fusion_resource::MapWords(a.maxRequests,a.topk)+first*c,a.topkIndices,first*a.topk,c,0U,end-first==1,ctx+48};
-  auto* owner=data+qli_fusion_resource::OwnerOffset(c);
+  auto unique=FusionUnique{data,workspace+QLI_MAP_WORDS(a.maxRequests,a.topk)+first*c,a.topkIndices,first*a.topk,c,0U,end-first==1,ctx+48};
+  auto* owner=data+QLI_OWNER_OFFSET(c);
   auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
   auto* bits=reinterpret_cast<__ubuf__ uint32_t*>(part+c);
   auto* flags=map;
@@ -947,7 +950,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void RankPipeCompactV
     uint32_t c,uint32_t u){
   const uint32_t t=threadIdx.x;
   auto* flags=reinterpret_cast<__ubuf__ uint16_t*>(data);
-  auto* owner=data+qli_fusion_resource::OwnerOffset(c);
+  auto* owner=data+QLI_OWNER_OFFSET(c);
   auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
   uint32_t hits=0U,misses=0U,parity=0U;
   for(uint32_t block=0;block<c;block+=32U*SORTED_THREADS){
@@ -994,8 +997,8 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
   const uint32_t t=static_cast<uint32_t>(threadIdx.x), rows=static_cast<uint32_t>(end-first);
   const bool packedMap = EightMapIsPacked(rows, topk);
   const uint32_t mapWords = capacity/2U;
-  P map=data, owner=data+qli_fusion_resource::OwnerOffset(capacity);
-  auto unique=FusionUnique{data,mapWorkspace+qli_fusion_resource::MapWords(a.maxRequests,topk)+first*capacity,a.topkIndices,first*static_cast<int64_t>(topk),capacity,0U,end-first==1,ctx+48};
+  P map=data, owner=data+QLI_OWNER_OFFSET(capacity);
+  auto unique=FusionUnique{data,mapWorkspace+QLI_MAP_WORDS(a.maxRequests,topk)+first*capacity,a.topkIndices,first*static_cast<int64_t>(topk),capacity,0U,end-first==1,ctx+48};
   auto* map16 = reinterpret_cast<__ubuf__ uint16_t*>(ctx + EIGHT_CTX);
   const uint32_t q=rows*topk;
   const int64_t qb=first*static_cast<int64_t>(topk),cb=first*static_cast<int64_t>(capacity);
@@ -1187,17 +1190,17 @@ __simt_vf__ __aicore__ LAUNCH_BOUND((Phase==4?PLAN_THREADS:SORTED_THREADS)) inli
     if(jointHashCapacity==0U){
       for(int64_t row=rowStart;row<numReqs;row+=rowStride){
         if(false)RunPrivateRow(args,row,scanWorkspace+PLAN_SCAN_STORAGE_ELEMENTS,scanWorkspace,thread);
-        else RunPrivateRow(args,row,compactWorkspace+qli_fusion_resource::MapWords(maxRequests,topk)+qli_fusion_resource::UniqueGmWords(maxRequests,capacity)+static_cast<uint64_t>(row)*workspaceRowElements,scanWorkspace,thread);
+        else RunPrivateRow(args,row,compactWorkspace+QLI_MAP_WORDS(maxRequests,topk)+QLI_UNIQUE_GM_WORDS(maxRequests,capacity)+static_cast<uint64_t>(row)*workspaceRowElements,scanWorkspace,thread);
       }
     }else for(int64_t row=rowStart;row<rowStride;++row){
       if(false)RunPrivateRow(args,row,scanWorkspace+PLAN_SCAN_STORAGE_ELEMENTS,scanWorkspace,thread);
-      else RunPrivateRow(args,row,compactWorkspace+qli_fusion_resource::MapWords(maxRequests,topk)+qli_fusion_resource::UniqueGmWords(maxRequests,capacity)+static_cast<uint64_t>(row)*workspaceRowElements,scanWorkspace,thread);
+      else RunPrivateRow(args,row,compactWorkspace+QLI_MAP_WORDS(maxRequests,topk)+QLI_UNIQUE_GM_WORDS(maxRequests,capacity)+static_cast<uint64_t>(row)*workspaceRowElements,scanWorkspace,thread);
     }
   } else {
     __ubuf__ int32_t* ctx=scanWorkspace+PLAN_SCAN_STORAGE_ELEMENTS;
     if(scratchElements<=EIGHT_UB_WORDS){
       __ubuf__ int32_t* data=ctx+EIGHT_CTX;
-      auto* packet=data+qli_fusion_resource::OwnerOffset(args.capacity);
+      auto* packet=data+QLI_OWNER_OFFSET(args.capacity);
       if constexpr(HOT_FIXED){if(args.topk==2048U&&args.capacity==4096U){
         SortedStage<Phase,true>(args,rowStart,rowStride,data,ctx,packet,scanWorkspace,compactWorkspace);return;}}
       SortedStage<Phase,false>(args,rowStart,rowStride,data,ctx,packet,scanWorkspace,compactWorkspace);
@@ -2067,7 +2070,7 @@ __simd_callee__ inline void LayoutPut(__ubuf__ int32_t* ctx,
 __simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32_t* ctx,
     uint32_t c,uint32_t u){
   using namespace AscendC;
-  const uint32_t ow=qli_fusion_resource::OwnerOffset(c),pa=ow+c;
+  const uint32_t ow=QLI_OWNER_OFFSET(c),pa=ow+c;
   Reg::RegTensor<uint32_t> lane,zero,one,idx,oddBit,packed,high,f,mask,slot,invalid;
   Reg::RegTensor<uint32_t> hf,ef,hp,ep,hc,ec,hi,ei,last,entry,safe,tmp,mc,rank,inc,owner,index16,status;
   Reg::RegTensor<int32_t> signedOwner;
@@ -2120,10 +2123,10 @@ __simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32
 
 __aicore__ inline void RankPipeCopyOutputs(AscendC::TPipe& pipe,
     AscendC::LocalTensor<int32_t> local,__ubuf__ int32_t* ctx,
-    int64_t first,uint32_t topk,uint32_t c,void* lruSlots,void* missTokens,void* missSlots){
+    int64_t first,uint32_t topk,uint32_t c,__gm__ uint8_t* lruSlots,__gm__ uint8_t* missTokens,__gm__ uint8_t* missSlots){
   const uint32_t n=static_cast<uint32_t>(ctx[46]),misses=static_cast<uint32_t>(ctx[47]);
   const uint32_t uniqueOffset=0U; // map is dead: bounded descriptor-tail staging
-  const uint32_t ownerOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+qli_fusion_resource::OwnerOffset(c);
+  const uint32_t ownerOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+QLI_OWNER_OFFSET(c);
   AscendC::GlobalTensor<int32_t> lru,mt,ms;
   lru.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t*>(lruSlots)+first*c,c);
   const int64_t tail=first*static_cast<int64_t>(topk)+misses;
@@ -2191,7 +2194,7 @@ __aicore__ inline void FusionRefinePacket(__ubuf__ int32_t* records,
       if(delta){
         auto source=local[PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+c/2U];
         AscendC::GlobalTensor<int32_t> target;
-        target.SetGlobalBuffer(workspace+qli_fusion_resource::MapWords(requests,topk)+first*c+old,delta);
+        target.SetGlobalBuffer(workspace+QLI_MAP_WORDS(requests,topk)+first*c+old,delta);
         auto event=pipe.AllocEventID<AscendC::HardEvent::V_MTE3>();
         AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(event);AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(event);
         pipe.ReleaseEventID<AscendC::HardEvent::V_MTE3>(event);
@@ -2232,7 +2235,7 @@ __aicore__ inline void RunFusionGroupImpl(const Buffers& b,const TilingData& d,
           const uint32_t chunk=ctx[3];
 #if JOINT_MTP7_MAP16
           const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+
-              qli_fusion_resource::OwnerOffset(d.capacity);
+              QLI_OWNER_OFFSET(d.capacity);
 #else
           const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+
               ((static_cast<uint32_t>(end-first)*d.topk+d.capacity+7U)&~7U);
@@ -2363,7 +2366,7 @@ __aicore__ inline void RunFusionGroupImpl(const Buffers& b,const TilingData& d,
           const uint32_t chunk=ctx[3];
 #if JOINT_MTP7_MAP16
           const uint32_t inputOffset=d.scratchElements<=EIGHT_UB_WORDS?
-              PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+qli_fusion_resource::OwnerOffset(d.capacity):PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX;
+              PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+QLI_OWNER_OFFSET(d.capacity):PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX;
 #else
           const uint32_t inputOffset=d.scratchElements<=EIGHT_UB_WORDS?
               PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+((((HW_C?static_cast<uint32_t>(end-first):8U)*d.topk+d.capacity+7U)&~7U)):PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX;
@@ -2398,7 +2401,7 @@ __aicore__ inline void RunFusionGroupImpl(const Buffers& b,const TilingData& d,
           if(d.scratchElements<=EIGHT_UB_WORDS && ctx[0]==1){
             const uint32_t q=static_cast<uint32_t>(end-first)*static_cast<uint32_t>(d.topk);
 #if JOINT_MTP7_MAP16
-            const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+qli_fusion_resource::OwnerOffset(d.capacity);
+            const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+QLI_OWNER_OFFSET(d.capacity);
 #else
             const uint32_t inputOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+((q+d.capacity+7U)&~7U);
 #endif
@@ -2431,7 +2434,7 @@ __aicore__ inline void RunFusionGroupImpl(const Buffers& b,const TilingData& d,
       // Inspect completion BEFORE fallback: the private path reuses the entire
       // ctx/scratch region, so its bytes are no longer rank-pipeline metadata.
       if(ctx[0]==2 && ctx[120]==1)
-        RankPipeCopyOutputs(pipe,local,ctx,first,static_cast<uint32_t>(d.topk),static_cast<uint32_t>(d.capacity),lruSlots,missTokens,missSlots);
+        RankPipeCopyOutputs(pipe,local,ctx,first,static_cast<uint32_t>(d.topk),static_cast<uint32_t>(d.capacity),reinterpret_cast<__gm__ uint8_t*>(lruSlots),reinterpret_cast<__gm__ uint8_t*>(missTokens),reinterpret_cast<__gm__ uint8_t*>(missSlots));
 #endif
       if(ctx[0]!=2){SORTED_CALL(4);}
 #undef SORTED_CALL

@@ -22,6 +22,15 @@ class Metrics(unittest.TestCase):
     def test_overlap_and_gap(self):
         p=self.parse(self.rows());self.assertEqual(p[0]['span_us'],19);self.assertEqual(p[0]['busy_us'],16)
         self.assertEqual(p[0]['between_kernel_gap_us'],3);self.assertEqual(p[1]['busy_us'],15)
+    def test_timestamp_quantization_near_contiguous_split(self):
+        base=1.0e15
+        rows=[[TOKENS['split'],base,533.078,'AI_CORE',1,0],
+              [TOKENS['plan'],base+533.078-0.25,14.0,'AI_VECTOR_CORE',1,0],
+              [TOKENS['a'],base+600.0,10.0,'AI_CORE',1,0],
+              [TOKENS['b'],base+620.0,10.0,'AI_CORE',1,0],
+              [TOKENS['c'],base+640.0,10.0,'AI_CORE',1,0]]
+        parsed=self.parse(rows,('split','a','b','c'))
+        self.assertEqual(parsed[0]['between_kernel_gap_us'],0.0)
     def test_missing_component(self):
         with self.assertRaises(RuntimeError):self.parse(self.rows()[:-1],repeat=2,orders=('split','a','split','a'))
     def test_wrong_order(self):

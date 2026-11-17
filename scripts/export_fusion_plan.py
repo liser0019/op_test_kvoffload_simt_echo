@@ -181,9 +181,9 @@ def port(text):
     controller=controller[:begin]+controller[end:]
     controller=replace(controller,'    }\n    ++group;first=end;\n  }\n#undef SORTED_CALL\n}', '#undef SORTED_CALL\n}\n')
     controller=controller.replace('((EightMapWords(static_cast<uint32_t>(end-first)*d.topk,static_cast<uint32_t>(d.topk),d.capacity)+d.capacity+7U)&~7U)',
-                                  'qli_fusion_resource::OwnerOffset(d.capacity)')
+                                  'OwnerOffset(d.capacity)')
     controller=re.sub(r'\(\(EightMapWords\([^\n]+?\)\+d.capacity\+7U\)&~7U\)',
-                      'qli_fusion_resource::OwnerOffset(d.capacity)',controller)
+                      'OwnerOffset(d.capacity)',controller)
     controller=controller.replace('storage.Get<float>()','storage.ReinterpretCast<float>()')
     # Replace refinement dispatch by the bounded packet wrapper below.
     begin=controller.index('\n#if JOINT_MTP7_MID_UNIQUE',controller.index('uint32_t more=0;'))
@@ -222,9 +222,25 @@ def port(text):
     begin=text.index('__simd_callee__ inline void HotPutCtx')
     end=text.index('__aicore__ inline void SortedVectorToScalar',begin)
     text=text[:begin]+text[end:]
+    # Device code must not emit a host TPECALL for a runtime offset helper.
+    text=text.replace('qli_fusion_resource::OwnerOffset(', 'QLI_OWNER_OFFSET(')
+    text=text.replace('OwnerOffset(', 'QLI_OWNER_OFFSET(')
+    text=text.replace('qli_fusion_resource::MapWords(', 'QLI_MAP_WORDS(')
+    text=text.replace('qli_fusion_resource::UniqueGmWords(', 'QLI_UNIQUE_GM_WORDS(')
+    # CANN 9.2.1 cannot cast void* across address spaces; the generated hook ABI
+    # uses GM pointers directly.
+    text=replace(text,'int64_t first,uint32_t topk,uint32_t c,void* lruSlots,void* missTokens,void* missSlots){',
+        'int64_t first,uint32_t topk,uint32_t c,__gm__ uint8_t* lruSlots,__gm__ uint8_t* missTokens,__gm__ uint8_t* missSlots){')
+    controller=controller.replace(
+        'RankPipeCopyOutputs(pipe,local,ctx,first,static_cast<uint32_t>(d.topk),static_cast<uint32_t>(d.capacity),lruSlots,missTokens,missSlots)',
+        'RankPipeCopyOutputs(pipe,local,ctx,first,static_cast<uint32_t>(d.topk),static_cast<uint32_t>(d.capacity),reinterpret_cast<__gm__ uint8_t*>(lruSlots),reinterpret_cast<__gm__ uint8_t*>(missTokens),reinterpret_cast<__gm__ uint8_t*>(missSlots))')
     begin=text.index('__simd_vf__ inline void RefineFusedCountVf')
     end=text.index('template <uint32_t Bits, int KnownHalf>',begin)
     text=text[:begin]+text[end:]
+    controller=controller.replace('qli_fusion_resource::OwnerOffset(', 'QLI_OWNER_OFFSET(')
+    controller=controller.replace('OwnerOffset(', 'QLI_OWNER_OFFSET(')
+    controller=controller.replace('qli_fusion_resource::MapWords(', 'QLI_MAP_WORDS(')
+    controller=controller.replace('qli_fusion_resource::UniqueGmWords(', 'QLI_UNIQUE_GM_WORDS(')
     return text,controller
 
 
@@ -258,7 +274,7 @@ def main():
 #include "storage.h"
 '''
     header+='\n'.join(f'#define {k} {v}' for k,v in FLAGS.items())+'\n'
-    header+='#define EIGHT_MAP_ARGUMENT(q,t) , (d.capacity/2U)\n'
+    header+='#define EIGHT_MAP_ARGUMENT(q,t) , (d.capacity/2U)\n#define QLI_OWNER_OFFSET(value) ((static_cast<uint32_t>(value)/2U)+(QLI_PLAN_STORAGE==3?2048U:static_cast<uint32_t>(value)/2U))\n#define QLI_MAP_WORDS(requests,topk) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(topk)/2U)\n#define QLI_UNIQUE_GM_WORDS(requests,capacity) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(capacity))\n'
     public=(ROOT/'csrc/qli_fusion/public.inc').read_text()
     wrappers=(ROOT/'csrc/qli_fusion/packet.inc').read_text()
     output=header+text+public+wrappers+controller+'''
@@ -269,6 +285,10 @@ __aicore__ inline void RunGroup(const Buffers& b,const TilingData& d,int64_t fir
 }
 } // namespace qli_fused_plan
 '''
+    output=output.replace('qli_fusion_resource::OwnerOffset(', 'QLI_OWNER_OFFSET(')
+    output=output.replace('OwnerOffset(', 'QLI_OWNER_OFFSET(')
+    output=output.replace('qli_fusion_resource::MapWords(', 'QLI_MAP_WORDS(')
+    output=output.replace('qli_fusion_resource::UniqueGmWords(', 'QLI_UNIQUE_GM_WORDS(')
     output='\n'.join(line.rstrip() for line in output.splitlines())+'\n'
     target=ROOT/'csrc/qli_fusion/plan.h'
     if args.check:
