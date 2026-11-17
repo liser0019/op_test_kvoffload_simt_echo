@@ -62,7 +62,9 @@ def overlay(folder,mode):
     binding=folder/'torch_extension/csrc'/f'{op}.cpp'
     resource_name=f'qli_plan_resources_{suffix.lower()}.h'
     common=folder.parent.parent/'torch_extension/cann_ops_transformer/common';common.mkdir(parents=True,exist_ok=True)
-    (common/resource_name).write_text(resource)
+    # This file lives outside dest, so the final per-operator namespace rewrite
+    # does not visit it. Match the rewritten binding explicitly on a clean build.
+    (common/resource_name).write_text(resource.replace('qli_fusion_resource',op+'_resource'))
     s=binding.read_text();s=f'#include "{resource_name}"\n'+s
     start=s.index('    const uint64_t scratch = PlanScratchElements(')
     end=s.index('\n    char *layoutQueryPtr',start)
@@ -151,7 +153,14 @@ def overlay(folder,mode):
         # at isFirstS2InnerLoop and reloads weights/Q scales/K scales. Padding in
         # K scales must also be reinitialized after Plan overwrote this area.
         anchor='    if (info.isFirstS2InnerLoop) {\n        WaitFlag<HardEvent::V_MTE2>'
-        s=replace(s,anchor,'    if (info.isFirstS2InnerLoop) {\n        Duplicate(kScaleUB_,static_cast<SCALE_T>(0),2*s2BaseSize_*16);\n        PipeBarrier<PIPE_V>();\n        WaitFlag<HardEvent::V_MTE2>')
+        s=replace(s,anchor,'''    if (info.isFirstS2InnerLoop) {
+        Duplicate(kScaleUB_,static_cast<SCALE_T>(0),2*s2BaseSize_*16);
+        // The arena was borrowed by Plan. This new V write must finish before
+        // GetKeyScale's MTE2 writes the same region. Existing ready flags were
+        // published before this reset; PIPE_V alone cannot order the two pipes.
+        // Stage-boundary initialization: avoid borrowing an active ping-pong ID.
+        PipeBarrier<PIPE_ALL>();
+        WaitFlag<HardEvent::V_MTE2>''')
         # Explicitly drain pending Vector-owned DMA before borrowing the arena;
         # this does not release or overwrite Cube's separate resMm region.
         anchor='            planHook_->PublishGroup(row, row + 1, planRows_, planStorage_,'

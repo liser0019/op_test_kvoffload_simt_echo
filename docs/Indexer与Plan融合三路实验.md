@@ -3,6 +3,9 @@
 本分支提供可构建源码与上机脚本。开发机没有CANN/NPU：CPU检查不等于
 Bisheng编译通过、设备同步正确或取得性能收益。所有性能数字由服务器生成。
 
+`0a42bee`之后的A/B初始化同步、CSV计时精度修复，以及只复测失败工况的命令，
+见[QLI同步与计时修复](QLI同步与计时修复.md)。A/B的原始TopK差异根因仍待设备对照确认。
+
 ## 对照版本
 
 | 名称 | Indexer | Plan | 中间数据 |
@@ -166,7 +169,7 @@ bash scripts/test_qli_fusion.sh --device 0 --requests 32 --contexts 262144 \
 
 ```bash
 PYTHONPATH=. python3 -B checks/check_qli_fusion_plan.py
-PYTHONPATH=. python3 -B -m unittest checks.test_qli_fusion_metrics checks.test_qli_fusion_fixture -v
+PYTHONPATH=. python3 -B -m unittest checks.test_qli_fusion_metrics checks.test_qli_fusion_fixture checks.test_qli_fusion_sync -v
 python3 -B scripts/export_fusion_plan.py --check
 # 已在独立上游checkout生成overlay时：
 PYTHONPATH=. python3 -B checks/check_qli_fusion_resources.py --upstream /path/to/generated/upstream

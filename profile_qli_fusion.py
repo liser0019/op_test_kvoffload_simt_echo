@@ -15,7 +15,7 @@ import numpy as np
 from compare import summary
 import joint_plan_common as common
 from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
-from fusion.metrics import read_csvs
+from fusion.metrics import read_csvs,TIMING_ARITHMETIC
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
 from scripts.prepare_qli_fusion import NAMES,source_id
 
@@ -145,7 +145,8 @@ def main_run(args,report):
         f=build/'install'/name
         if not f.is_file() or hashlib.sha256(f.read_bytes()).hexdigest()!=digest:raise RuntimeError('installed CANN package changed: '+str(f))
     operators,compiled=load_operators(manifest)
-    report.update(device=device,build_manifest=manifest,compiled_extensions=compiled)
+    report.update(device=device,build_manifest=manifest,compiled_extensions=compiled,
+                  timing_arithmetic=TIMING_ARITHMETIC)
     from fusion.glm52_inputs import Shape,make_inputs
     def quantize(x):return torch_npu.npu_dynamic_quant(x,dst_type=torch.float8_e4m3fn)
     names=args.implementations
@@ -257,6 +258,7 @@ def main_run(args,report):
                         if key in samples[0]:stats[n][key]=summary([p[key] for p in samples])
                     stats[n].update(event=summary([p['event_us'] for p in raw[n]]),host=summary([p['host_us'] for p in raw[n]]),checks=checks[n],raw_interface=raw[n],raw_device=samples)
                 data={'tag':tag,'context':context,'mtp':mtp,'capacity':capacity,'requests':args.requests,
+                    'timing_arithmetic':TIMING_ARITHMETIC,
                     'qli_input_sha256':qli_hash,'qli_s1_base':2,
                     'input':describe(case),'logical_input_sha256':hashlib.sha256(b''.join(case[k].tobytes() for k in common.INPUTS)).hexdigest(),
                     'statistics':stats,'execution_orders':orders,'csv_paths':[str(p) for p in csvs],'kernel_inventory':inventory}
@@ -281,6 +283,7 @@ def main_run(args,report):
         return
     write_json(out/'data_index.json',{'status':'complete','cases':[{'tag':r['tag'],'metadata':str(out/r['tag']/'capture_metadata.json'),'csv_paths':r['csv_paths']} for r in all_results]})
     lines=['# 保序Indexer＋Plan：拆分与融合对照','','设备时间单位μs。busy为目标设备区间的并集长度，避免把重叠AIC/AIV重复相加；span为首个目标开始至最后目标结束。Event包含接口下发及辅助任务，单独报告。',
+           'CSV使用十进制解析并先扣除共同时间原点；原始时间字符串与小范围时间戳重叠容差保留在逐样本元数据。',
            'split为同一保序Indexer实现＋冻结rankpipe AC，Indexer分块固定S1Base=2。状态恢复、校验不计入目标Duration；固定地址预热。',
            '75%标签仅约束首行初始命中；其他行使用真实Indexer选择，实际命中与descriptor见元数据。未测Transfer/SFA。','',
            '| 工况 | 实现 | busy P50/P95 | span P50/P95 | Event P50/P95 | span/拆分 | 样本数 | 联合/回退/单行有序 | descriptor数 |',

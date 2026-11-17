@@ -35,7 +35,8 @@ def main():
                 td=Path(td)
                 (td/'aclnn_common.h').write_text('#pragma once\nnamespace at_npu {namespace native {}}\n#define ACLNN_CMD(...) do {} while(0)\n')
                 subprocess.run(['g++','-std=c++17','-fsyntax-only','-DTORCH_EXTENSION_NAME=qli_fusion_cpu_syntax',
-                    '-I'+str(td),'-I'+sysconfig.get_paths()['include'],*['-I'+s for s in include_paths()],
+                    '-I'+str(td),'-I'+str(a.upstream/'torch_extension/cann_ops_transformer/common'),
+                    '-I'+sysconfig.get_paths()['include'],*['-I'+s for s in include_paths()],
                     str(base/'csrc'/(name+'.cpp'))],check=True)
             print(name,'host C++ syntax passed (ACLNN stub; not a CANN build)')
 
