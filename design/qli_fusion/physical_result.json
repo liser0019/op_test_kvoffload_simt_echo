@@ -1,0 +1,149 @@
+{
+  "P": 4,
+  "peak_step": "S3",
+  "warnings": [],
+  "lower_bound_check": {
+    "P": 4,
+    "inputs": 0,
+    "outputs": 1,
+    "bound": 1,
+    "triggered": false,
+    "message": "通过（P=4 ≥ 输入0+输出1=1）"
+  },
+  "trace": [
+    {
+      "id": "S1",
+      "op": "Cube result region (pinned) → B0",
+      "before": [],
+      "during": [],
+      "after": [
+        "B0"
+      ],
+      "pinned": [
+        "B0",
+        "B3"
+      ]
+    },
+    {
+      "id": "S2",
+      "op": "QLI Vector compute → B1",
+      "before": [
+        "B0"
+      ],
+      "during": [
+        "B1"
+      ],
+      "after": [
+        "B0",
+        "B1"
+      ],
+      "pinned": [
+        "B0",
+        "B3"
+      ]
+    },
+    {
+      "id": "S3",
+      "op": "ordered TopK → B2,B3",
+      "before": [
+        "B0",
+        "B1"
+      ],
+      "during": [
+        "B1",
+        "B2"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "pinned": [
+        "B0",
+        "B3"
+      ]
+    },
+    {
+      "id": "S4",
+      "op": "wait final Vector/DMA readers",
+      "before": [
+        "B0",
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "during": [
+        "B1",
+        "B2"
+      ],
+      "after": [
+        "B0",
+        "B3"
+      ],
+      "pinned": [
+        "B0",
+        "B3"
+      ]
+    },
+    {
+      "id": "S5",
+      "op": "Plan merge and finish → B1",
+      "before": [
+        "B0",
+        "B3"
+      ],
+      "during": [
+        "B1"
+      ],
+      "after": [
+        "B0",
+        "B1",
+        "B3"
+      ],
+      "pinned": [
+        "B0",
+        "B3"
+      ]
+    },
+    {
+      "id": "S6",
+      "op": "commit then wait MTE3 → B2",
+      "before": [
+        "B0",
+        "B1",
+        "B3"
+      ],
+      "during": [
+        "B1",
+        "B2"
+      ],
+      "after": [
+        "B0",
+        "B2"
+      ],
+      "pinned": [
+        "B0",
+        "B3"
+      ]
+    },
+    {
+      "id": "S7",
+      "op": "next Cube/Vector tile",
+      "before": [
+        "B0",
+        "B2"
+      ],
+      "during": [
+        "B2"
+      ],
+      "after": [
+        "B2"
+      ],
+      "pinned": [
+        "B0",
+        "B3"
+      ]
+    }
+  ]
+}

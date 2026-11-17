@@ -1,0 +1,8 @@
+{
+  "repository": "https://gitcode.com/sparse/ops-transformer.git",
+  "commit": "9ec2110969a9e8502bf6d579c027ac4ea9572016",
+  "file": "attention/quant_lightning_indexer_ordered_fused/tests/perf/glm52_inputs.py",
+  "sha256": "dff16f979c85d9e398318fbaf546284487117e291e10c00fe22b918b6304d8bc",
+  "license": "../LICENSES/CANN-2.0.txt",
+  "adaptation": "fixture file copied verbatim; caller selects shape/capacity and constructs Plan state from actual NPU TopK"
+}

@@ -1,0 +1,145 @@
+{
+  "value": 4,
+  "peak_step": "S3",
+  "mode": "P_baseline",
+  "pinned": [
+    "cube_result",
+    "topk_indices"
+  ],
+  "trace": [
+    {
+      "id": "S1",
+      "op": "Cube result region (pinned)",
+      "before": [],
+      "during": [],
+      "after": [
+        "cube_result"
+      ],
+      "pinned": [
+        "cube_result",
+        "topk_indices"
+      ]
+    },
+    {
+      "id": "S2",
+      "op": "QLI Vector compute",
+      "before": [
+        "cube_result"
+      ],
+      "during": [
+        "vector_parameters"
+      ],
+      "after": [
+        "cube_result",
+        "vector_parameters"
+      ],
+      "pinned": [
+        "cube_result",
+        "topk_indices"
+      ]
+    },
+    {
+      "id": "S3",
+      "op": "ordered TopK",
+      "before": [
+        "cube_result",
+        "vector_parameters"
+      ],
+      "during": [
+        "topk_scratch",
+        "vector_parameters"
+      ],
+      "after": [
+        "cube_result",
+        "topk_indices",
+        "topk_scratch",
+        "vector_parameters"
+      ],
+      "pinned": [
+        "cube_result",
+        "topk_indices"
+      ]
+    },
+    {
+      "id": "S4",
+      "op": "wait final Vector/DMA readers",
+      "before": [
+        "cube_result",
+        "topk_indices",
+        "topk_scratch",
+        "vector_parameters"
+      ],
+      "during": [
+        "topk_scratch",
+        "vector_parameters"
+      ],
+      "after": [
+        "cube_result",
+        "topk_indices"
+      ],
+      "pinned": [
+        "cube_result",
+        "topk_indices"
+      ]
+    },
+    {
+      "id": "S5",
+      "op": "Plan merge and finish",
+      "before": [
+        "cube_result",
+        "topk_indices"
+      ],
+      "during": [
+        "plan_scratch"
+      ],
+      "after": [
+        "cube_result",
+        "plan_scratch",
+        "topk_indices"
+      ],
+      "pinned": [
+        "cube_result",
+        "topk_indices"
+      ]
+    },
+    {
+      "id": "S6",
+      "op": "commit then wait MTE3",
+      "before": [
+        "cube_result",
+        "plan_scratch",
+        "topk_indices"
+      ],
+      "during": [
+        "plan_outputs",
+        "plan_scratch"
+      ],
+      "after": [
+        "cube_result",
+        "plan_outputs"
+      ],
+      "pinned": [
+        "cube_result",
+        "topk_indices"
+      ]
+    },
+    {
+      "id": "S7",
+      "op": "next Cube/Vector tile",
+      "before": [
+        "cube_result",
+        "plan_outputs"
+      ],
+      "during": [
+        "plan_outputs"
+      ],
+      "after": [
+        "plan_outputs"
+      ],
+      "pinned": [
+        "cube_result",
+        "topk_indices"
+      ]
+    }
+  ]
+}

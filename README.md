@@ -1,4 +1,8 @@
-## 当前专项：32请求、MTP3，AB8K / rankpipe A / rankpipe AC
+# Indexer＋Plan融合实验
+
+新增 `feat/qli-rankpipe-fusion`：同一保序Indexer＋独立rankpipe AC，与融合A（代表位置16位＋位图）、B（代表位置16位＋二分）、C（流式GM unique＋位图）对照。默认BS32、MTP0/1/3/7、capacity4K/4K/8K/16K，首轮每路每工况5样本；同事原融合版可选。详细构建、小测、尾部-1门禁、正式采集及计时口径见[中文教程](docs/Indexer与Plan融合三路实验.md)。本机仅执行CPU检查，未进行CANN/NPU验证。
+
+## 历史专项：32请求、MTP3，AB8K / rankpipe A / rankpipe AC
 
 只比较三路既有实现，固定TopK2048、capacity8192、512线程，测256K（262144）和100K（102400）两档token位置范围，覆盖冷启动和满缓存75%。入口：`bash scripts/test_ab8k_context.sh --device 0 --output /workspace/ab8k_context_results`。默认一次门禁＋每工况20样本正式采集，无初筛。算法源码不改，逐样本严格校验和库身份检查保留。详见[参数口径、运行命令和报告说明](docs/AB8K与rankpipe两档上下文对照.md)。开发机只做CPU检查，CANN/NPU待服务器验证。
 

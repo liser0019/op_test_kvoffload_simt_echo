@@ -1,0 +1,74 @@
+[
+  {
+    "mode": 0,
+    "capacity": 4096,
+    "plan_bytes": 0,
+    "fusion_bytes": 150528
+  },
+  {
+    "mode": 0,
+    "capacity": 8192,
+    "plan_bytes": 0,
+    "fusion_bytes": 150528
+  },
+  {
+    "mode": 0,
+    "capacity": 16384,
+    "plan_bytes": 0,
+    "fusion_bytes": 150528
+  },
+  {
+    "mode": 1,
+    "capacity": 4096,
+    "plan_bytes": 115488,
+    "fusion_bytes": 156704
+  },
+  {
+    "mode": 1,
+    "capacity": 8192,
+    "plan_bytes": 131872,
+    "fusion_bytes": 173088
+  },
+  {
+    "mode": 1,
+    "capacity": 16384,
+    "plan_bytes": 164640,
+    "fusion_bytes": 205856
+  },
+  {
+    "mode": 2,
+    "capacity": 4096,
+    "plan_bytes": 115488,
+    "fusion_bytes": 156704
+  },
+  {
+    "mode": 2,
+    "capacity": 8192,
+    "plan_bytes": 131872,
+    "fusion_bytes": 173088
+  },
+  {
+    "mode": 2,
+    "capacity": 16384,
+    "plan_bytes": 164640,
+    "fusion_bytes": 205856
+  },
+  {
+    "mode": 3,
+    "capacity": 4096,
+    "plan_bytes": 115488,
+    "fusion_bytes": 176672
+  },
+  {
+    "mode": 3,
+    "capacity": 8192,
+    "plan_bytes": 123680,
+    "fusion_bytes": 184864
+  },
+  {
+    "mode": 3,
+    "capacity": 16384,
+    "plan_bytes": 140064,
+    "fusion_bytes": 201248
+  }
+]

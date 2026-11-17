@@ -1,0 +1,79 @@
+{
+  "inputs": [],
+  "outputs": [
+    "plan_outputs"
+  ],
+  "pinned": [
+    "B0",
+    "B3"
+  ],
+  "steps": [
+    {
+      "id": "S1",
+      "op": "Cube result region (pinned) → B0",
+      "reads": [],
+      "writes": [
+        "B0"
+      ]
+    },
+    {
+      "id": "S2",
+      "op": "QLI Vector compute → B1",
+      "reads": [
+        "B0"
+      ],
+      "writes": [
+        "B1"
+      ]
+    },
+    {
+      "id": "S3",
+      "op": "ordered TopK → B2,B3",
+      "reads": [
+        "B1"
+      ],
+      "writes": [
+        "B2",
+        "B3"
+      ]
+    },
+    {
+      "id": "S4",
+      "op": "wait final Vector/DMA readers",
+      "reads": [
+        "B1",
+        "B2"
+      ],
+      "writes": []
+    },
+    {
+      "id": "S5",
+      "op": "Plan merge and finish → B1",
+      "reads": [
+        "B3"
+      ],
+      "writes": [
+        "B1"
+      ]
+    },
+    {
+      "id": "S6",
+      "op": "commit then wait MTE3 → B2",
+      "reads": [
+        "B1",
+        "B3"
+      ],
+      "writes": [
+        "B2"
+      ]
+    },
+    {
+      "id": "S7",
+      "op": "next Cube/Vector tile",
+      "reads": [
+        "B0"
+      ],
+      "writes": []
+    }
+  ]
+}

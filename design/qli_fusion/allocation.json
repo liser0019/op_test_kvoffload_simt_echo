@@ -1,0 +1,80 @@
+{
+  "inputs": [],
+  "outputs": [
+    "plan_outputs"
+  ],
+  "pinned": [
+    "cube_result",
+    "topk_indices"
+  ],
+  "steps": [
+    {
+      "id": "S1",
+      "op": "Cube result region (pinned)",
+      "reads": [],
+      "writes": [
+        "cube_result"
+      ]
+    },
+    {
+      "id": "S2",
+      "op": "QLI Vector compute",
+      "reads": [
+        "cube_result"
+      ],
+      "writes": [
+        "vector_parameters"
+      ]
+    },
+    {
+      "id": "S3",
+      "op": "ordered TopK",
+      "reads": [
+        "vector_parameters"
+      ],
+      "writes": [
+        "topk_scratch",
+        "topk_indices"
+      ]
+    },
+    {
+      "id": "S4",
+      "op": "wait final Vector/DMA readers",
+      "reads": [
+        "vector_parameters",
+        "topk_scratch"
+      ],
+      "writes": []
+    },
+    {
+      "id": "S5",
+      "op": "Plan merge and finish",
+      "reads": [
+        "topk_indices"
+      ],
+      "writes": [
+        "plan_scratch"
+      ]
+    },
+    {
+      "id": "S6",
+      "op": "commit then wait MTE3",
+      "reads": [
+        "plan_scratch",
+        "topk_indices"
+      ],
+      "writes": [
+        "plan_outputs"
+      ]
+    },
+    {
+      "id": "S7",
+      "op": "next Cube/Vector tile",
+      "reads": [
+        "cube_result"
+      ],
+      "writes": []
+    }
+  ],
+  "exclusive_branches": []
+}
