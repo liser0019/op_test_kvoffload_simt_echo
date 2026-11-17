@@ -1,4 +1,10 @@
-## 当前小范围实验：MTP7 安全前缀／16位映射 A、B、AB
+## 当前专项：32请求、MTP3，AB8K / rankpipe A / rankpipe AC
+
+只比较三路既有实现，固定TopK2048、capacity8192、512线程，测256K（262144）和100K（102400）两档token位置范围，覆盖冷启动和满缓存75%。入口：`bash scripts/test_ab8k_context.sh --device 0 --output /workspace/ab8k_context_results`。默认一次门禁＋每工况20样本正式采集，无初筛。算法源码不改，逐样本严格校验和库身份检查保留。详见[参数口径、运行命令和报告说明](docs/AB8K与rankpipe两档上下文对照.md)。开发机只做CPU检查，CANN/NPU待服务器验证。
+
+以下为历史实验说明。
+
+## 历史小范围实验：MTP7 安全前缀／16位映射 A、B、AB
 
 冻结 `joint_mtp7_reuse_parallel_512`，新增 A（归并前安全消费前缀，省事后统计）、B（8行16位UID映射、扩大归并包）及AB。四路512线程、生产动态UB同为181024B；28请求，冷/热×MTP0/1/3/7，默认每路5样本，共160个正式目标样本。入口 `bash scripts/test_mtp7_prefix.sh --device 1 --output /workspace/mtp7_prefix_results`，一次门禁、一次采集，无历史大矩阵。详见[实现、CPU检查与服务器命令](docs/MTP7安全前缀与16位映射对照.md)。新候选尚未进行本机CANN/NPU验证。
 

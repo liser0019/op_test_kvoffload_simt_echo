@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,REFINE_SWEEP,EXEC_SWEEP,HOT_SWEEP,mtp7_config,MTP7_PACK_MASKS,MTP7_PREFIX_MASKS,MTP7_MERGE_MASKS,MTP7_FUSED_TUNE_MASKS,CAPACITY8K_MASKS,fused_tune_bits,layout_hot_bits,stage_exec_bits,rankpipe_bits
 
 
-def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False,hot_only=False,mtp8_only=False,mtp7_fix_only=False,mtp7_pack_only=False,peer_only=False,prefix_only=False,merge_unique_only=False,fused_tune_only=False,capacity8k_only=False,capacity16k_only=False,layout_hot_only=False,stage_exec_only=False,rankpipe_only=False):
+def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False,hot_only=False,mtp8_only=False,mtp7_fix_only=False,mtp7_pack_only=False,peer_only=False,prefix_only=False,merge_unique_only=False,fused_tune_only=False,capacity8k_only=False,capacity16k_only=False,layout_hot_only=False,stage_exec_only=False,rankpipe_only=False,ab8k_compare_only=False):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     launch = (ROOT / "csrc/joint_plan/launch.h").read_text()
@@ -17,6 +17,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
                "sparse_kv_plan_private_kernel")
     declarations, entries = [], ["nullptr"] * (max(MASKS.values()) + 1)
     for letters, mask in MASKS.items():
+        if ab8k_compare_only and mask not in (213,245,249):continue
         if rankpipe_only and mask not in (243,*range(244,252)):continue
         if stage_exec_only and mask not in (221,*range(228,244)):continue
         if layout_hot_only and mask not in (214,215,*range(216,228)):continue
@@ -108,5 +109,6 @@ if __name__ == "__main__":
     parser.add_argument("--layout-hot-only",action="store_true")
     parser.add_argument("--stage-exec-only",action="store_true")
     parser.add_argument("--rankpipe-only",action="store_true")
+    parser.add_argument("--ab8k-compare-only",action="store_true")
     args = parser.parse_args()
-    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only,args.exec_only,args.hot_only,args.mtp8_only,args.mtp7_fix_only,args.mtp7_pack_only,args.peer_only,args.prefix_only,args.merge_unique_only,args.fused_tune_only,args.capacity8k_only,args.capacity16k_only,args.layout_hot_only,args.stage_exec_only,args.rankpipe_only)
+    generate(args.output, args.merge_only, args.sorted_only,args.sweep_only,args.union_only,args.ac_threads_only,args.cold_compare_only,args.integrated_only,args.refine_only,args.exec_only,args.hot_only,args.mtp8_only,args.mtp7_fix_only,args.mtp7_pack_only,args.peer_only,args.prefix_only,args.merge_unique_only,args.fused_tune_only,args.capacity8k_only,args.capacity16k_only,args.layout_hot_only,args.stage_exec_only,args.rankpipe_only,args.ab8k_compare_only)

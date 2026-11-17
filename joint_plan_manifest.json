@@ -241,8 +241,8 @@
   "hardware_validation": "not_run_on_development_machine",
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
-    "build_joint_plan.sh": "b173be4d4e53b9fd371798a347b8f021953904f027a840a0e163c18bc55ba6f0",
-    "joint_plan/CMakeLists.txt": "ffbfa099708acdc3fb61418129626af3f22d25f390878dc37407869c7922d425",
+    "build_joint_plan.sh": "e8f8bfb004e44d791d220f597208c0c60882d92ccf3f3ad8d2693320bb750193",
+    "joint_plan/CMakeLists.txt": "82c759550875f2f458cf7ffb164feb3b586a4d0df7a2d3b6f02bdf890eb3d563",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -272,7 +272,7 @@
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
     "joint_variants.py": "b1e3786242c7c8312b3bdb8a723cc52f3417d77630aa1f16c95f3f356a39e00c",
-    "checks/generate_joint_variants.py": "c2d089e6e7e6f3099087fcf53d58a270c9939b1591494affffdfc6b1abcf6b90",
+    "checks/generate_joint_variants.py": "8be3b1f5479d038b1c3ad3276283d916110df1cd094e3b4d6dd11980b3b0d888",
     "checks/check_joint_variant_kernels.py": "d631f0930988cca63729e4bf2041fb1e108de20d20fd5d85d94d0a5cf74ddbc7",
     "checks/joint_variant_cpu_driver.cpp": "44d202ca33e11c93b3b859118c2656c0a6c55776fe1729ca0d070a1185bada24",
     "checks/simt_variants/cpu_runtime.h": "e7d893c63524557c2ce3d0280a369214e834d41e56b6eca48277a54754b62356",
@@ -408,7 +408,7 @@
     "checks/check_mtp7_pack_suite.py": "e25177d268b00f61bb93c1e704ceef2acd8773eac87af636a3e50d00ffa8b4b6",
     "scripts/test_mtp7_sweep.sh": "f29913b2edf5a09a8215e9ba5f153041d5f2b934d9a6d56387e102d102c18269",
     "docs/MTP7缓冲复用与分段归并一轮测试.md": "1dda9a81e9f7afa9f0c90c8c33e0b8ab0f814020674ee206749d4b2fd5717b90",
-    "README.md": "47e68549cdced45c7bee8730c24bcab871c09c558c713eb6e2f6bd389fba0923",
+    "README.md": "b501e41ae041ffff2568ca611a1852139cbc4856081ce696f16fadbd551a0a30",
     "csrc/peer_qli_plan/standalone_body.h": "ce6a55bba7e1c9386e5d1293be556b85cbcc4d5499f089e87e04b8cf4be0e37d",
     "csrc/peer_qli_plan/plugin.cpp": "2886c7bb1c49b8fe77679fc5006a3f477ad2da993b9d29c0f2a6a12e816bc625",
     "csrc/peer_qli_plan/kernel.cpp": "d96d2555457b89b36c8ab830e2d648fc62f99816ceb964db161694b00103a2b1",
@@ -502,7 +502,10 @@
     "design/rankpipe/stage.liveness.txt": "99ea8895f9e70dc1380cba83b3516e05e56bf828d7d4d7d9643bd39b85aebc8b",
     "design/rankpipe/stage.allocate.txt": "d8ee5eec7fc10e1c7051aeacb3dc0fb0d6419efb2194d62067be4caf72bdaf13",
     "csrc/joint_variants/rankpipe_output.h": "c5d4e2326806f2a87673197505f9fbcb6808ee6a81fc11dd155c617c3240292c",
-    "design/rankpipe/notes.md": "915e2ce60f5bbadd173b9ee3ec6f754b8b36d34b4075f4fb978982c416077879"
+    "design/rankpipe/notes.md": "915e2ce60f5bbadd173b9ee3ec6f754b8b36d34b4075f4fb978982c416077879",
+    "checks/check_ab8k_context.py": "3a12e591f933adc263172937eaef4a843cd8b8d1d072aa338f6aeb0c91d3246b",
+    "profile_ab8k_context.py": "7f739cd2f94c94f8c46aea2e8694bd5e01d17c97e8d69c345a7574b5b16e26af",
+    "scripts/test_ab8k_context.sh": "9edd9c879d1bc4d0e94622cbdc88d2faafe3d2df9d73d4a7d3674bb770ae7768"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -3107,5 +3110,30 @@
     "frozen243_cpu_preprocessor_sha256": "486bc49b99eeae36ffd62542a11ce1e6f33d4c13fa1df3e8d1954bd42be433a7",
     "preprocessor_scope": "same CPU shim/macros; before and after controller change identical; not device text identity",
     "validation": "CPU only; CANN/NPU pending"
+  },
+  "ab8k_context_comparison": {
+    "implementations": {
+      "joint_mtp7_fused_ab_8k_512": 213,
+      "joint_rankpipe_a_512": 245,
+      "joint_rankpipe_ac_512": 249
+    },
+    "requests": 32,
+    "mtp": 3,
+    "topk": 2048,
+    "capacity": 8192,
+    "max_tokens": [
+      262144,
+      102400
+    ],
+    "scenarios": [
+      "cold_reset",
+      "full_cache_75pct"
+    ],
+    "seed": 2026,
+    "warmup": 10,
+    "repeat": 20,
+    "regression_repeat": 5,
+    "algorithm_changes": false,
+    "scope": "CPU source/model and harness checks only; CANN/NPU verification pending"
   }
 }
