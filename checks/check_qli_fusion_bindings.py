@@ -12,7 +12,7 @@ import sysconfig
 import tempfile
 import types
 import torch
-from scripts.prepare_qli_fusion import NAMES
+from scripts.prepare_qli_fusion import NAMES,NATIVE_INDEXER
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--upstream',required=True,type=Path);p.add_argument('--syntax',action='store_true');a=p.parse_args()
@@ -24,16 +24,24 @@ def main():
             self.register_meta()
     fake=types.ModuleType('cann_ops_transformer.op_builder');fake.OpBuilder=Builder;fake.get_as_library=lambda:lib
     sys.modules['cann_ops_transformer.op_builder']=fake
-    for name in NAMES.values():
+    for name in (*NAMES.values(),NATIVE_INDEXER):
         base=a.upstream/'attention'/name/'torch_extension'
         spec=importlib.util.spec_from_file_location('cpu_check_'+name,base/(name+'.py'))
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-        print(name,'Torch schema + Meta/PrivateUse1 registration passed')
+        if name==NATIVE_INDEXER:
+            builder=module.quant_lightning_indexer_op_builder
+            assert builder.sources()==[f'csrc/attention/{name}.cpp']
+            print(name,'native benchmark adapter import passed')
+        else:
+            print(name,'Torch schema + Meta/PrivateUse1 registration passed')
         if a.syntax:
             from torch.utils.cpp_extension import include_paths
             with tempfile.TemporaryDirectory() as td:
                 td=Path(td)
-                (td/'aclnn_common.h').write_text('#pragma once\nnamespace at_npu {namespace native {}}\n#define ACLNN_CMD(...) do {} while(0)\n')
+                (td/'aclnn_common.h').write_text(
+                    '#pragma once\nnamespace at_npu::native {\n'
+                    'inline void* GetOpApiFuncAddr(const char*) { return nullptr; }\n}\n'
+                    '#define ACLNN_CMD(...) do {} while(0)\n')
                 subprocess.run(['g++','-std=c++17','-fsyntax-only','-DTORCH_EXTENSION_NAME=qli_fusion_cpu_syntax',
                     '-I'+str(td),'-I'+str(a.upstream/'torch_extension/cann_ops_transformer/common'),
                     '-I'+sysconfig.get_paths()['include'],*['-I'+s for s in include_paths()],

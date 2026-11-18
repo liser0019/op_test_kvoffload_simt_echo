@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""同输入比较：保序Indexer→独立rankpipe AC，与融合A/B/C。仅在NPU运行。"""
+"""同输入比较原始Indexer、保序Indexer→独立rankpipe AC和融合A/B/C。"""
 from __future__ import annotations
 import argparse
 import csv
@@ -17,7 +17,7 @@ import joint_plan_common as common
 from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
 from fusion.metrics import read_csvs,TIMING_ARITHMETIC
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
-from scripts.prepare_qli_fusion import NAMES,source_id
+from scripts.prepare_qli_fusion import NAMES,NATIVE_INDEXER,source_id
 
 ROOT=Path(__file__).resolve().parent
 BASE='joint_rankpipe_ac_512'
@@ -37,10 +37,49 @@ def check_ordered_topk(indices,visible_seq_lens):
             raise RuntimeError(f'row {r}: expected strictly increasing valid token IDs followed only by -1')
 
 
-def load_operators(manifest):
+def check_native_topk(indices, canonical, visible_seq_lens):
+    """Validate native output and compare token sets against the ordered Indexer."""
+    rows = np.asarray(indices)
+    if (rows.ndim != 2 or rows.shape != canonical.shape or rows.dtype != np.int32 or
+            len(visible_seq_lens) != rows.shape[0]):
+        raise RuntimeError('native Indexer TopK shape or dtype mismatch')
+    # The upstream Indexer does not promise order by token ID. Sorting a CPU
+    # copy of the valid prefix checks uniqueness without changing NPU outputs.
+    sorted_rows = rows.copy()
+    shared = 0
+    valid_total = 0
+    min_overlap = 1.0
+    different_rows = 0
+    for r, visible in enumerate(visible_seq_lens):
+        count = min(rows.shape[1], max(0, int(visible)))
+        sorted_rows[r, :count].sort()
+        valid = sorted_rows[r, :count]
+        if (np.any(valid < 0) or np.any(valid >= visible) or
+                np.any(valid[1:] == valid[:-1]) or np.any(rows[r, count:] != -1)):
+            raise RuntimeError(f'row {r}: invalid native Indexer token IDs, duplicates or padding')
+        if count:
+            shared_count = np.intersect1d(valid, canonical[r, :count], assume_unique=True).size
+            shared += shared_count
+            valid_total += count
+            min_overlap = min(min_overlap, shared_count / count)
+            different_rows += shared_count != count
+    return {
+        'status': 'passed',
+        'topk_set_overlap': shared / valid_total if valid_total else 1.0,
+        'topk_min_row_overlap': min_overlap,
+        'topk_rows_with_different_sets': int(different_rows),
+    }
+
+
+def load_operators(manifest, vendor, include_baseline):
     if manifest['source_id']!=source_id():raise RuntimeError('fusion source/manifest mismatch; rebuild required')
     operators={};identities={}
-    for mode,name in NAMES.items():
+    names = {'split' if mode == 0 else 'abc'[mode-1]: name for mode, name in NAMES.items()}
+    if include_baseline:
+        if manifest.get('native_indexer', {}).get('operator') != NATIVE_INDEXER:
+            raise RuntimeError('native Indexer missing from build manifest; rebuild the fusion package')
+        names['baseline'] = NATIVE_INDEXER
+    for role,name in names.items():
         package='cann_ops_transformer_qlifusion.ops.attention.'+name
         module=importlib.import_module(package)
         binding=importlib.import_module(package+'.'+name)
@@ -48,7 +87,13 @@ def load_operators(manifest):
         if native._fusion_identity()!=manifest['source_id']:raise RuntimeError(name+': stale compiled torch extension')
         path=Path(native.__file__)
         identities[name]={'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
-        operators['split' if mode==0 else 'abc'[mode-1]]=getattr(module,name)
+        if role == 'baseline':
+            api_library = (vendor/'op_api/lib/libcust_opapi.so').resolve()
+            paths = [Path(p).resolve() for p in native._op_api_paths()]
+            if paths != [api_library, api_library]:
+                raise RuntimeError(f'native Indexer resolved outside the benchmark vendor: {paths}')
+            identities[name]['op_api_library'] = str(api_library)
+        operators[role] = getattr(module,name)
     return operators,identities
 
 
@@ -144,12 +189,12 @@ def main_run(args,report):
     for name,digest in manifest['installed_files'].items():
         f=build/'install'/name
         if not f.is_file() or hashlib.sha256(f.read_bytes()).hexdigest()!=digest:raise RuntimeError('installed CANN package changed: '+str(f))
-    operators,compiled=load_operators(manifest)
+    names=args.implementations
+    operators,compiled=load_operators(manifest,vendor,'baseline' in names)
     report.update(device=device,build_manifest=manifest,compiled_extensions=compiled,
                   timing_arithmetic=TIMING_ARITHMETIC)
     from fusion.glm52_inputs import Shape,make_inputs
     def quantize(x):return torch_npu.npu_dynamic_quant(x,dst_type=torch.float8_e4m3fn)
-    names=args.implementations
     if 'peer' in names:
         m=importlib.import_module('cann_ops_transformer_qlifusion.ops.attention.quant_lightning_indexer_ordered_fused')
         operators['peer']=m.quant_lightning_indexer_ordered_fused
@@ -174,38 +219,47 @@ def main_run(args,report):
         # Canonical ordered TopK is generated on NPU, never precomputed on CPU.
         canonical=operators['split'](**kwargs(dummy,dw));torch.npu.synchronize()
         canonical_cpu=canonical.cpu().numpy().reshape(shape.rows,2048)
-        check_ordered_topk(canonical_cpu,inputs.plan_metadata['visible_seq_lens'].cpu().numpy())
+        visible_seq_lens=inputs.plan_metadata['visible_seq_lens'].cpu().numpy()
+        check_ordered_topk(canonical_cpu,visible_seq_lens)
         wall[f'fixture/context{context}/mtp{mtp}']=time.monotonic()-begin
         for scenario in args.scenarios:
             case=make_plan_case(inputs,canonical_cpu,mtp,scenario,args.seed)
             tag=f'context{context}_mtp{mtp}_{scenario}';directory=out/tag;directory.mkdir()
-            bundles={};topk_guards={}
+            bundles={};topk_guards={};topk_outputs={}
+            device_query=inputs.qli['query'].device
             for n in names:
-                inp=common.upload_inputs(torch,case)
-                guard=torch.full((shape.rows*2048+32,),common.GUARD_VALUE,dtype=torch.int32,device=inp['req_ids'].device)
-                inp['topk_indices']=guard[16:-16].reshape(shape.rows,2048)
-                inp['topk_indices'].copy_(canonical.reshape(shape.rows,2048))
-                bundles[n]=common.prepare(torch,case,BASE,inputs=inp) if n=='split' else prepare_fused(torch,case,inp)
+                guard=torch.full((shape.rows*2048+32,),common.GUARD_VALUE,dtype=torch.int32,device=device_query)
+                topk_outputs[n]=guard[16:-16].reshape(shape.rows,1,2048)
                 topk_guards[n]=guard
+                if n!='baseline':
+                    inp=common.upload_inputs(torch,case)
+                    inp['topk_indices']=topk_outputs[n].reshape(shape.rows,2048)
+                    inp['topk_indices'].copy_(canonical.reshape(shape.rows,2048))
+                    bundles[n]=common.prepare(torch,case,BASE,inputs=inp) if n=='split' else prepare_fused(torch,case,inp)
             extras={};calls={n:0 for n in names};raw={n:[] for n in names}
-            for n,b in bundles.items():
-                b['fast_fixed_check']=True
+            for n in names:
                 extras[n]=[torch.npu.Event(enable_timing=True),torch.npu.Event(enable_timing=True)]
+            for b in bundles.values():
+                b['fast_fixed_check']=True
             current={'implementation':None,'phase':None,'call':0}
             def invoke(n,phase):
-                b=bundles[n];current.update(implementation=n,phase=phase,call=calls[n]+1)
-                common.restore(torch,b);ready.zero_();torch.npu.synchronize()
-                b['inputs']['topk_indices'].fill_(-777);torch.npu.synchronize()
+                b=bundles.get(n);current.update(implementation=n,phase=phase,call=calls[n]+1)
+                if b is not None:
+                    common.restore(torch,b);ready.zero_();torch.npu.synchronize()
+                topk_outputs[n].fill_(-777);torch.npu.synchronize()
                 start,end=extras[n];host=time.monotonic();start.record()
-                kw=kwargs(b,dw if n=='split' else None)
-                if n!='peer':kw['topk_out']=b['inputs']['topk_indices'].reshape(shape.rows,1,2048)
-                result=operators['split' if n=='split' else n](**kw)
+                kw=inputs.qli if n=='baseline' else kwargs(b,dw if n=='split' else None)
+                result=operators[n](**kw,topk_out=topk_outputs[n]) if n!='peer' else operators[n](**kw)
                 if n=='split':
                     # Current stream; no synchronize/D2H between the two kernels.
                     common.invoke(b)
                 end.record();end.synchronize();event_us=start.elapsed_time(end)*1000.;host_us=(time.monotonic()-host)*1e6
                 calls[n]+=1
-                np.testing.assert_array_equal(result.cpu().numpy().reshape(shape.rows,2048),canonical_cpu,err_msg='ordered TopK changed')
+                indices=result.cpu().numpy().reshape(shape.rows,2048)
+                if n=='baseline':
+                    result_info=check_native_topk(indices,canonical_cpu,visible_seq_lens)
+                else:
+                    np.testing.assert_array_equal(indices,canonical_cpu,err_msg='ordered TopK changed')
                 if n=='peer':b['inputs']['topk_indices'].copy_(result.reshape(shape.rows,2048)) # checking only, after end Event
                 for k,before in readonly.items():
                     if not torch.equal(inputs.qli[k].view(torch.uint8),before.view(torch.uint8)):raise RuntimeError('read-only QLI input modified: '+k)
@@ -215,7 +269,8 @@ def main_run(args,report):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('split QLI workspace guard changed')
                 for guard in (topk_guards[n][:16],topk_guards[n][-16:]):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('TopK output guard changed')
-                result_info=common.check(case,b)
+                if b is not None:
+                    result_info=common.check(case,b)
                 return event_us,host_us,result_info
             begin=time.monotonic()
             try:
@@ -239,7 +294,10 @@ def main_run(args,report):
                     for iteration in range(args.repeat):
                         order=names[iteration%len(names):]+names[:iteration%len(names)]
                         for n in order:
-                            event_us,host_us,info=invoke(n,'sample');raw[n].append({'event_us':event_us,'host_us':host_us});orders.append(n);checks[n]=info
+                            event_us,host_us,info=invoke(n,'sample')
+                            sample={'event_us':event_us,'host_us':host_us}
+                            if n=='baseline':sample['topk_check']=info
+                            raw[n].append(sample);orders.append(n);checks[n]=info
                         prof.step()
                 wall[tag+'/capture_check_export']=time.monotonic()-begin
                 csvs=sorted(capture.rglob('kernel_details.csv'))
@@ -257,6 +315,21 @@ def main_run(args,report):
                     for key in ('indexer_span_us','plan_us','between_kernel_gap_us'):
                         if key in samples[0]:stats[n][key]=summary([p[key] for p in samples])
                     stats[n].update(event=summary([p['event_us'] for p in raw[n]]),host=summary([p['host_us'] for p in raw[n]]),checks=checks[n],raw_interface=raw[n],raw_device=samples)
+                split_span=stats['split']['span_us']['p50_us']
+                for s in stats.values():
+                    s['span_p50_over_split']=s['span_us']['p50_us']/split_span
+                if 'baseline' in stats:
+                    baseline_span=stats['baseline']['span_us']['p50_us']
+                    for s in stats.values():
+                        span=s['span_us']['p50_us']
+                        s['span_p50_over_native_indexer']=span/baseline_span
+                        s['span_p50_delta_vs_native_indexer_us']=span-baseline_span
+                    topk_checks=[s['topk_check'] for s in raw['baseline']]
+                    stats['baseline']['native_topk_comparison']={
+                        'min_sample_overlap':min(s['topk_set_overlap'] for s in topk_checks),
+                        'min_row_overlap':min(s['topk_min_row_overlap'] for s in topk_checks),
+                        'max_different_rows':max(s['topk_rows_with_different_sets'] for s in topk_checks),
+                    }
                 data={'tag':tag,'context':context,'mtp':mtp,'capacity':capacity,'requests':args.requests,
                     'timing_arithmetic':TIMING_ARITHMETIC,
                     'qli_input_sha256':qli_hash,'qli_s1_base':2,
@@ -267,35 +340,59 @@ def main_run(args,report):
                 print('完成',tag,flush=True)
             except BaseException:
                 try:
-                    b=bundles[current['implementation']]
-                    np.savez(directory/'failure_state.npz',**common.snapshot(b),**{k:case[k] for k in common.INPUTS},
-                        **{'actual_input_'+k:b['inputs'][k].cpu().numpy() for k in common.INPUTS})
                     write_json(directory/'failure_call.json',current)
+                    if current['implementation']=='baseline':
+                        np.savez(directory/'failure_topk.npz',
+                                 baseline=topk_outputs['baseline'].cpu().numpy(),ordered=canonical_cpu,
+                                 visible_seq_lens=visible_seq_lens)
+                    else:
+                        b=bundles[current['implementation']]
+                        np.savez(directory/'failure_state.npz',**common.snapshot(b),**{k:case[k] for k in common.INPUTS},
+                            **{'actual_input_'+k:b['inputs'][k].cpu().numpy() for k in common.INPUTS})
                 except BaseException:pass
                 raise
             finally:
                 for b in bundles.values():common.close(b)
-        del readonly,inputs,dummy,canonical,bundles
+        del readonly,inputs,dummy,canonical,bundles,topk_outputs,topk_guards
     report.update(status='complete',wall_seconds=wall,cases=all_results)
     write_json(out/'capture_metadata.json',report)
     if args.gate_only:
         (out/'report.md').write_text('# 融合Plan边界正确性\n\n仅正确性检查，无性能结论。\n\n'+json.dumps(all_results,ensure_ascii=False,indent=2)+'\n')
         return
     write_json(out/'data_index.json',{'status':'complete','cases':[{'tag':r['tag'],'metadata':str(out/r['tag']/'capture_metadata.json'),'csv_paths':r['csv_paths']} for r in all_results]})
-    lines=['# 保序Indexer＋Plan：拆分与融合对照','','设备时间单位μs。busy为目标设备区间的并集长度，避免把重叠AIC/AIV重复相加；span为首个目标开始至最后目标结束。Event包含接口下发及辅助任务，单独报告。',
+    lines=['# Indexer与Plan性能对照','','设备时间单位μs。busy为目标设备区间的并集长度，避免把重叠AIC/AIV重复相加；span为首个目标开始至最后目标结束。Event包含接口下发及辅助任务，单独报告。',
            'CSV使用十进制解析并先扣除共同时间原点；原始时间字符串与小范围时间戳重叠容差保留在逐样本元数据。',
            'split为同一保序Indexer实现＋冻结rankpipe AC，Indexer分块固定S1Base=2。状态恢复、校验不计入目标Duration；固定地址预热。',
-           '75%标签仅约束首行初始命中；其他行使用真实Indexer选择，实际命中与descriptor见元数据。未测Transfer/SFA。','',
-           '| 工况 | 实现 | busy P50/P95 | span P50/P95 | Event P50/P95 | span/拆分 | 样本数 | 联合/回退/单行有序 | descriptor数 |',
-           '|---|---|---:|---:|---:|---:|---:|---|---:|']
+           '75%标签仅约束首行初始命中；其他行使用真实Indexer选择，实际命中与descriptor见元数据。未测Transfer/SFA。']
+    with_baseline = 'baseline' in names
+    if with_baseline:
+        lines+=['baseline只运行上游原始quant_lightning_indexer，使用原始tiling。冷/热标签只描述Plan的缓存初态。',
+                'span/拆分用于评估融合收益。span/原始Indexer和差值反映两种不同计算范围的整段耗时。']
+    baseline_columns = ' span/原始Indexer | 对原始Indexer Δspan P50 (μs) |' if with_baseline else ''
+    baseline_align = '---:|---:|' if with_baseline else ''
+    lines+=['',f'| 工况 | 实现 | busy P50/P95 | span P50/P95 | Event P50/P95 | span/拆分 |'
+            f'{baseline_columns} 样本数 | 联合/回退/单行有序 | descriptor数 |',
+            f'|---|---|---:|---:|---:|---:|{baseline_align}---:|---|---:|']
     for r in all_results:
-        base=r['statistics']['split']['span_us']['p50_us']
         for n,s in r['statistics'].items():
             fmt=lambda x:f"{x['p50_us']:.3f}/{x['p95_us']:.3f}"
             checked=s['checks']
-            paths=f"{checked['joint_groups']}/{checked['overflow_groups']}/{checked.get('single_sorted_groups',0)}"
-            lines.append(f"| {r['tag']} | {n} | {fmt(s['busy_us'])} | {fmt(s['span_us'])} | {fmt(s['event'])} | {s['span_us']['p50_us']/base:.3f} | {args.repeat} | {paths} | {checked['total_transfer_descriptors']} |")
+            paths,descriptors='—','—'
+            if n!='baseline':
+                paths=f"{checked['joint_groups']}/{checked['overflow_groups']}/{checked.get('single_sorted_groups',0)}"
+                descriptors=checked['total_transfer_descriptors']
+            comparison=''
+            if with_baseline:
+                comparison=(f" {s['span_p50_over_native_indexer']:.3f} |"
+                            f" {s['span_p50_delta_vs_native_indexer_us']:+.3f} |")
+            lines.append(f"| {r['tag']} | {n} | {fmt(s['busy_us'])} | {fmt(s['span_us'])} | {fmt(s['event'])} | "
+                         f"{s['span_p50_over_split']:.3f} |{comparison} {args.repeat} | {paths} | {descriptors} |")
         s=r['statistics']['split'];lines+=['',f"拆分详情 {r['tag']}：Indexer span P50={s['indexer_span_us']['p50_us']:.3f}，Plan P50={s['plan_us']['p50_us']:.3f}，两者间隙P50={s['between_kernel_gap_us']['p50_us']:.3f}。",'']
+        if 'baseline' in r['statistics']:
+            topk=r['statistics']['baseline']['native_topk_comparison']
+            lines+= [f"原始Indexer TopK折算为集合后，{r['tag']} 的最小样本重合率为 "
+                     f"{topk['min_sample_overlap']:.4%}，最小行重合率为 {topk['min_row_overlap']:.4%}，"
+                     f"单个样本最多 {topk['max_different_rows']} 行集合有差异。",'']
     (out/'report.md').write_text('\n'.join(lines)+'\n')
 
 
@@ -305,13 +402,15 @@ def main():
     p.add_argument('--output',type=Path,required=True);p.add_argument('--requests',type=int,default=32)
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7]);p.add_argument('--contexts',nargs='+',type=int,default=[262144])
     p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
-    p.add_argument('--implementations',nargs='+',choices=('split','a','b','c','peer'),default=['split','a','b','c'])
+    p.add_argument('--implementations',nargs='+',choices=('baseline','split','a','b','c','peer'),
+                   default=['split','a','b','c'],
+                   help='baseline includes the unmodified upstream Indexer without Plan')
     p.add_argument('--warmup',type=int,default=2);p.add_argument('--repeat',type=int,default=5);p.add_argument('--regression-repeat',type=int,default=1)
     p.add_argument('--seed',type=int,default=2026);p.add_argument('--kernel-map',type=Path)
     p.add_argument('--gate-only',action='store_true',help='只验证融合A/B/C，可测短序列尾部-1；不运行独立Plan或生成性能数字')
     args=p.parse_args()
     if args.gate_only:
-        args.implementations=[n for n in args.implementations if n not in ('split','peer')]
+        args.implementations=[n for n in args.implementations if n not in ('baseline','split','peer')]
         if args.scenarios!=['cold_reset']:p.error('--gate-only requires --scenarios cold_reset')
     if args.requests<1 or args.repeat<1 or args.regression_repeat<1 or args.warmup<0 or any(x<(8 if args.gate_only else 2048) for x in args.contexts):p.error('invalid sizes/counts')
     if (not args.gate_only and 'split' not in args.implementations) or not args.implementations or len(set(args.implementations))!=len(args.implementations):p.error('split baseline is mandatory for performance; implementations must be unique')

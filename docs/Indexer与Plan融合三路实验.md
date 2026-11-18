@@ -10,6 +10,7 @@ Bisheng编译通过、设备同步正确或取得性能收益。所有性能数�
 
 | 名称 | Indexer | Plan | 中间数据 |
 |---|---|---|---|
+| baseline（可选） | 上游原始 `quant_lightning_indexer`，原始 tiling | — | 把 TopK 写入预分配输出 |
 | split | 同一份保序QLI，关闭Plan hook | 独立、冻结 `joint_rankpipe_ac_512` | TopK直接写入独立Plan绑定的缓冲；中间没有TensorMove或显式同步 |
 | a | 保序QLI＋Plan，同一个mixed kernel | 代表位置16位＋精确位图 | unique保存原始query位置；只复用Vector临时区，Cube结果区独占 |
 | b | 同a | 代表位置16位＋目录/二分 | 与a比较resident查询方式，保留归并、LRU、owner和持久协议 |
@@ -146,6 +147,31 @@ bash scripts/test_qli_fusion.sh --device 0 --requests 32 --contexts 262144 \
 `--implementations split a b c peer` 保留原融合版参考；peer采用自身tiling，
 其结果不参与“同一S1Base”的算法归因。默认不运行它，减少首轮成本。
 
+### 与原始 Indexer 单独运行对比
+
+拉取最新测试框架后，用新的 `QLI_FUSION_BUILD_DIR` 按上面的步骤重建融合设备包和
+Torch 扩展。它现在同时构建 GitCode 固定提交 `9ec2110` 中
+`attention/quant_lightning_indexer` 的原始算子，并为该算子安装一个轻量测试绑定。
+绑定检查两个 ACLNN 入口从本次专用 vendor 加载。
+
+```bash
+bash scripts/test_qli_fusion.sh --device 4 --requests 32 --contexts 262144 \
+  --mtp 3 --scenarios cold_reset full_cache_75pct \
+  --implementations baseline split a b c \
+  --warmup 10 --repeat 20 --regression-repeat 1 \
+  --output "$RUN/native_indexer_mtp3" --temp-dir "$RUN/tmp"
+```
+
+这五路共享相同的 Q/K、scale、weights 和页表，并交替采集。冷／热标签描述的是
+Plan 的缓存初态，`baseline` 两种工况都只运行原始 Indexer。它保留上游 tiling，
+所以报告同时提供 `span/原始Indexer`（整段耗时比）和 `span/拆分`（评估融合收益）。
+两者均使用设备 span P50。原始 Indexer 采用自身的 TopK 输出顺序，每次检查有效索引
+范围、数量、重复项和 padding，并单独记录与保序 Indexer 的 TopK 集合重合度。
+即便集合存在差异，仍可查看这条性能对照及其重合率。split 和融合路径之间继续执行
+逐位置 TopK、一致的 Plan 状态及保护区校验。
+
+可用 `--contexts 102400 262144 --mtp 0 1 3 7` 将同一对照扩展到此前的 16 个工况。
+
 ## 计时与失败诊断
 
 - 主报告同时给出设备目标执行区间并集busy、完整链路span、Event接口时间的
@@ -159,7 +185,7 @@ bash scripts/test_qli_fusion.sh --device 0 --requests 32 --contexts 262144 \
 - CSV匹配目标算子名/构建后缀，并固定实际完整kernel名与task分组。
   混入TensorMove不计目标时间，缺少目标或多采一个均失败。
 - 若目标SDK采用不同kernel命名，保留 `kernel_inventory` 后提供
-  `--kernel-map` JSON：键为split/a/b/c/peer/plan，值为精确kernel名字数组。
+  `--kernel-map` JSON：键为baseline/split/a/b/c/peer/plan，值为精确kernel名字数组。
   不通过放宽样本数或拼接CSV绕过检查。
 - 输出目录预检先于NPU初始化和大输入分配；支持 `--temp-dir`，不自动换目录。
 - 失败留存 `profile.log`、原始trace、`failure_call.json` 和数值现场，失败不写

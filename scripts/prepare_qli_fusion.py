@@ -17,12 +17,16 @@ else:
 
 COMMIT='9ec2110969a9e8502bf6d579c027ac4ea9572016'
 SOURCE='attention/quant_lightning_indexer_ordered_fused'
+NATIVE_INDEXER='quant_lightning_indexer'
+NATIVE_SOURCE=f'attention/{NATIVE_INDEXER}'
+NATIVE_BINDING=ROOT/'fusion/native_indexer_binding'
 NAMES={0:'quant_lightning_indexer_plan_split',1:'quant_lightning_indexer_plan_a',
        2:'quant_lightning_indexer_plan_b',3:'quant_lightning_indexer_plan_c'}
 
 def source_id():
     files=[ROOT/'scripts/export_fusion_plan.py',ROOT/'scripts/prepare_qli_fusion.py',
            ROOT/'csrc/joint_plan/sparse_kv_plan_config.h',
+           *sorted(NATIVE_BINDING.iterdir()),
            *sorted((ROOT/'csrc/qli_fusion').glob('*'))]
     h=hashlib.sha256(COMMIT.encode())
     for f in files:
@@ -192,13 +196,19 @@ def main():
     if head!=COMMIT:raise SystemExit(f'expected upstream {COMMIT}, got {head}')
     source=repo/SOURCE
     # Enforce exact public upstream files, including the QLI/TopK implementation.
-    tracked=subprocess.check_output(['git','-C',str(repo),'ls-tree','-r','--name-only',COMMIT,SOURCE],text=True).splitlines()
+    tracked=subprocess.check_output(
+        ['git','-C',str(repo),'ls-tree','-r','--name-only',COMMIT,SOURCE,NATIVE_SOURCE],
+        text=True,
+    ).splitlines()
     for name in tracked:
         expected=subprocess.check_output(['git','-C',str(repo),'show',f'{COMMIT}:{name}'])
         if not (repo/name).is_file() or (repo/name).read_bytes()!=expected:raise SystemExit('upstream file differs: '+name)
+    baseline_binding=repo/NATIVE_SOURCE/'torch_extension'
+    destinations=[repo/'attention'/name for name in NAMES.values()]+[baseline_binding]
+    for dest in destinations:
+        if dest.exists():raise SystemExit('refusing to overwrite existing directory: '+str(dest))
     for mode,name in NAMES.items():
         dest=repo/'attention'/name
-        if dest.exists():raise SystemExit('refusing to overwrite existing directory: '+str(dest))
         shutil.copytree(source,dest)
         old='quant_lightning_indexer_ordered_fused';camel='QuantLightningIndexerOrderedFused'
         suffix='Split' if mode==0 else 'ABC'[mode-1]
@@ -216,12 +226,24 @@ def main():
             if f.is_file() and f.suffix in ('.h','.cpp','.inc'):
                 s=f.read_text().replace('qli_fusion_resource',name+'_resource').replace('qli_fused_host',name+'_host')
                 f.write_text(s)
-    manifest={'upstream':COMMIT,'source_id':source_id(),'plan_parent':'44ee66caed1ceb58fad4190887b1e07fae0d4281',
+    digest=source_id()
+    (baseline_binding/'csrc').mkdir(parents=True)
+    python_binding=NATIVE_BINDING/f'{NATIVE_INDEXER}.py'
+    cpp_binding=NATIVE_BINDING/f'{NATIVE_INDEXER}.cpp'
+    shutil.copy2(python_binding,baseline_binding/python_binding.name)
+    (baseline_binding/'csrc'/cpp_binding.name).write_text(
+        replace(cpp_binding.read_text(),'@FUSION_SOURCE_ID@',digest)
+    )
+    manifest={'upstream':COMMIT,'source_id':digest,'plan_parent':'44ee66caed1ceb58fad4190887b1e07fae0d4281',
+              'native_indexer':{'operator':NATIVE_INDEXER,'source':NATIVE_SOURCE,
+                                'upstream':COMMIT,'tiling':'upstream'},
               'operators':NAMES,'qli_s1_base':2,'files':{}}
     for name in NAMES.values():
         for f in (repo/'attention'/name).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
+    for f in (repo/NATIVE_SOURCE).rglob('*'):
+        if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
     (repo/'qli_fusion_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    print('prepared four registered operators; manifest:',repo/'qli_fusion_manifest.json')
+    print('prepared four experiment operators and the native Indexer binding; manifest:',repo/'qli_fusion_manifest.json')
 
 if __name__=='__main__':main()

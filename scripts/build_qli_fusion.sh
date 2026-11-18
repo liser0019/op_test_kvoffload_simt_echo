@@ -19,7 +19,7 @@ git clone --single-branch --branch wzj_qli_order_fused https://gitcode.com/spars
 git -C "$WORK/upstream" checkout --detach "$PIN"
 "$PYTHON" -B "$ROOT/scripts/export_fusion_plan.py" --check
 "$PYTHON" -B "$ROOT/scripts/prepare_qli_fusion.py" --upstream "$WORK/upstream"
-OPS=quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_a,quant_lightning_indexer_plan_b,quant_lightning_indexer_plan_c,quant_lightning_indexer_ordered_fused
+OPS=quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_a,quant_lightning_indexer_plan_b,quant_lightning_indexer_plan_c,quant_lightning_indexer_ordered_fused,quant_lightning_indexer
 cd "$WORK/upstream"
 bash build.sh --pkg --soc=ascend950 --ops="$OPS" --vendor_name=qlifusion -j"${JOBS:-3}"
 PACKAGES=(build_out/cann-ops-transformer-qlifusion*.run)

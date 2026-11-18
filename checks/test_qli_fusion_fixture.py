@@ -3,9 +3,25 @@ import unittest
 import numpy as np
 import torch
 from fusion.glm52_inputs import Shape,make_inputs
-from profile_qli_fusion import make_plan_case,operator_kwargs,check_ordered_topk
+from profile_qli_fusion import make_plan_case,operator_kwargs,check_ordered_topk,check_native_topk
 
 class Fixture(unittest.TestCase):
+    def test_native_topk_compares_sets_without_mutating_output(self):
+        native = np.array([[9, 5, 2], [4, 1, 0], [1, 0, -1]], dtype=np.int32)
+        ordered = np.array([[2, 5, 9], [0, 1, 3], [0, 1, -1]], dtype=np.int32)
+        original = native.copy()
+        stats = check_native_topk(native, ordered, [10, 6, 2])
+        self.assertEqual(stats['topk_set_overlap'], 7/8)
+        self.assertEqual(stats['topk_min_row_overlap'], 2/3)
+        self.assertEqual(stats['topk_rows_with_different_sets'], 1)
+        np.testing.assert_array_equal(native, original)
+
+    def test_native_topk_rejects_invalid_prefix_or_padding(self):
+        ordered = np.array([[0, 1, -1]], dtype=np.int32)
+        for row in ([1, 1, -1], [0, 2, -1], [0, -1, 1], [0, 1, -2]):
+            with self.subTest(row=row), self.assertRaisesRegex(RuntimeError, 'invalid native'):
+                check_native_topk(np.array([row], dtype=np.int32), ordered, [2])
+
     def test_ordered_topk_valid_prefix_contract(self):
         check_ordered_topk(np.array([[2,5,9,11],[0,1,2,-1],[-1,-1,-1,-1]]),[20,3,0])
         check_ordered_topk(np.array([[2,5,9,11]]),[20])

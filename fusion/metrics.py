@@ -8,8 +8,22 @@ from decimal import Decimal, InvalidOperation
 TOKENS={'split':'quant_lightning_indexer_plan_split','a':'quant_lightning_indexer_plan_a',
         'b':'quant_lightning_indexer_plan_b','c':'quant_lightning_indexer_plan_c',
         'peer':'quant_lightning_indexer_ordered_fused',
+        'baseline':'quant_lightning_indexer',
         'plan':'sparse_kv_plan_joint_kernel_rankpipe_ac_512'}
 TIMING_ARITHMETIC='decimal_relative_v1'
+
+
+def kernel_pattern(role, token):
+    camel = ''.join(word.title() for word in token.split('_'))
+    snake = re.escape(token)
+    if role == 'baseline':
+        # The native snake-case name is a prefix of several other operators.
+        snake += r'(?!_(?:plan|ordered|v[0-9]+)(?:_|$))'
+    return re.compile(r'(?<![A-Za-z0-9])(?:' + snake + '|' + camel + r')(?![A-Za-z0-9])')
+
+
+KERNEL_PATTERNS = {role: kernel_pattern(role, token) for role, token in TOKENS.items()}
+
 
 def interval_union(events):
     """Union without changing numeric types (Decimal inside the CSV parser)."""
@@ -47,13 +61,11 @@ def read_csvs(paths,orders,repeat,exact=None):
             for row in reader:
                 name=row[nk];inventory.add(name)
                 hits=[]
-                for role,token in TOKENS.items():
+                for role,pattern in KERNEL_PATTERNS.items():
                     if exact:
                         match=name in exact.get(role,[])
                     else:
-                        # Accept build-generated suffixes, not an arbitrary substring.
-                        camel=''.join(w.title() for w in token.split('_'))
-                        match=bool(re.search(r'(?<![A-Za-z0-9])(?:'+re.escape(token)+'|'+re.escape(camel)+r')(?![A-Za-z0-9])',name))
+                        match=bool(pattern.search(name))
                     if match:hits.append(role)
                 if not hits:continue
                 if len(hits)!=1:raise RuntimeError('ambiguous target kernel: '+name)

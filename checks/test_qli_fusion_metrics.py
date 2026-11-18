@@ -24,6 +24,18 @@ class Metrics(unittest.TestCase):
     def test_overlap_and_gap(self):
         p=self.parse(self.rows());self.assertEqual(p[0]['span_us'],19);self.assertEqual(p[0]['busy_us'],16)
         self.assertEqual(p[0]['between_kernel_gap_us'],3);self.assertEqual(p[1]['busy_us'],15)
+    def test_native_indexer_does_not_capture_split_or_fused_kernel_names(self):
+        rows = self.rows() + [
+            ['quant_lightning_indexer_mix_aic', 40, 8, 'AI_CORE', 1, 0],
+            ['QuantLightningIndexer_mix_aiv', 41, 9, 'AI_VECTOR_CORE', 1, 0],
+        ]
+        split, fused, native = self.parse(rows, ('split', 'a', 'baseline'))
+        self.assertEqual(split['plan_us'], 4)
+        self.assertEqual(fused['implementation'], 'a')
+        self.assertEqual(native['implementation'], 'baseline')
+        self.assertEqual(native['span_us'], 10)
+        self.assertEqual(native['busy_us'], 10)
+        self.assertNotIn('plan_us', native)
     def test_timestamp_quantization_near_contiguous_split(self):
         base=1.0e15
         rows=[[TOKENS['split'],base,533.078,'AI_CORE',1,0],
