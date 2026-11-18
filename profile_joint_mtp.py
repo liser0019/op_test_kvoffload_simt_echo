@@ -219,6 +219,8 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
 
 def mtp_comparison(runs):
     result = []
+    if not any(r["workload"]["mtp"] == 0 for r in runs):
+        return result
     for run in runs:
         workload = run["workload"]
         if workload["mtp"] == 0:
@@ -397,8 +399,9 @@ def main():
     args = parser.parse_args()
     if any(n in common.MERGE_NAMES for n in args.implementations) and not args.sorted_topk:
         parser.error("joint_merge必须显式指定--sorted-topk，以相同升序输入比较")
-    if args.warmup < 0 or args.repeat <= 0 or args.regression_repeat <= 0 or 0 not in args.mtp:
-        parser.error("warmup>=0、repeat>0且mtp列表必须含0")
+    mtp3_only = bool(args.implementations) and all(n == "joint_rankpipe_ac_512" or n.startswith("joint_mtp3_") for n in args.implementations)
+    if args.warmup < 0 or args.repeat <= 0 or args.regression_repeat <= 0 or (0 not in args.mtp and not mtp3_only):
+        parser.error("warmup>=0、repeat>0且mtp列表必须含0；固定MTP3候选集合可只采MTP3")
     for key in ("mtp", "implementations", "scenarios", "overlaps"):
         if len(getattr(args, key)) != len(set(getattr(args, key))):
             parser.error(key + "不得重复")

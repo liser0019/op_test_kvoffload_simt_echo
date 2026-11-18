@@ -10,6 +10,15 @@
 #ifndef JOINT_MTP7_TILE
 #define JOINT_MTP7_TILE 0
 #endif
+#ifndef JOINT_MTP3_FULL
+#define JOINT_MTP3_FULL 0
+#endif
+#ifndef JOINT_MTP3_MAP
+#define JOINT_MTP3_MAP 0
+#endif
+#ifndef JOINT_MTP3_LOAD
+#define JOINT_MTP3_LOAD 0
+#endif
 static_assert(JOINT_MTP7_OPT>=0 && JOINT_MTP7_OPT<=2,"MTP7 candidate selector");
 #if JOINT_LAYOUT16
 constexpr uint64_t EIGHT_UB_WORDS=204U*1024U/4U;
@@ -150,7 +159,11 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
       uint64_t words=16ULL*static_cast<uint32_t>(ctx[3]);
       if(HW_C && a.scratchElements<=EIGHT_UB_WORDS)
 #if JOINT_MTP7_MAP16
+#if JOINT_MTP3_FULL
+        words=(rows==4U&&topk==2048U&&capacity==8192U)?32768U:24576U;
+#else
         words=24576U;
+#endif
 #else
         words=a.scratchElements-EIGHT_CTX-((mapRows*topk+capacity+7U)&~7U);
 #endif
@@ -463,8 +476,21 @@ __simd_vf__ inline void RefineUniqueMapVf(__ubuf__ int32_t* records,
     const uint32_t count=n-base<64U?n-base:64U;
     Reg::Adds(even,lane,base,full);Reg::ShiftLefts(even,even,int16_t{1},full);
     Reg::Adds(odd,even,uint32_t{1},full);
+#if JOINT_MTP3_LOAD
+    const bool pairAligned=(reinterpret_cast<uintptr_t>(records+2U*base)&31U)==0U;
+    if(count==64U&&pairAligned){
+      Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_DINTLV_B32>(
+          reinterpret_cast<Reg::RegTensor<uint32_t>&>(score),payload,
+          reinterpret_cast<__ubuf__ uint32_t*>(records)+2U*base);
+    }else{
+      Reg::Duplicate(score,0.0f);Reg::Duplicate(payload,uint32_t{0});
+      Reg::Gather<float,float,uint32_t>(score,reinterpret_cast<__ubuf__ float*>(records),even,valid);
+      Reg::Gather<uint32_t,uint32_t,uint32_t>(payload,reinterpret_cast<__ubuf__ uint32_t*>(records),odd,valid);
+    }
+#else
     Reg::Duplicate(score,0.0f);
     Reg::Gather<float,float,uint32_t>(score,reinterpret_cast<__ubuf__ float*>(records),even,valid);
+#endif
     Reg::Gather<float,uint32_t>(shiftScore,score,previousIndex);
     Reg::Select(previous,lastScore,shiftScore,first);
     Reg::Compare<float,CMPMODE::NE>(head,score,previous,valid);
@@ -489,8 +515,10 @@ __simd_vf__ inline void RefineUniqueMapVf(__ubuf__ int32_t* records,
 #endif
     Reg::Select(index,index,safeIndex,writeHead); // even masked indices are unique
     Reg::Scatter<int32_t,uint32_t>(data,token,index,writeHead);
+#if !JOINT_MTP3_LOAD
     Reg::Duplicate(payload,uint32_t{0});
     Reg::Gather<uint32_t,uint32_t,uint32_t>(payload,reinterpret_cast<__ubuf__ uint32_t*>(records),odd,valid);
+#endif
     Reg::Adds(safeIndex,lane,q,full);Reg::Select(payload,payload,safeIndex,valid);
 #if JOINT_MTP7_MAP16
     if (true) {
@@ -798,6 +826,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf
 #else
 #include "layout_hot_simd.h"
 #endif
+#elif JOINT_RANKPIPE && JOINT_STAGE_EXEC
+// Rankpipe uses the stage-exec compact VF without instantiating MTP7 fused kernels.
+#include "stage_exec_simd.h"
 #endif
 
 #if JOINT_RANKPIPE
@@ -1068,10 +1099,11 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
         if constexpr(JOINT_LAYOUT16==1 && (JOINT_LAYOUT_HOT_BITS&2U)){
           SORTED_CALL(6);SortedVectorToScalar(pipe);
           if(ctx[0]==1){
+            const bool hotUbMap=JOINT_MTP3_MAP && d.capacity==8192U && d.topk==2048U && (end-first)==4;
 #if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 2)
-            asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
+            asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);
 #else
-            asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
+            asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);
 #endif
             SortedVectorToScalar(pipe);
             if(ctx[0]==1){SORTED_CALL(9);SortedVectorToScalar(pipe);}
