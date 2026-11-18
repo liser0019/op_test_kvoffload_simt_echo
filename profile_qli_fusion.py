@@ -17,10 +17,11 @@ import joint_plan_common as common
 from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
 from fusion.metrics import read_csvs,TIMING_ARITHMETIC
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
-from scripts.prepare_qli_fusion import NAMES,NATIVE_INDEXER,source_id
+from scripts.prepare_qli_fusion import NAMES,NATIVE_INDEXER,ORDERED4,source_id
 
 ROOT=Path(__file__).resolve().parent
 BASE='joint_rankpipe_ac_512'
+INDEXER_ONLY = {'baseline', 'ordered4'}
 
 
 def check_ordered_topk(indices,visible_seq_lens):
@@ -71,14 +72,25 @@ def check_native_topk(indices, canonical, visible_seq_lens):
     }
 
 
-def load_operators(manifest, vendor, include_baseline):
+def load_operators(manifest, vendor, implementations):
     if manifest['source_id']!=source_id():raise RuntimeError('fusion source/manifest mismatch; rebuild required')
     operators={};identities={}
     names = {'split' if mode == 0 else 'abc'[mode-1]: name for mode, name in NAMES.items()}
-    if include_baseline:
+    if 'baseline' in implementations:
         if manifest.get('native_indexer', {}).get('operator') != NATIVE_INDEXER:
             raise RuntimeError('native Indexer missing from build manifest; rebuild the fusion package')
         names['baseline'] = NATIVE_INDEXER
+    if 'ordered4' in implementations:
+        if manifest.get('ordered_indexer_4', {}).get('operator') != ORDERED4:
+            raise RuntimeError('ordered S1Base=4 missing from build manifest; rebuild the fusion package')
+        names['ordered4'] = ORDERED4
+    names = {role: name for role, name in names.items() if role == 'split' or role in implementations}
+    required = set(names.values())
+    if 'peer' in implementations:
+        required.add('quant_lightning_indexer_ordered_fused')
+    missing = required.difference(manifest['packaged_operators'])
+    if missing:
+        raise RuntimeError(f'operators missing from the package: {sorted(missing)}')
     for role,name in names.items():
         package='cann_ops_transformer_qlifusion.ops.attention.'+name
         module=importlib.import_module(package)
@@ -190,7 +202,7 @@ def main_run(args,report):
         f=build/'install'/name
         if not f.is_file() or hashlib.sha256(f.read_bytes()).hexdigest()!=digest:raise RuntimeError('installed CANN package changed: '+str(f))
     names=args.implementations
-    operators,compiled=load_operators(manifest,vendor,'baseline' in names)
+    operators,compiled=load_operators(manifest,vendor,names)
     report.update(device=device,build_manifest=manifest,compiled_extensions=compiled,
                   timing_arithmetic=TIMING_ARITHMETIC)
     from fusion.glm52_inputs import Shape,make_inputs
@@ -231,7 +243,7 @@ def main_run(args,report):
                 guard=torch.full((shape.rows*2048+32,),common.GUARD_VALUE,dtype=torch.int32,device=device_query)
                 topk_outputs[n]=guard[16:-16].reshape(shape.rows,1,2048)
                 topk_guards[n]=guard
-                if n!='baseline':
+                if n not in INDEXER_ONLY:
                     inp=common.upload_inputs(torch,case)
                     inp['topk_indices']=topk_outputs[n].reshape(shape.rows,2048)
                     inp['topk_indices'].copy_(canonical.reshape(shape.rows,2048))
@@ -248,7 +260,14 @@ def main_run(args,report):
                     common.restore(torch,b);ready.zero_();torch.npu.synchronize()
                 topk_outputs[n].fill_(-777);torch.npu.synchronize()
                 start,end=extras[n];host=time.monotonic();start.record()
-                kw=inputs.qli if n=='baseline' else kwargs(b,dw if n=='split' else None)
+                if n=='baseline':
+                    kw=inputs.qli
+                elif n=='ordered4':
+                    # The shared registration ABI expects these tensors. The
+                    # generated Indexer has its Plan hook disabled at compile time.
+                    kw=kwargs(dummy,dw)
+                else:
+                    kw=kwargs(b,dw if n=='split' else None)
                 result=operators[n](**kw,topk_out=topk_outputs[n]) if n!='peer' else operators[n](**kw)
                 if n=='split':
                     # Current stream; no synchronize/D2H between the two kernels.
@@ -269,7 +288,12 @@ def main_run(args,report):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('split QLI workspace guard changed')
                 for guard in (topk_guards[n][:16],topk_guards[n][-16:]):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('TopK output guard changed')
-                if b is not None:
+                if n=='ordered4':
+                    for key in dummy['host_initial']:
+                        if key!='workspace' and not torch.equal(dummy['state'][key], dummy['initial'][key]):
+                            raise RuntimeError('ordered4 modified Plan state: '+key)
+                    result_info={'status':'passed', 'topk_exact_match':True, 's1_base':4}
+                elif b is not None:
                     result_info=common.check(case,b)
                 return event_us,host_us,result_info
             begin=time.monotonic()
@@ -335,15 +359,29 @@ def main_run(args,report):
                     'qli_input_sha256':qli_hash,'qli_s1_base':2,
                     'input':describe(case),'logical_input_sha256':hashlib.sha256(b''.join(case[k].tobytes() for k in common.INPUTS)).hexdigest(),
                     'statistics':stats,'execution_orders':orders,'csv_paths':[str(p) for p in csvs],'kernel_inventory':inventory}
+                if 'ordered4' in stats:
+                    ordered2=stats['split']['indexer_span_us']['p50_us']
+                    ordered4=stats['ordered4']['span_us']['p50_us']
+                    data['indexer_comparison']={
+                        'ordered4_s1_base':4,
+                        'ordered2_s1_base':2,
+                        'ordered2_span_p50_us':ordered2,
+                        'ordered4_span_p50_us':ordered4,
+                        'ordered2_minus_ordered4_p50_us':ordered2-ordered4,
+                        'split_plan_p50_us':stats['split']['plan_us']['p50_us'],
+                    }
+                    if 'baseline' in stats:
+                        data['indexer_comparison']['ordered4_minus_native_p50_us']=ordered4-baseline_span
                 write_json(directory/'capture_metadata.json',data);all_results.append(data)
                 write_json(out/'data_index.json',{'status':'running','cases':[{'tag':r['tag'],'metadata':str(out/r['tag']/'capture_metadata.json'),'csv_paths':r['csv_paths']} for r in all_results]})
                 print('完成',tag,flush=True)
             except BaseException:
                 try:
                     write_json(directory/'failure_call.json',current)
-                    if current['implementation']=='baseline':
+                    if current['implementation'] in INDEXER_ONLY:
+                        name=current['implementation']
                         np.savez(directory/'failure_topk.npz',
-                                 baseline=topk_outputs['baseline'].cpu().numpy(),ordered=canonical_cpu,
+                                 **{name:topk_outputs[name].cpu().numpy()},ordered=canonical_cpu,
                                  visible_seq_lens=visible_seq_lens)
                     else:
                         b=bundles[current['implementation']]
@@ -378,7 +416,7 @@ def main_run(args,report):
             fmt=lambda x:f"{x['p50_us']:.3f}/{x['p95_us']:.3f}"
             checked=s['checks']
             paths,descriptors='—','—'
-            if n!='baseline':
+            if n not in INDEXER_ONLY:
                 paths=f"{checked['joint_groups']}/{checked['overflow_groups']}/{checked.get('single_sorted_groups',0)}"
                 descriptors=checked['total_transfer_descriptors']
             comparison=''
@@ -388,6 +426,16 @@ def main_run(args,report):
             lines.append(f"| {r['tag']} | {n} | {fmt(s['busy_us'])} | {fmt(s['span_us'])} | {fmt(s['event'])} | "
                          f"{s['span_p50_over_split']:.3f} |{comparison} {args.repeat} | {paths} | {descriptors} |")
         s=r['statistics']['split'];lines+=['',f"拆分详情 {r['tag']}：Indexer span P50={s['indexer_span_us']['p50_us']:.3f}，Plan P50={s['plan_us']['p50_us']:.3f}，两者间隙P50={s['between_kernel_gap_us']['p50_us']:.3f}。",'']
+        if 'indexer_comparison' in r:
+            indexer=r['indexer_comparison']
+            lines.append(f"Indexer 对照 {r['tag']}：保序 S1Base=4 单跑 P50 "
+                         f"{indexer['ordered4_span_p50_us']:.3f} μs，split 的保序 S1Base=2 段 "
+                         f"{indexer['ordered2_span_p50_us']:.3f} μs，两者差 "
+                         f"{indexer['ordered2_minus_ordered4_p50_us']:+.3f} μs（2行减4行）。")
+            if 'ordered4_minus_native_p50_us' in indexer:
+                lines.append(f"保序 S1Base=4 减原始 Indexer 的 P50 差值 "
+                             f"{indexer['ordered4_minus_native_p50_us']:+.3f} μs。")
+            lines.append('')
         if 'baseline' in r['statistics']:
             topk=r['statistics']['baseline']['native_topk_comparison']
             lines+= [f"原始Indexer TopK折算为集合后，{r['tag']} 的最小样本重合率为 "
@@ -402,15 +450,15 @@ def main():
     p.add_argument('--output',type=Path,required=True);p.add_argument('--requests',type=int,default=32)
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7]);p.add_argument('--contexts',nargs='+',type=int,default=[262144])
     p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
-    p.add_argument('--implementations',nargs='+',choices=('baseline','split','a','b','c','peer'),
+    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered4','split','a','b','c','peer'),
                    default=['split','a','b','c'],
-                   help='baseline includes the unmodified upstream Indexer without Plan')
+                   help='baseline: upstream Indexer only; ordered4: ordered Indexer only, S1Base=4')
     p.add_argument('--warmup',type=int,default=2);p.add_argument('--repeat',type=int,default=5);p.add_argument('--regression-repeat',type=int,default=1)
     p.add_argument('--seed',type=int,default=2026);p.add_argument('--kernel-map',type=Path)
     p.add_argument('--gate-only',action='store_true',help='只验证融合A/B/C，可测短序列尾部-1；不运行独立Plan或生成性能数字')
     args=p.parse_args()
     if args.gate_only:
-        args.implementations=[n for n in args.implementations if n not in ('baseline','split','peer')]
+        args.implementations=[n for n in args.implementations if n not in INDEXER_ONLY | {'split','peer'}]
         if args.scenarios!=['cold_reset']:p.error('--gate-only requires --scenarios cold_reset')
     if args.requests<1 or args.repeat<1 or args.regression_repeat<1 or args.warmup<0 or any(x<(8 if args.gate_only else 2048) for x in args.contexts):p.error('invalid sizes/counts')
     if (not args.gate_only and 'split' not in args.implementations) or not args.implementations or len(set(args.implementations))!=len(args.implementations):p.error('split baseline is mandatory for performance; implementations must be unique')

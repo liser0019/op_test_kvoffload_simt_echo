@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Install reviewed overlays into a *dedicated* pinned ops-transformer checkout.
 
-Never edits a user's existing operator directory. Four distinct registered ops
-are generated, so all candidates can coexist in one vendor package/process.
+Never edits a user's existing operator directory. Each generated operator has
+its own registration so candidates can coexist in one vendor package/process.
 """
 from pathlib import Path
 import argparse
@@ -22,6 +22,7 @@ NATIVE_SOURCE=f'attention/{NATIVE_INDEXER}'
 NATIVE_BINDING=ROOT/'fusion/native_indexer_binding'
 NAMES={0:'quant_lightning_indexer_plan_split',1:'quant_lightning_indexer_plan_a',
        2:'quant_lightning_indexer_plan_b',3:'quant_lightning_indexer_plan_c'}
+ORDERED4='quant_lightning_indexer_plan_split4'
 
 def source_id():
     files=[ROOT/'scripts/export_fusion_plan.py',ROOT/'scripts/prepare_qli_fusion.py',
@@ -37,8 +38,8 @@ def source_id():
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
-def overlay(folder,mode):
-    op=NAMES[mode];suffix='Split' if mode==0 else 'ABC'[mode-1]
+def overlay(folder,mode,suffix,s1_base):
+    op=folder.name
     kernel=folder/'op_kernel';host=folder/'op_host'
     for name in ('plan.h','storage.h','resources.h'):
         shutil.copy2(ROOT/'csrc/qli_fusion'/name,kernel/'plan'/name)
@@ -119,8 +120,17 @@ def overlay(folder,mode):
     planLocalMemoryBytes_=qli_fusion_resource::LocalBytes(qliParams_.capacity);
     planJointHashCapacity_=qliParams_.jointMtp?1U:0U;
     planScratchElements_=qli_fusion_resource::ScratchWords(qliParams_.capacity);planMaxJointRows_=8;
-    fusedS1BaseSize_=2U; // same QLI tile for split/A/B/C; report this explicitly
+    fusedS1BaseSize_=@S1_BASE@U;
 '''+s[end:]
+    s=replace(s,'@S1_BASE@',str(s1_base))
+    if s1_base==4:
+        # This experiment changes the tile, so a silent fallback to two rows
+        # would make its timing indistinguishable from the split Indexer.
+        start=s.index('    if (resources.total > qli_fused_host::kUbLimitBytes) {',start)
+        end=s.index('    if (resources.total > qli_fused_host::kUbLimitBytes) {',start+1)
+        s=s[:start]+s[end:]
+        s=replace(s,'fused QLI and plan UB footprint exceeds 216 KiB',
+                  'ordered Indexer with fixed S1Base=4 exceeds 216 KiB')
     # Original lambda and old UB-limit constant would now be unused under -Werror.
     start=s.index('    constexpr uint64_t kPlanRowUbLimitBytes',s.index('::CheckPlanInputs()'))
     end=s.index('    const auto &outShape',start)
@@ -204,14 +214,16 @@ def main():
         expected=subprocess.check_output(['git','-C',str(repo),'show',f'{COMMIT}:{name}'])
         if not (repo/name).is_file() or (repo/name).read_bytes()!=expected:raise SystemExit('upstream file differs: '+name)
     baseline_binding=repo/NATIVE_SOURCE/'torch_extension'
-    destinations=[repo/'attention'/name for name in NAMES.values()]+[baseline_binding]
+    variants=[(mode,name,'Split' if mode==0 else 'ABC'[mode-1],2)
+              for mode,name in NAMES.items()]
+    variants.append((0,ORDERED4,'Split4',4))
+    destinations=[repo/'attention'/name for _,name,_,_ in variants]+[baseline_binding]
     for dest in destinations:
         if dest.exists():raise SystemExit('refusing to overwrite existing directory: '+str(dest))
-    for mode,name in NAMES.items():
+    for mode,name,suffix,s1_base in variants:
         dest=repo/'attention'/name
         shutil.copytree(source,dest)
         old='quant_lightning_indexer_ordered_fused';camel='QuantLightningIndexerOrderedFused'
-        suffix='Split' if mode==0 else 'ABC'[mode-1]
         for f in sorted(dest.rglob('*'),key=lambda x:len(x.parts),reverse=True):
             if f.is_file():
                 try:s=f.read_text()
@@ -219,7 +231,7 @@ def main():
                 s=s.replace(camel,'QuantLightningIndexerPlan'+suffix).replace(old,name).replace('QLIOrderedFused','QLIPlan'+suffix).replace('QLI_ORDERED_FUSED','QLI_PLAN_'+suffix.upper())
                 f.write_text(s)
             if old in f.name:f.rename(f.with_name(f.name.replace(old,name)))
-        overlay(dest,mode)
+        overlay(dest,mode,suffix,s1_base)
         # All host tiling objects are linked into one vendor library. Distinct
         # constexpr definitions must NOT share a mangled name across A/B/C.
         for f in dest.rglob('*'):
@@ -237,13 +249,15 @@ def main():
     manifest={'upstream':COMMIT,'source_id':digest,'plan_parent':'44ee66caed1ceb58fad4190887b1e07fae0d4281',
               'native_indexer':{'operator':NATIVE_INDEXER,'source':NATIVE_SOURCE,
                                 'upstream':COMMIT,'tiling':'upstream'},
-              'operators':NAMES,'qli_s1_base':2,'files':{}}
-    for name in NAMES.values():
+              'operators':NAMES,'qli_s1_base':2,
+              'ordered_indexer_4':{'operator':ORDERED4,'s1_base':4,'plan_enabled':False},
+              'files':{}}
+    for _,name,_,_ in variants:
         for f in (repo/'attention'/name).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
     for f in (repo/NATIVE_SOURCE).rglob('*'):
         if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
     (repo/'qli_fusion_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    print('prepared four experiment operators and the native Indexer binding; manifest:',repo/'qli_fusion_manifest.json')
+    print('prepared experiment operators and the native Indexer binding; manifest:',repo/'qli_fusion_manifest.json')
 
 if __name__=='__main__':main()

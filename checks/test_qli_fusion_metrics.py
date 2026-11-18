@@ -36,6 +36,18 @@ class Metrics(unittest.TestCase):
         self.assertEqual(native['span_us'], 10)
         self.assertEqual(native['busy_us'], 10)
         self.assertNotIn('plan_us', native)
+    def test_four_row_indexer_stays_separate_from_split_plan(self):
+        rows = self.rows()[:4] + [
+            [TOKENS['baseline'], 20, 6, 'AI_CORE', 1, 0],
+            [TOKENS['ordered4']+'_mix_aic', 30, 7, 'AI_CORE', 1, 0],
+            ['QuantLightningIndexerPlanSplit4_mix_aiv', 31, 8, 'AI_VECTOR_CORE', 1, 0],
+        ]
+        split, native, ordered4 = self.parse(rows, ('split', 'baseline', 'ordered4'))
+        self.assertEqual(split['indexer_span_us'], 12)
+        self.assertEqual(split['plan_us'], 4)
+        self.assertEqual(native['span_us'], 6)
+        self.assertEqual(ordered4['span_us'], 9)
+        self.assertNotIn('plan_us', ordered4)
     def test_timestamp_quantization_near_contiguous_split(self):
         base=1.0e15
         rows=[[TOKENS['split'],base,533.078,'AI_CORE',1,0],

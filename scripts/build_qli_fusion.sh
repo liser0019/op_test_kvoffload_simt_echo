@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Dedicated upstream checkout/package: never patch an existing user's source tree.
 set -euo pipefail
+case "${1:-}" in
+  "") INDEXER_COMPARE_ONLY=0 ;;
+  --indexer-compare-only)
+    [[ $# -eq 1 ]] || { echo "用法：$0 [--indexer-compare-only]" >&2; exit 2; }
+    INDEXER_COMPARE_ONLY=1 ;;
+  *) echo "用法：$0 [--indexer-compare-only]" >&2; exit 2 ;;
+esac
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PYTHON=${PYTHON:-python3}
 # The upstream scripts invoke python3 themselves. Keep them in the caller's
@@ -19,7 +26,10 @@ git clone --single-branch --branch wzj_qli_order_fused https://gitcode.com/spars
 git -C "$WORK/upstream" checkout --detach "$PIN"
 "$PYTHON" -B "$ROOT/scripts/export_fusion_plan.py" --check
 "$PYTHON" -B "$ROOT/scripts/prepare_qli_fusion.py" --upstream "$WORK/upstream"
-OPS=quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_a,quant_lightning_indexer_plan_b,quant_lightning_indexer_plan_c,quant_lightning_indexer_ordered_fused,quant_lightning_indexer
+OPS=quant_lightning_indexer,quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_split4
+if [[ "$INDEXER_COMPARE_ONLY" -eq 0 ]]; then
+  OPS+=,quant_lightning_indexer_plan_a,quant_lightning_indexer_plan_b,quant_lightning_indexer_plan_c,quant_lightning_indexer_ordered_fused
+fi
 cd "$WORK/upstream"
 bash build.sh --pkg --soc=ascend950 --ops="$OPS" --vendor_name=qlifusion -j"${JOBS:-3}"
 PACKAGES=(build_out/cann-ops-transformer-qlifusion*.run)
@@ -31,10 +41,11 @@ WHEELS=(build_out/cann_ops_transformer_qlifusion*.whl)
 [[ ${#WHEELS[@]} -eq 1 && -f "${WHEELS[0]}" ]] || { echo "wheel数量异常" >&2;exit 1; }
 "$PYTHON" -m pip install --force-reinstall --no-deps "${WHEELS[0]}"
 cp qli_fusion_manifest.json "$WORK/manifest.json"
-"$PYTHON" -B - "$WORK" <<'PY'
+"$PYTHON" -B - "$WORK" "$OPS" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
 root=Path(sys.argv[1]);path=root/'manifest.json';data=json.loads(path.read_text())
+data['packaged_operators']=sys.argv[2].split(',')
 data['installed_files']={str(f.relative_to(root/'install')):hashlib.sha256(f.read_bytes()).hexdigest()
     for f in (root/'install').rglob('*') if f.is_file() and f.suffix in ('.so','.o','.bin','.json')}
 if not data['installed_files']:raise SystemExit('no installed CANN binaries/configs found')

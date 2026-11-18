@@ -12,7 +12,7 @@ import sysconfig
 import tempfile
 import types
 import torch
-from scripts.prepare_qli_fusion import NAMES,NATIVE_INDEXER
+from scripts.prepare_qli_fusion import NAMES,NATIVE_INDEXER,ORDERED4
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--upstream',required=True,type=Path);p.add_argument('--syntax',action='store_true');a=p.parse_args()
@@ -24,7 +24,7 @@ def main():
             self.register_meta()
     fake=types.ModuleType('cann_ops_transformer.op_builder');fake.OpBuilder=Builder;fake.get_as_library=lambda:lib
     sys.modules['cann_ops_transformer.op_builder']=fake
-    for name in (*NAMES.values(),NATIVE_INDEXER):
+    for name in (*NAMES.values(),ORDERED4,NATIVE_INDEXER):
         base=a.upstream/'attention'/name/'torch_extension'
         spec=importlib.util.spec_from_file_location('cpu_check_'+name,base/(name+'.py'))
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

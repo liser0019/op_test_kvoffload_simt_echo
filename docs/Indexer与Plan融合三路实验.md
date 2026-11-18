@@ -11,6 +11,7 @@ Bisheng编译通过、设备同步正确或取得性能收益。所有性能数�
 | 名称 | Indexer | Plan | 中间数据 |
 |---|---|---|---|
 | baseline（可选） | 上游原始 `quant_lightning_indexer`，原始 tiling | — | 把 TopK 写入预分配输出 |
+| ordered4（可选） | 与 split 同源的保序 QLI，固定 S1Base=4 | — | 同样的保序 TopK，编译时关闭 Plan hook，Plan UB 为 0 |
 | split | 同一份保序QLI，关闭Plan hook | 独立、冻结 `joint_rankpipe_ac_512` | TopK直接写入独立Plan绑定的缓冲；中间没有TensorMove或显式同步 |
 | a | 保序QLI＋Plan，同一个mixed kernel | 代表位置16位＋精确位图 | unique保存原始query位置；只复用Vector临时区，Cube结果区独占 |
 | b | 同a | 代表位置16位＋目录/二分 | 与a比较resident查询方式，保留归并、LRU、owner和持久协议 |
@@ -172,6 +173,36 @@ Plan 的缓存初态，`baseline` 两种工况都只运行原始 Indexer。它�
 
 可用 `--contexts 102400 262144 --mtp 0 1 3 7` 将同一对照扩展到此前的 16 个工况。
 
+### 单独比较原始 Indexer 与保序 Indexer 的耗时
+
+在 MTP3、32 请求时，上游 baseline 每块处理 4 条 query。用 `ordered4` 让保序
+Indexer 也以 4 行一块单独运行。这个版本从 split 的 Indexer 生成，保留同一
+算子绑定所需的占位参数，编译时禁用 Plan hook。测试核对占位状态及 TopK，设备
+采集只记录此 Indexer 的 kernel。资源不足会报错，避免自动降为 2 行。
+
+若就做这项对照，在设置好 CANN 环境和新的 `$RUN` 后，用精简包：
+
+```bash
+export QLI_FUSION_BUILD_DIR="$RUN/indexer_compare_build"
+bash scripts/build_qli_fusion.sh --indexer-compare-only
+source "$QLI_FUSION_BUILD_DIR/env.sh"
+
+bash scripts/test_qli_fusion.sh --device 4 --requests 32 --contexts 262144 \
+  --mtp 3 --scenarios cold_reset full_cache_75pct \
+  --implementations baseline ordered4 split --warmup 10 --repeat 20 \
+  --output "$RUN/indexer_breakdown" --temp-dir "$RUN/tmp"
+```
+
+split 照常使用独立 rankpipe AC Plan 库，可通过 `--library` 指向同身份的已有产物。
+报告把以下三项同时列出：
+
+- **原始 Indexer 和保序 4 行 Indexer 的 span 差值**。同为 4 行分块下的实现差异。
+- **split 的保序 2 行 Indexer 段和保序 4 行 Indexer 的 span 差值**。反映切块及随之改变的调度、缓存配置。
+- **split 中独立 Plan 的设备耗时**。冷、热缓存只改变 Plan 的初态。
+
+同一行切分下的差值包含保序 Indexer 的实现差异，报告不会把它当作某个
+TopK 指令的独立耗时。两条保序 Indexer 输出逐位置比较；原始 Indexer 仍报告 token 集合重合率。
+
 ## 计时与失败诊断
 
 - 主报告同时给出设备目标执行区间并集busy、完整链路span、Event接口时间的
@@ -185,7 +216,7 @@ Plan 的缓存初态，`baseline` 两种工况都只运行原始 Indexer。它�
 - CSV匹配目标算子名/构建后缀，并固定实际完整kernel名与task分组。
   混入TensorMove不计目标时间，缺少目标或多采一个均失败。
 - 若目标SDK采用不同kernel命名，保留 `kernel_inventory` 后提供
-  `--kernel-map` JSON：键为baseline/split/a/b/c/peer/plan，值为精确kernel名字数组。
+  `--kernel-map` JSON：键为baseline/ordered4/split/a/b/c/peer/plan，值为精确kernel名字数组。
   不通过放宽样本数或拼接CSV绕过检查。
 - 输出目录预检先于NPU初始化和大输入分配；支持 `--temp-dir`，不自动换目录。
 - 失败留存 `profile.log`、原始trace、`failure_call.json` 和数值现场，失败不写

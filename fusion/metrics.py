@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 TOKENS={'split':'quant_lightning_indexer_plan_split','a':'quant_lightning_indexer_plan_a',
         'b':'quant_lightning_indexer_plan_b','c':'quant_lightning_indexer_plan_c',
         'peer':'quant_lightning_indexer_ordered_fused',
+        'ordered4':'quant_lightning_indexer_plan_split4',
         'baseline':'quant_lightning_indexer',
         'plan':'sparse_kv_plan_joint_kernel_rankpipe_ac_512'}
 TIMING_ARITHMETIC='decimal_relative_v1'
