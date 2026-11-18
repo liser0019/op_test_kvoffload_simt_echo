@@ -699,7 +699,20 @@ constexpr bool REFINE_D=(11&8U)!=0;
 
 static_assert(1>=0 && 1<=2,"MTP7 candidate selector");
 constexpr uint64_t EIGHT_UB_WORDS=216U*1024U/4U;
-constexpr uint32_t EIGHT_CTX=128U;
+constexpr uint32_t EIGHT_CTX=qli_fusion_resource::kContextWords;
+constexpr int32_t PRIVATE_DONE_FLAG=0x40000000;
+__simt_callee__ __aicore__ inline void MarkPrivateDone(__ubuf__ int32_t* ctx,uint32_t unique){
+  if constexpr(QLI_PLAN_STORAGE==3){ctx[47]=static_cast<int32_t>(unique|static_cast<uint32_t>(PRIVATE_DONE_FLAG));}
+  else{ctx[120]=1;}
+}
+__aicore__ inline bool PrivateDone(const __ubuf__ int32_t* ctx){
+  if constexpr(QLI_PLAN_STORAGE==3){return (static_cast<uint32_t>(ctx[47])&static_cast<uint32_t>(PRIVATE_DONE_FLAG))!=0U;}
+  return ctx[120]==1;
+}
+__aicore__ inline uint32_t PrivateUniqueCount(const __ubuf__ int32_t* ctx){
+  if constexpr(QLI_PLAN_STORAGE==3){return static_cast<uint32_t>(ctx[47])&~static_cast<uint32_t>(PRIVATE_DONE_FLAG);}
+  return static_cast<uint32_t>(ctx[47]);
+}
 static_assert(10>=0 && 10<32,"hot factor bits");
 constexpr bool HOT_FILTER=(10&1U)!=0;
 constexpr bool HOT_PART=(10&2U)!=0 || 0;
@@ -797,7 +810,7 @@ __simt_callee__ __aicore__ inline void RankPipeCold(const JointPlanArgs& a,
     }
     if(thread==1U)a.rowModes[row]=rows==1U?ROW_PRIVATE:(r==0U?ROW_JOINT:ROW_FOLLOWER);
   }
-  if(thread==0U){a.lastReqIds[first]=a.reqIds[req];ctx[46]=q-u;ctx[47]=u;ctx[120]=1;ctx[0]=2;}
+  if(thread==0U){a.lastReqIds[first]=a.reqIds[req];ctx[46]=q-u;ctx[47]=u;MarkPrivateDone(ctx,u);ctx[0]=2;}
   asc_syncthreads();
 }
 
@@ -940,7 +953,7 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
     if(t==1)a.rowModes[row]=rows==1?ROW_PRIVATE:(r==0?ROW_JOINT:ROW_FOLLOWER);
   }
   if(t==0){
-    ctx[46]=q-misses;ctx[47]=misses;ctx[120]=1;
+    ctx[46]=q-misses;ctx[47]=misses;MarkPrivateDone(ctx,misses);
     a.lastReqIds[first]=reqid;ctx[0]=2;
   }asc_syncthreads();
 }
@@ -1004,7 +1017,8 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
   const int64_t qb=first*static_cast<int64_t>(topk),cb=first*static_cast<int64_t>(capacity);
   if constexpr(Phase==0) {
     if(t==0U){
-      ctx[120]=0;
+      if constexpr(QLI_PLAN_STORAGE==3)ctx[47]=0;
+      else ctx[120]=0;
       ctx[0]=1;ctx[1]=0;ctx[2]=-1;ctx[4]=0;ctx[6]=0;ctx[7]=0;ctx[28]=0;ctx[29]=0;
       uint32_t chunk=(3U*capacity>64U?3U*capacity:64U)/16U;
       if(chunk>768U)chunk=768U;ctx[3]=static_cast<int32_t>(chunk&~3U);
@@ -2124,7 +2138,7 @@ __simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32
 __aicore__ inline void RankPipeCopyOutputs(AscendC::TPipe& pipe,
     AscendC::LocalTensor<int32_t> local,__ubuf__ int32_t* ctx,
     int64_t first,uint32_t topk,uint32_t c,__gm__ uint8_t* lruSlots,__gm__ uint8_t* missTokens,__gm__ uint8_t* missSlots){
-  const uint32_t n=static_cast<uint32_t>(ctx[46]),misses=static_cast<uint32_t>(ctx[47]);
+  const uint32_t n=static_cast<uint32_t>(ctx[46]),misses=PrivateUniqueCount(ctx);
   const uint32_t uniqueOffset=0U; // map is dead: bounded descriptor-tail staging
   const uint32_t ownerOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+QLI_OWNER_OFFSET(c);
   AscendC::GlobalTensor<int32_t> lru,mt,ms;
@@ -2433,7 +2447,7 @@ __aicore__ inline void RunFusionGroupImpl(const Buffers& b,const TilingData& d,
 #if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 4)
       // Inspect completion BEFORE fallback: the private path reuses the entire
       // ctx/scratch region, so its bytes are no longer rank-pipeline metadata.
-      if(ctx[0]==2 && ctx[120]==1)
+      if(ctx[0]==2 && PrivateDone(ctx))
         RankPipeCopyOutputs(pipe,local,ctx,first,static_cast<uint32_t>(d.topk),static_cast<uint32_t>(d.capacity),reinterpret_cast<__gm__ uint8_t*>(lruSlots),reinterpret_cast<__gm__ uint8_t*>(missTokens),reinterpret_cast<__gm__ uint8_t*>(missSlots));
 #endif
       if(ctx[0]!=2){SORTED_CALL(4);}

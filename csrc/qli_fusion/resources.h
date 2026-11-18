@@ -8,7 +8,10 @@
 #define QLI_PLAN_STORAGE 1
 #endif
 namespace qli_fusion_resource {
-constexpr uint32_t kScanWords=72, kContextWords=128, kWorkWords=24576;
+constexpr uint32_t kScanWords=72, kWorkWords=24576;
+// C packs its private-completion flag into ctx[47], leaving ctx[0..119] live.
+// This saves exactly eight words (32 bytes) at capacity 8192.
+constexpr uint32_t kContextWords = QLI_PLAN_STORAGE==3 ? 120U : 128U;
 constexpr uint32_t UniqueWords(uint32_t c) { return QLI_PLAN_STORAGE==3?2048U:c/2U; }
 constexpr uint32_t OwnerOffset(uint32_t c) { return c/2U+UniqueWords(c); }
 constexpr uint32_t ScratchWords(uint32_t c) { return kContextWords+OwnerOffset(c)+kWorkWords; }

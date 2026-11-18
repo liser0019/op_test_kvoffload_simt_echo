@@ -285,6 +285,35 @@ __aicore__ inline void RunGroup(const Buffers& b,const TilingData& d,int64_t fir
 }
 } // namespace qli_fused_plan
 '''
+    # C keeps its private-completion flag in ctx[47]. The context is only
+    # allocated for 120 words, recovering exactly 32 bytes at capacity 8192.
+    output=replace(output,
+        'constexpr uint64_t EIGHT_UB_WORDS=216U*1024U/4U;\nconstexpr uint32_t EIGHT_CTX=128U;',
+        '''constexpr uint64_t EIGHT_UB_WORDS=216U*1024U/4U;
+constexpr uint32_t EIGHT_CTX=qli_fusion_resource::kContextWords;
+constexpr int32_t PRIVATE_DONE_FLAG=0x40000000;
+__simt_callee__ __aicore__ inline void MarkPrivateDone(__ubuf__ int32_t* ctx,uint32_t unique){
+  if constexpr(QLI_PLAN_STORAGE==3){ctx[47]=static_cast<int32_t>(unique|static_cast<uint32_t>(PRIVATE_DONE_FLAG));}
+  else{ctx[120]=1;}
+}
+__aicore__ inline bool PrivateDone(const __ubuf__ int32_t* ctx){
+  if constexpr(QLI_PLAN_STORAGE==3){return (static_cast<uint32_t>(ctx[47])&static_cast<uint32_t>(PRIVATE_DONE_FLAG))!=0U;}
+  return ctx[120]==1;
+}
+__aicore__ inline uint32_t PrivateUniqueCount(const __ubuf__ int32_t* ctx){
+  if constexpr(QLI_PLAN_STORAGE==3){return static_cast<uint32_t>(ctx[47])&~static_cast<uint32_t>(PRIVATE_DONE_FLAG);}
+  return static_cast<uint32_t>(ctx[47]);
+}''')
+    output=replace(output,
+        'if(thread==0U){a.lastReqIds[first]=a.reqIds[req];ctx[46]=q-u;ctx[47]=u;ctx[120]=1;ctx[0]=2;}',
+        'if(thread==0U){a.lastReqIds[first]=a.reqIds[req];ctx[46]=q-u;ctx[47]=u;MarkPrivateDone(ctx,u);ctx[0]=2;}')
+    output=replace(output,'ctx[46]=q-misses;ctx[47]=misses;ctx[120]=1;',
+        'ctx[46]=q-misses;ctx[47]=misses;MarkPrivateDone(ctx,misses);')
+    output=replace(output,'      ctx[120]=0;\n',
+        '      if constexpr(QLI_PLAN_STORAGE==3)ctx[47]=0;\n      else ctx[120]=0;\n')
+    output=replace(output,'const uint32_t n=static_cast<uint32_t>(ctx[46]),misses=static_cast<uint32_t>(ctx[47]);',
+        'const uint32_t n=static_cast<uint32_t>(ctx[46]),misses=PrivateUniqueCount(ctx);')
+    output=replace(output,'if(ctx[0]==2 && ctx[120]==1)','if(ctx[0]==2 && PrivateDone(ctx))')
     output=output.replace('qli_fusion_resource::OwnerOffset(', 'QLI_OWNER_OFFSET(')
     output=output.replace('OwnerOffset(', 'QLI_OWNER_OFFSET(')
     output=output.replace('qli_fusion_resource::MapWords(', 'QLI_MAP_WORDS(')

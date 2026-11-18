@@ -143,6 +143,15 @@ class Metrics(unittest.TestCase):
         self.assertTrue(all(sample['between_kernel_gap_us'] == 2 for sample in result))
         with self.assertRaisesRegex(RuntimeError, 'split Indexer changed before Plan'):
             self.parse(rows[:2]+rows[3:], orders, repeat=2)
+    def test_peer_aligned4_names_do_not_capture_original_peer(self):
+        rows = [
+            [TOKENS['peer'], 0, 10, 'AI_CORE', 1, 0],
+            [TOKENS['peer4'], 20, 11, 'AI_CORE', 1, 0],
+        ]
+        parsed = self.parse(rows, ('peer', 'peer4'))
+        self.assertEqual([sample['implementation'] for sample in parsed], ['peer', 'peer4'])
+        self.assertEqual([sample['span_us'] for sample in parsed], [10, 11])
+
     def test_wrong_order(self):
         with self.assertRaises(RuntimeError):self.parse(self.rows(),orders=('a','split'))
     def test_wrong_units(self):

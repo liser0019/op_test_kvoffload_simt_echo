@@ -19,6 +19,7 @@ COMMIT='9ec2110969a9e8502bf6d579c027ac4ea9572016'
 SOURCE='attention/quant_lightning_indexer_ordered_fused'
 NATIVE_INDEXER='quant_lightning_indexer'
 FINAL_SORT4='quant_lightning_indexer_plan_final4'
+PEER4='quant_lightning_indexer_plan_peer4'
 NATIVE_SOURCE=f'attention/{NATIVE_INDEXER}'
 NATIVE_BINDING=ROOT/'fusion/native_indexer_binding'
 NAMES={0:'quant_lightning_indexer_plan_split',1:'quant_lightning_indexer_plan_a',
@@ -88,6 +89,39 @@ def install_final_sort_indexer(repo):
     epilogue=(ROOT/'csrc/qli_fusion/native_final_sort.inc').read_text().rstrip()
     copy=anchor.replace('indicesOutLocal_.ReinterpretCast<int32_t>()','orderedIndices.ReinterpretCast<int32_t>()')
     vector.write_text(replace(code,anchor,epilogue+'\n'+copy))
+
+
+def install_peer4_fused(repo):
+    """Clone the pinned fused operator with request-aligned four-row tiling.
+
+    The parent selects two rows whenever total query rows are at most 64.
+    That rule makes batch8/MTP3 split each four-row request across producers.
+    Keep the measured four-row launch whenever Plan fits, and retain the host
+    resource fallback to two rows for larger QLI/Plan footprints.
+    """
+    source=repo/SOURCE
+    dest=repo/'attention'/PEER4
+    shutil.copytree(source,dest)
+    old='quant_lightning_indexer_ordered_fused'
+    camel='QuantLightningIndexerOrderedFused'
+    for path in sorted(dest.rglob('*'),key=lambda item:len(item.parts),reverse=True):
+        if path.is_file():
+            try:
+                code=path.read_text()
+            except UnicodeDecodeError:
+                continue
+            code=(code.replace(camel,'QuantLightningIndexerPlanPeer4')
+                  .replace(old,PEER4)
+                  .replace('QLIOrderedFused','QLIPlanPeer4')
+                  .replace('QLI_ORDERED_FUSED','QLI_PLAN_PEER4'))
+            path.write_text(code)
+        if old in path.name:
+            path.rename(path.with_name(path.name.replace(old,PEER4)))
+    tiling=dest/'op_host'/f'{PEER4}_tiling.cpp'
+    code=tiling.read_text()
+    code=replace(code,'fusedS1BaseSize_ = tSize_ <= 64 ? 2U : 4U;',
+                 'fusedS1BaseSize_ = 4U;  // request-aligned candidate; resource fallback remains below')
+    tiling.write_text(code)
 
 
 def verify_topk_isolation(repo):
@@ -200,9 +234,12 @@ def overlay(folder,mode,suffix,s1_base):
     planLocalMemoryBytes_=qli_fusion_resource::LocalBytes(qliParams_.capacity);
     planJointHashCapacity_=qliParams_.jointMtp?1U:0U;
     planScratchElements_=qli_fusion_resource::ScratchWords(qliParams_.capacity);planMaxJointRows_=8;
-    fusedS1BaseSize_=@S1_BASE@U;
+    @S1_ASSIGNMENT@
 '''+s[end:]
-    s=replace(s,'@S1_BASE@',str(s1_base))
+    if s1_base is None:
+        s=replace(s,'@S1_ASSIGNMENT@','fusedS1BaseSize_ = tSize_ <= 64 ? 2U : 4U;')
+    else:
+        s=replace(s,'@S1_ASSIGNMENT@',f'fusedS1BaseSize_={s1_base}U;')
     if s1_base==4:
         # This experiment changes the tile, so a silent fallback to two rows
         # would make its timing indistinguishable from the split Indexer.
@@ -294,14 +331,15 @@ def main():
         expected=subprocess.check_output(['git','-C',str(repo),'show',f'{COMMIT}:{name}'])
         if not (repo/name).is_file() or (repo/name).read_bytes()!=expected:raise SystemExit('upstream file differs: '+name)
     baseline_binding=repo/NATIVE_SOURCE/'torch_extension'
-    variants=[(mode,name,'Split' if mode==0 else 'ABC'[mode-1],2)
+    variants=[(mode,name,'Split' if mode==0 else 'ABC'[mode-1],None if mode==3 else 2)
               for mode,name in NAMES.items()]
     variants.append((0,ORDERED4,'Split4',4))
     variants.append((0,TOPK_CONTROL4,'TopkControl4',4))
-    destinations=[repo/'attention'/name for _,name,_,_ in variants]+[baseline_binding,repo/'attention'/FINAL_SORT4]
+    destinations=[repo/'attention'/name for _,name,_,_ in variants]+[baseline_binding,repo/'attention'/FINAL_SORT4,repo/'attention'/PEER4]
     for dest in destinations:
         if dest.exists():raise SystemExit('refusing to overwrite existing directory: '+str(dest))
     install_final_sort_indexer(repo)
+    install_peer4_fused(repo)
     for mode,name,suffix,s1_base in variants:
         dest=repo/'attention'/name
         shutil.copytree(source,dest)
@@ -332,6 +370,10 @@ def main():
                                 'upstream':COMMIT,'tiling':'upstream'},
               'native_final_sort':{'operator':FINAL_SORT4,'source':NATIVE_SOURCE,
                                    'upstream':COMMIT,'tiling':'upstream','topk':2048},
+              'peer_aligned4':{'operator':PEER4,'source':SOURCE,'upstream':COMMIT,
+                               's1_base':4,'fallback_s1_base':2},
+              'auto_rankpipe_c':{'operator':NAMES[3],'source':SOURCE,'upstream':COMMIT,
+                                 'plan':'rankpipe_ac','tiling':'upstream_auto'},
               'operators':NAMES,'qli_s1_base':2,
               'ordered_indexer_4':{'operator':ORDERED4,'s1_base':4,'plan_enabled':False},
               'topk_control_4':{'operator':TOPK_CONTROL4,'parent':ORDERED4,'s1_base':4,
@@ -340,7 +382,7 @@ def main():
     for _,name,_,_ in variants:
         for f in (repo/'attention'/name).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
-    for operator in (NATIVE_INDEXER,FINAL_SORT4):
+    for operator in (NATIVE_INDEXER,FINAL_SORT4,PEER4):
         for f in (repo/'attention'/operator).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
     (repo/'qli_fusion_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

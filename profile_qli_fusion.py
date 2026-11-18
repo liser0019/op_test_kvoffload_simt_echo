@@ -18,22 +18,25 @@ import peer_plan
 from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
 from fusion.metrics import read_csvs,SPLIT_ROLES,TIMING_ARITHMETIC
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
-from scripts.prepare_qli_fusion import FINAL_SORT4,NAMES,NATIVE_INDEXER,ORDERED4,TOPK_CONTROL4,source_id
+from scripts.prepare_qli_fusion import FINAL_SORT4,NAMES,NATIVE_INDEXER,ORDERED4,PEER4,TOPK_CONTROL4,source_id
 
 ROOT=Path(__file__).resolve().parent
 BASE='joint_rankpipe_ac_512'
 INDEXER_ONLY = {'baseline', 'ordered4', 'topk_control4'}
 TOPK_ISOLATION = {'ordered4', 'topk_control4'}
-PEER_OPERATOR = 'quant_lightning_indexer_ordered_fused'
+PEER_OPERATORS = {'peer': 'quant_lightning_indexer_ordered_fused', 'peer4': PEER4}
 NATIVE_ABI = {'baseline', 'final4'}
 
 
 def canonical_indexer(implementations):
-    if 'final4' in implementations:
+    selected=set(implementations)
+    if 'final4' in selected:
         return 'final4'
-    if 'split4' in implementations:
+    if 'split4' in selected:
         return 'split4'
-    return 'ordered4' if set(implementations) == TOPK_ISOLATION else 'split'
+    if 'peer' in selected and selected <= set(PEER_OPERATORS) | {'c'}:
+        return 'peer'
+    return 'ordered4' if selected == TOPK_ISOLATION else 'split'
 
 
 def check_ordered_topk(indices,visible_seq_lens):
@@ -108,8 +111,9 @@ def load_operators(manifest, vendor, implementations):
     if 'final4' in required:
         required.add('baseline')
     names = {role: name for role, name in names.items() if role in required}
-    if 'peer' in implementations:
-        names['peer'] = PEER_OPERATOR
+    for role, operator in PEER_OPERATORS.items():
+        if role in implementations:
+            names[role] = operator
     missing = set(names.values()).difference(manifest['packaged_operators'])
     if missing:
         raise RuntimeError(f'operators missing from the package: {sorted(missing)}')
@@ -117,7 +121,7 @@ def load_operators(manifest, vendor, implementations):
         package='cann_ops_transformer_qlifusion.ops.attention.'+name
         binding=importlib.import_module(package+'.'+name)
         native=getattr(binding,name+'_op_builder').load()
-        if role != 'peer' and native._fusion_identity()!=manifest['source_id']:
+        if role not in PEER_OPERATORS and native._fusion_identity()!=manifest['source_id']:
             raise RuntimeError(name+': stale compiled torch extension')
         path=Path(native.__file__)
         identities[name]={'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -183,7 +187,7 @@ def extra_workspace(torch,case,device,elements=None):
     return storage,view
 
 
-def prepare_fused(torch,case,inputs,*,peer=False):
+def prepare_fused(torch,case,inputs,*,peer=False, name=None):
     host=initial_arrays(case,True,case['capacity']);state={};buffers={};initial={}
     for k,array in host.items():
         dtype=torch.int64 if array.dtype==np.int64 else torch.int32
@@ -193,7 +197,7 @@ def prepare_fused(torch,case,inputs,*,peer=False):
     layout = peer_plan.layout(case['topk'],case['capacity'],case['rows'],case['q_len']) if peer else {}
     storage,view=extra_workspace(torch,case,inputs['req_ids'].device,layout.get('workspace_elements'))
     state['workspace']=view;buffers['workspace']=storage;initial['workspace']=view.clone()
-    return dict(name=peer_plan.NAME if peer else BASE,torch=torch,inputs=inputs,state=state,
+    return dict(name=peer_plan.NAME if peer else BASE, role=name,torch=torch,inputs=inputs,state=state,
         buffers=buffers,initial=initial,host_initial=host,joint_enabled=True,context=None,layout=layout,
         page_table_host=inputs['block_table'].cpu().numpy().copy() if peer else None)
 
@@ -289,9 +293,9 @@ def main_run(args,report):
                     inp=common.upload_inputs(torch,case)
                     inp['topk_indices']=topk_outputs[n].reshape(shape.rows,2048)
                     inp['topk_indices'].copy_(canonical.reshape(shape.rows,2048))
-                    if n=='peer':
+                    if n in PEER_OPERATORS:
                         inp['block_table']=inputs.plan_metadata['host_block_table']
-                    bundles[n]=common.prepare(torch,case,BASE,inputs=inp) if n in split_roles else prepare_fused(torch,case,inp,peer=n=='peer')
+                    bundles[n]=common.prepare(torch,case,BASE,inputs=inp) if n in split_roles else prepare_fused(torch,case,inp,peer=n in PEER_OPERATORS,name=n)
             extras={};calls={n:0 for n in names};raw={n:[] for n in names}
             for n in names:
                 extras[n]=[torch.npu.Event(enable_timing=True),torch.npu.Event(enable_timing=True)]
@@ -312,7 +316,7 @@ def main_run(args,report):
                     kw=kwargs(dummy,dw)
                 else:
                     kw=kwargs(b,dw if n=='split' else None)
-                result=operators[n](**kw,topk_out=topk_outputs[n]) if n!='peer' else operators[n](**kw)
+                result=operators[n](**kw,topk_out=topk_outputs[n]) if n not in PEER_OPERATORS else operators[n](**kw)
                 if n in split_roles:
                     # Current stream; no synchronize/D2H between the two kernels.
                     common.invoke(b)
@@ -326,7 +330,7 @@ def main_run(args,report):
                 else:
                     np.testing.assert_array_equal(indices,canonical_cpu,err_msg='ordered TopK changed')
                     result_info={'status':'passed','topk_exact_match':True}
-                if n=='peer':b['inputs']['topk_indices'].copy_(result.reshape(shape.rows,2048)) # checking only, after end Event
+                if n in PEER_OPERATORS:b['inputs']['topk_indices'].copy_(result.reshape(shape.rows,2048)) # checking only, after end Event
                 for k,before in readonly.items():
                     if not torch.equal(inputs.qli[k].view(torch.uint8),before.view(torch.uint8)):raise RuntimeError('read-only QLI input modified: '+k)
                 if not torch.equal(inputs.plan_metadata['host_block_table'],host_table_before):raise RuntimeError('read-only Plan host_block_table modified')
@@ -486,8 +490,8 @@ def main_run(args,report):
                 'split4是固定S1Base=4的同事保序Indexer，接同一个独立Plan。两路使用同一份初始状态和严格TopK验证。']
     if isolate_topk:
         lines+=['两路均为固定 S1Base=4 的同源 Indexer，Plan 已关闭。topk_control4 只替换成上游原始 TopK 头文件。']
-    if 'peer' in names:
-        lines+=['peer为同事原融合算子（保序Indexer＋原Plan），沿用上游自动tiling。']
+    if PEER_OPERATORS.keys() & names:
+        lines+=['peer为同事原融合算子（保序Indexer＋ABD512），peer4固定四行分块；c在本分支保持原有QLI自动tiling，并把内部Plan替换为rankpipe AC。']
         if not split_roles:
             lines+=['保序参考只在采集前运行一次，用于验证TopK和构造相同初态。']
     with_baseline = 'baseline' in names
@@ -550,7 +554,7 @@ def main():
     p.add_argument('--output',type=Path,required=True);p.add_argument('--requests',type=int,default=32)
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7]);p.add_argument('--contexts',nargs='+',type=int,default=[262144])
     p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
-    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered4','topk_control4','split','split4','final4','a','b','c','peer'),
+    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered4','topk_control4','split','split4','final4','a','b','c','peer','peer4'),
                    default=['split','a','b','c'],
                    help='baseline: upstream Indexer only; ordered4: ordered Indexer only, S1Base=4')
     p.add_argument('--warmup',type=int,default=2);p.add_argument('--repeat',type=int,default=5);p.add_argument('--regression-repeat',type=int,default=1)
@@ -558,14 +562,14 @@ def main():
     p.add_argument('--gate-only',action='store_true',help='只验证融合A/B/C，可测短序列尾部-1；不运行独立Plan或生成性能数字')
     args=p.parse_args()
     if args.gate_only:
-        args.implementations=[n for n in args.implementations if n not in INDEXER_ONLY | SPLIT_ROLES | {'peer'}]
+        args.implementations=[n for n in args.implementations if n not in INDEXER_ONLY | SPLIT_ROLES | set(PEER_OPERATORS)]
         if args.scenarios!=['cold_reset']:p.error('--gate-only requires --scenarios cold_reset')
     if args.requests<1 or args.repeat<1 or args.regression_repeat<1 or args.warmup<0 or any(x<(8 if args.gate_only else 2048) for x in args.contexts):p.error('invalid sizes/counts')
     implementations=set(args.implementations)
     if not implementations or len(implementations)!=len(args.implementations):
         p.error('implementations must be nonempty and unique')
-    if not args.gate_only and not implementations.intersection(SPLIT_ROLES) and implementations not in ({'baseline','peer'},TOPK_ISOLATION):
-        p.error('performance requires a split Plan, baseline/peer, or ordered4/topk_control4')
+    if not args.gate_only and not implementations.intersection(SPLIT_ROLES) and implementations not in ({'baseline'},TOPK_ISOLATION) and not implementations.intersection(PEER_OPERATORS):
+        p.error('performance requires a split Plan, fused peer, baseline, or TopK isolation')
     if {'ordered4','split4'}<=implementations:
         p.error('ordered4 and split4 use the same Indexer kernel and cannot be profiled together')
     if implementations.intersection({'split4','final4'}) and not set(args.mtp)<={3,7}:
