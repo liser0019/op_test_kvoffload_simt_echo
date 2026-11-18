@@ -2,7 +2,7 @@
 
 测试日期：2026-11-18。设备：NPU4，Ascend950DT_9582。CANN 9.2.1，torch 2.10.0+cpu，torch_npu 2.10.0.post7。
 
-源码提交：`1eb895c34a1fad2f207ca8b11242f9a07f635c7e`。  
+源码提交：`1eb895c34a1fad2f207ca8b11242f9a07f635c7e`。
 设备包 SHA256：`350a52124bee9110c319ecdddb6d63a550ae934d458de317fa75ed4074515be8`。
 
 固定配置：32 请求、MTP3（每请求4行，共128行）、256K、TopK 2048、capacity 8192。预热10次，正式20样本。
