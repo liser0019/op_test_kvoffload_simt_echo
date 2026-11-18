@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # Dedicated upstream checkout/package: never patch an existing user's source tree.
 set -euo pipefail
+if [[ $# -gt 1 ]]; then
+  echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only]" >&2
+  exit 2
+fi
+OPS=quant_lightning_indexer,quant_lightning_indexer_plan_split
 case "${1:-}" in
-  "") INDEXER_COMPARE_ONLY=0 ;;
-  --indexer-compare-only)
-    [[ $# -eq 1 ]] || { echo "用法：$0 [--indexer-compare-only]" >&2; exit 2; }
-    INDEXER_COMPARE_ONLY=1 ;;
-  *) echo "用法：$0 [--indexer-compare-only]" >&2; exit 2 ;;
+  "") OPS+=,quant_lightning_indexer_plan_split4,quant_lightning_indexer_plan_a,quant_lightning_indexer_plan_b,quant_lightning_indexer_plan_c,quant_lightning_indexer_ordered_fused ;;
+  --indexer-compare-only) OPS+=,quant_lightning_indexer_plan_split4 ;;
+  --peer-compare-only) OPS+=,quant_lightning_indexer_ordered_fused ;;
+  --topk-compare-only) OPS=quant_lightning_indexer_plan_split4,quant_lightning_indexer_plan_topk_control4 ;;
+  --fast-split-only) OPS=quant_lightning_indexer,quant_lightning_indexer_plan_final4,quant_lightning_indexer_plan_split4 ;;
+  *) echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only]" >&2; exit 2 ;;
 esac
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PYTHON=${PYTHON:-python3}
@@ -26,15 +32,12 @@ git clone --single-branch --branch wzj_qli_order_fused https://gitcode.com/spars
 git -C "$WORK/upstream" checkout --detach "$PIN"
 "$PYTHON" -B "$ROOT/scripts/export_fusion_plan.py" --check
 "$PYTHON" -B "$ROOT/scripts/prepare_qli_fusion.py" --upstream "$WORK/upstream"
-OPS=quant_lightning_indexer,quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_split4
-if [[ "$INDEXER_COMPARE_ONLY" -eq 0 ]]; then
-  OPS+=,quant_lightning_indexer_plan_a,quant_lightning_indexer_plan_b,quant_lightning_indexer_plan_c,quant_lightning_indexer_ordered_fused
-fi
 cd "$WORK/upstream"
 bash build.sh --pkg --soc=ascend950 --ops="$OPS" --vendor_name=qlifusion -j"${JOBS:-3}"
 PACKAGES=(build_out/cann-ops-transformer-qlifusion*.run)
 [[ ${#PACKAGES[@]} -eq 1 && -f "${PACKAGES[0]}" ]] || { echo "vendor包数量异常" >&2;exit 1; }
 bash "${PACKAGES[0]}" --install-path="$WORK/install"
+export ASCEND_CUSTOM_OPP_PATH="${ASCEND_CUSTOM_OPP_PATH:-}"
 source "$WORK/install/vendors/qlifusion_transformer/bin/set_env.bash"
 bash build.sh --torch_extension --ops="$OPS" --vendor_name=qlifusion
 WHEELS=(build_out/cann_ops_transformer_qlifusion*.whl)
@@ -52,6 +55,7 @@ if not data['installed_files']:raise SystemExit('no installed CANN binaries/conf
 path.write_text(json.dumps(data,indent=2)+'\n')
 PY
 cat > "$WORK/env.sh" <<EOF
+export ASCEND_CUSTOM_OPP_PATH="\${ASCEND_CUSTOM_OPP_PATH:-}"
 source "$WORK/install/vendors/qlifusion_transformer/bin/set_env.bash"
 export QLI_FUSION_BUILD_DIR="$WORK"
 EOF

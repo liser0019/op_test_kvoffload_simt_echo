@@ -9,9 +9,12 @@ TOKENS={'split':'quant_lightning_indexer_plan_split','a':'quant_lightning_indexe
         'b':'quant_lightning_indexer_plan_b','c':'quant_lightning_indexer_plan_c',
         'peer':'quant_lightning_indexer_ordered_fused',
         'ordered4':'quant_lightning_indexer_plan_split4',
+        'final4':'quant_lightning_indexer_plan_final4',
+        'topk_control4':'quant_lightning_indexer_plan_topk_control4',
         'baseline':'quant_lightning_indexer',
         'plan':'sparse_kv_plan_joint_kernel_rankpipe_ac_512'}
 TIMING_ARITHMETIC='decimal_relative_v1'
+SPLIT_ROLES = frozenset({'split', 'split4', 'final4'})
 
 
 def kernel_pattern(role, token):
@@ -64,14 +67,18 @@ def read_csvs(paths,orders,repeat,exact=None):
                 hits=[]
                 for role,pattern in KERNEL_PATTERNS.items():
                     if exact:
-                        match=name in exact.get(role,[])
+                        key='split4' if role=='ordered4' and 'split4' in expected else role
+                        match=name in exact.get(key,exact.get(role,[]))
                     else:
                         match=bool(pattern.search(name))
                     if match:hits.append(role)
                 if not hits:continue
                 if len(hits)!=1:raise RuntimeError('ambiguous target kernel: '+name)
-                role=hits[0];impl='split' if role=='plan' else role
-                if impl not in expected:raise RuntimeError('unexpected target implementation: '+impl)
+                role=hits[0]
+                if role=='ordered4' and 'split4' in expected:
+                    role='split4'
+                if role!='plan' and role not in expected:
+                    raise RuntimeError('unexpected target implementation: '+role)
                 try:
                     start,duration=Decimal(row[sk]),Decimal(row[dk])
                 except (InvalidOperation,TypeError,ValueError) as exc:
@@ -79,9 +86,11 @@ def read_csvs(paths,orders,repeat,exact=None):
                 if (not start.is_finite() or not duration.is_finite() or duration<=0 or
                     not math.isfinite(float(start)) or not math.isfinite(float(duration)) or float(duration)<=0):
                     raise RuntimeError('invalid device time')
-                records.append(dict(implementation=impl,role=role,kernel=name,start_us=start,duration_us=duration,
+                records.append(dict(implementation=role,role=role,kernel=name,start_us=start,duration_us=duration,
                     absolute_start_us=row[sk],csv_duration_us=row[dk],
-                    task=row.get('Task Type',''),stream=row.get('Stream ID'),device=row.get('Device ID'),csv=str(path)))
+                    task=row.get('Task Type',''),stream=row.get('Stream ID'),
+                    device=row.get('Device ID') or row.get('Device_id'),
+                    block_num=row.get('Block Num'),mix_block_num=row.get('Mix Block Num'),csv=str(path)))
     if not records:raise RuntimeError('no target kernel records')
     # Subtract the exact common origin BEFORE any duration/interval arithmetic.
     # Components returned to JSON have relative start_us plus the original CSV
@@ -90,15 +99,34 @@ def read_csvs(paths,orders,repeat,exact=None):
     for record in records:record['start_us']-=origin
     for key in ('stream','device'):
         if len({r[key] for r in records if r[key] is not None})>1:raise RuntimeError('mixed target '+key)
+    records.sort(key=lambda r:r['start_us'])
+    # Every split invocation launches the same Plan. Pair it with the preceding
+    # Indexer on this stream before counting components by implementation.
+    pending=None
+    for record in records:
+        role=record['role']
+        if role=='plan':
+            if pending is None:
+                raise RuntimeError('Plan has no preceding split Indexer')
+            record['implementation']=pending
+            pending=None
+        elif role in SPLIT_ROLES:
+            if pending is not None and pending!=role:
+                raise RuntimeError('split Indexer changed before Plan was recorded')
+            pending=role
+        elif pending is not None:
+            raise RuntimeError('split Plan missing before next implementation')
+    if pending is not None:
+        raise RuntimeError('independent Plan missing at end of sampling')
     schema={}
     for impl in expected:
         counts=Counter((r['role'],r['kernel'],r['task']) for r in records if r['implementation']==impl)
         if not counts or any(n!=repeat for n in counts.values()):
             raise RuntimeError(f'{impl}: target component sample mismatch: {counts}; inventory={sorted(inventory)}')
         if len(counts)>3:raise RuntimeError(f'{impl}: unexpected number of target components')
-        if impl=='split' and not any(k[0]=='plan' for k in counts):raise RuntimeError('independent Plan missing')
+        if impl in SPLIT_ROLES and not any(k[0]=='plan' for k in counts):raise RuntimeError('independent Plan missing')
         schema[impl]=counts
-    records.sort(key=lambda r:r['start_us']);position=0;pairs=[];previous_end=None
+    position=0;pairs=[];previous_end=None
     for impl in orders:
         count=len(schema[impl]);group=records[position:position+count];position+=count
         actual=Counter((r['role'],r['kernel'],r['task']) for r in group)
@@ -108,8 +136,8 @@ def read_csvs(paths,orders,repeat,exact=None):
         result=dict(implementation=impl,span_us=float(end-start),busy_us=float(interval_union(group)),
             timestamp_origin_us=str(origin),component_start_basis='relative_to_timestamp_origin_us',
             components=[public_component(r) for r in group])
-        if impl=='split':
-            indexer=[r for r in group if r['role']=='split'];plan=[r for r in group if r['role']=='plan']
+        if impl in SPLIT_ROLES:
+            indexer=[r for r in group if r['role']==impl];plan=[r for r in group if r['role']=='plan']
             if not indexer or len(plan)!=1:raise RuntimeError('split Indexer/Plan cardinality mismatch')
             finish=max(r['start_us']+r['duration_us'] for r in indexer)
             gap=plan[0]['start_us']-finish

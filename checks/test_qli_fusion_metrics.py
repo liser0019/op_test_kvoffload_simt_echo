@@ -48,6 +48,35 @@ class Metrics(unittest.TestCase):
         self.assertEqual(native['span_us'], 6)
         self.assertEqual(ordered4['span_us'], 9)
         self.assertNotIn('plan_us', ordered4)
+    def test_native_and_original_fused_without_split(self):
+        native = [TOKENS['baseline'] + '_mix_aic', 0, 8, 'AI_CORE', 1, 0]
+        fused = [
+            [TOKENS['peer'] + '_mix_aic', 10, 9, 'AI_CORE', 1, 0],
+            ['QuantLightningIndexerOrderedFused_mix_aiv', 11, 12, 'AI_VECTOR_CORE', 1, 0],
+        ]
+        rows = [native, *fused, ['TensorMove', 24, 1, 'AI_CORE', 1, 0]]
+        rows += [[n, s + 20, d, t, st, dev] for n, s, d, t, st, dev in fused]
+        rows.append([native[0], 44, *native[2:]])
+        order = ('baseline', 'peer', 'peer', 'baseline')
+        parsed = self.parse(rows, order, repeat=2)
+        self.assertEqual(tuple(p['implementation'] for p in parsed), order)
+        self.assertEqual([p['span_us'] for p in parsed], [8, 13, 13, 8])
+        self.assertEqual([p['busy_us'] for p in parsed], [8, 13, 13, 8])
+        self.assertTrue(all('plan_us' not in p for p in parsed))
+    def test_matched_topk_roles_preserve_device_and_launch_geometry(self):
+        header = ['Name', 'Start Time(us)', 'Duration(us)', 'Device_id', 'Block Num', 'Mix Block Num']
+        rows = [
+            ['QuantLightningIndexerPlanTopkControl4', 0, 8, 4, 32, 64],
+            ['QuantLightningIndexerPlanSplit4', 10, 9, 4, 32, 64],
+        ]
+        a, b = self.parse(rows, ('topk_control4', 'ordered4'), header=header)
+        self.assertEqual((a['span_us'], b['span_us']), (8, 9))
+        for sample in (a, b):
+            entry = sample['components'][0]
+            self.assertEqual((entry['device'], entry['block_num'], entry['mix_block_num']), ('4', '32', '64'))
+        rows[1][3] = 3
+        with self.assertRaisesRegex(RuntimeError, 'mixed target device'):
+            self.parse(rows, ('topk_control4', 'ordered4'), header=header)
     def test_timestamp_quantization_near_contiguous_split(self):
         base=1.0e15
         rows=[[TOKENS['split'],base,533.078,'AI_CORE',1,0],
@@ -96,6 +125,24 @@ class Metrics(unittest.TestCase):
                 self.parse([[TOKENS['a'],'1000000000000000',bad,'AI_CORE',1,0]],('a',))
     def test_missing_component(self):
         with self.assertRaises(RuntimeError):self.parse(self.rows()[:-1],repeat=2,orders=('split','a','split','a'))
+    def test_split_candidates_share_plan_kernel_but_keep_separate_samples(self):
+        orders = ('final4', 'split4', 'split4', 'final4')
+        rows = []
+        for index, role in enumerate(orders):
+            token = TOKENS['ordered4' if role == 'split4' else role]
+            start = index * 30
+            rows.extend([
+                [token+'_mix_aic', start, 7, 'AI_CORE', 1, 0],
+                [token+'_mix_aiv', start+1, 9, 'AI_VECTOR_CORE', 1, 0],
+                [TOKENS['plan'], start+12, 3+index, 'AI_VECTOR_CORE', 1, 0],
+            ])
+        result = self.parse(rows, orders, repeat=2)
+        self.assertEqual([sample['implementation'] for sample in result], list(orders))
+        self.assertEqual([sample['plan_us'] for sample in result], [3, 4, 5, 6])
+        self.assertTrue(all(sample['indexer_span_us'] == 10 for sample in result))
+        self.assertTrue(all(sample['between_kernel_gap_us'] == 2 for sample in result))
+        with self.assertRaisesRegex(RuntimeError, 'split Indexer changed before Plan'):
+            self.parse(rows[:2]+rows[3:], orders, repeat=2)
     def test_wrong_order(self):
         with self.assertRaises(RuntimeError):self.parse(self.rows(),orders=('a','split'))
     def test_wrong_units(self):

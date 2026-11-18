@@ -14,14 +14,26 @@ import traceback
 import numpy as np
 from compare import summary
 import joint_plan_common as common
+import peer_plan
 from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
-from fusion.metrics import read_csvs,TIMING_ARITHMETIC
+from fusion.metrics import read_csvs,SPLIT_ROLES,TIMING_ARITHMETIC
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
-from scripts.prepare_qli_fusion import NAMES,NATIVE_INDEXER,ORDERED4,source_id
+from scripts.prepare_qli_fusion import FINAL_SORT4,NAMES,NATIVE_INDEXER,ORDERED4,TOPK_CONTROL4,source_id
 
 ROOT=Path(__file__).resolve().parent
 BASE='joint_rankpipe_ac_512'
-INDEXER_ONLY = {'baseline', 'ordered4'}
+INDEXER_ONLY = {'baseline', 'ordered4', 'topk_control4'}
+TOPK_ISOLATION = {'ordered4', 'topk_control4'}
+PEER_OPERATOR = 'quant_lightning_indexer_ordered_fused'
+NATIVE_ABI = {'baseline', 'final4'}
+
+
+def canonical_indexer(implementations):
+    if 'final4' in implementations:
+        return 'final4'
+    if 'split4' in implementations:
+        return 'split4'
+    return 'ordered4' if set(implementations) == TOPK_ISOLATION else 'split'
 
 
 def check_ordered_topk(indices,visible_seq_lens):
@@ -76,36 +88,46 @@ def load_operators(manifest, vendor, implementations):
     if manifest['source_id']!=source_id():raise RuntimeError('fusion source/manifest mismatch; rebuild required')
     operators={};identities={}
     names = {'split' if mode == 0 else 'abc'[mode-1]: name for mode, name in NAMES.items()}
-    if 'baseline' in implementations:
+    if 'baseline' in implementations or 'final4' in implementations:
         if manifest.get('native_indexer', {}).get('operator') != NATIVE_INDEXER:
             raise RuntimeError('native Indexer missing from build manifest; rebuild the fusion package')
         names['baseline'] = NATIVE_INDEXER
-    if 'ordered4' in implementations:
+    if 'ordered4' in implementations or 'split4' in implementations:
         if manifest.get('ordered_indexer_4', {}).get('operator') != ORDERED4:
             raise RuntimeError('ordered S1Base=4 missing from build manifest; rebuild the fusion package')
-        names['ordered4'] = ORDERED4
-    names = {role: name for role, name in names.items() if role == 'split' or role in implementations}
-    required = set(names.values())
+        names.update({role:ORDERED4 for role in ('ordered4','split4') if role in implementations})
+    if 'final4' in implementations:
+        if manifest.get('native_final_sort', {}).get('operator') != FINAL_SORT4:
+            raise RuntimeError('native final-sort Indexer missing; build with --fast-split-only')
+        names['final4'] = FINAL_SORT4
+    if 'topk_control4' in implementations:
+        if manifest.get('topk_control_4', {}).get('operator') != TOPK_CONTROL4:
+            raise RuntimeError('fixed-4 original TopK control missing from build manifest')
+        names['topk_control4'] = TOPK_CONTROL4
+    required=set(implementations)|{canonical_indexer(implementations)}
+    if 'final4' in required:
+        required.add('baseline')
+    names = {role: name for role, name in names.items() if role in required}
     if 'peer' in implementations:
-        required.add('quant_lightning_indexer_ordered_fused')
-    missing = required.difference(manifest['packaged_operators'])
+        names['peer'] = PEER_OPERATOR
+    missing = set(names.values()).difference(manifest['packaged_operators'])
     if missing:
         raise RuntimeError(f'operators missing from the package: {sorted(missing)}')
     for role,name in names.items():
         package='cann_ops_transformer_qlifusion.ops.attention.'+name
-        module=importlib.import_module(package)
         binding=importlib.import_module(package+'.'+name)
         native=getattr(binding,name+'_op_builder').load()
-        if native._fusion_identity()!=manifest['source_id']:raise RuntimeError(name+': stale compiled torch extension')
+        if role != 'peer' and native._fusion_identity()!=manifest['source_id']:
+            raise RuntimeError(name+': stale compiled torch extension')
         path=Path(native.__file__)
         identities[name]={'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
-        if role == 'baseline':
+        if role in NATIVE_ABI:
             api_library = (vendor/'op_api/lib/libcust_opapi.so').resolve()
             paths = [Path(p).resolve() for p in native._op_api_paths()]
             if paths != [api_library, api_library]:
                 raise RuntimeError(f'native Indexer resolved outside the benchmark vendor: {paths}')
             identities[name]['op_api_library'] = str(api_library)
-        operators[role] = getattr(module,name)
+        operators[role] = getattr(binding,name)
     return operators,identities
 
 
@@ -152,25 +174,28 @@ def make_plan_case(inputs,indices,mtp,scenario,seed):
     return case
 
 
-def extra_workspace(torch,case,device):
-    r,c,t=case['requests'],case['capacity'],case['topk']
-    n=r*8*t//2+r*8*c+r*8*(3*4096+c+t)
-    storage=torch.full((n+32,),common.GUARD_VALUE,dtype=torch.int32,device=device)
+def extra_workspace(torch,case,device,elements=None):
+    if elements is None:
+        r,c,t=case['requests'],case['capacity'],case['topk']
+        elements=r*8*t//2+r*8*c+r*8*(3*4096+c+t)
+    storage=torch.full((elements+32,),common.GUARD_VALUE,dtype=torch.int32,device=device)
     view=storage[16:-16];view.fill_(np.iinfo(np.int32).max)
     return storage,view
 
 
-def prepare_fused(torch,case,inputs):
+def prepare_fused(torch,case,inputs,*,peer=False):
     host=initial_arrays(case,True,case['capacity']);state={};buffers={};initial={}
     for k,array in host.items():
         dtype=torch.int64 if array.dtype==np.int64 else torch.int32
         storage=torch.full((array.size+32,),common.GUARD_VALUE,dtype=dtype,device=inputs['req_ids'].device)
         view=storage[16:-16].reshape(array.shape);view.copy_(torch.from_numpy(array).to(view.device))
         state[k]=view;buffers[k]=storage;initial[k]=view.clone()
-    storage,view=extra_workspace(torch,case,inputs['req_ids'].device)
+    layout = peer_plan.layout(case['topk'],case['capacity'],case['rows'],case['q_len']) if peer else {}
+    storage,view=extra_workspace(torch,case,inputs['req_ids'].device,layout.get('workspace_elements'))
     state['workspace']=view;buffers['workspace']=storage;initial['workspace']=view.clone()
-    return dict(name=BASE,torch=torch,inputs=inputs,state=state,buffers=buffers,initial=initial,
-        host_initial=host,joint_enabled=True,context=None,layout={},page_table_host=None)
+    return dict(name=peer_plan.NAME if peer else BASE,torch=torch,inputs=inputs,state=state,
+        buffers=buffers,initial=initial,host_initial=host,joint_enabled=True,context=None,layout=layout,
+        page_table_host=inputs['block_table'].cpu().numpy().copy() if peer else None)
 
 
 def operator_kwargs(inputs,bundle,ready,workspace=None):
@@ -181,12 +206,18 @@ def operator_kwargs(inputs,bundle,ready,workspace=None):
     return inputs.qli|metadata|{k:v for k,v in state.items() if k!='workspace'}|{
         'active_rows':bundle['inputs']['active_rows'],'compact_workspace':state['workspace'] if workspace is None else workspace,
         'ready_counts':ready,'capacity':s.capacity,'max_token':s.seq_len,'host_block_size':128,
-        'host_num_blocks':inputs.host_num_blocks,'joint_mtp':1,'max_joint_rows':8}
+        'host_num_blocks':inputs.host_num_blocks,'joint_mtp':1,
+        'max_joint_rows':s.width if bundle.get('name') == peer_plan.NAME else 8}
 
 
 def main_run(args,report):
     build=Path(args.fusion_build).resolve();manifest=json.loads((build/'manifest.json').read_text())
     vendor=(build/'install'/'vendors'/'qlifusion_transformer').resolve()
+    names=args.implementations
+    split_roles=SPLIT_ROLES.intersection(names)
+    split_reference=next((n for n in ('split4','split','final4') if n in split_roles),None)
+    fast_split=bool(split_roles & {'split4','final4'})
+    isolate_topk=set(names)==TOPK_ISOLATION
     def prefer_vendor():
         parts=[p for p in os.environ.get('ASCEND_CUSTOM_OPP_PATH','').split(':') if p]
         parts=[p for p in parts if Path(p).resolve()!=vendor]
@@ -194,22 +225,18 @@ def main_run(args,report):
         return custom
     # Global sitecustomize/backend autoload can prepend fla_npu during imports.
     # Restore this dedicated vendor immediately before and after runtime loading.
-    prefer_vendor();torch,torch_npu,device=common.load_runtime(args);custom=prefer_vendor()
+    prefer_vendor();torch,torch_npu,device=common.load_runtime(args,require_plan=bool(split_roles));custom=prefer_vendor()
     if Path(custom.split(':')[0]).resolve()!=vendor:
         raise RuntimeError('failed to place dedicated vendor first in ASCEND_CUSTOM_OPP_PATH')
     if not manifest.get('installed_files'):raise RuntimeError('installed package identity missing; rebuild with scripts/build_qli_fusion.sh')
     for name,digest in manifest['installed_files'].items():
         f=build/'install'/name
         if not f.is_file() or hashlib.sha256(f.read_bytes()).hexdigest()!=digest:raise RuntimeError('installed CANN package changed: '+str(f))
-    names=args.implementations
     operators,compiled=load_operators(manifest,vendor,names)
     report.update(device=device,build_manifest=manifest,compiled_extensions=compiled,
                   timing_arithmetic=TIMING_ARITHMETIC)
     from fusion.glm52_inputs import Shape,make_inputs
     def quantize(x):return torch_npu.npu_dynamic_quant(x,dst_type=torch.float8_e4m3fn)
-    if 'peer' in names:
-        m=importlib.import_module('cann_ops_transformer_qlifusion.ops.attention.quant_lightning_indexer_ordered_fused')
-        operators['peer']=m.quant_lightning_indexer_ordered_fused
     out=args.output;wall={};all_results=[]
     for context in args.contexts:
       for mtp in args.mtp:
@@ -221,18 +248,33 @@ def main_run(args,report):
         host_table_before=inputs.plan_metadata['host_block_table'].clone()
         qli_hash=fingerprint_qli(torch,inputs.qli|{'plan_host_block_table':inputs.plan_metadata['host_block_table']})
         dummy_case=sort_topk(make_case(args.requests,2048,capacity,max(262144,context),mtp,'cold_reset','shared',seed=args.seed,block_size=128))
-        dummy=common.prepare(torch,dummy_case,BASE);common.close(dummy)
+        dummy=prepare_fused(torch,dummy_case,common.upload_inputs(torch,dummy_case))
         for key in ('req_ids','stable_prefix_lens','visible_seq_lens','token_to_req'):
             dummy['inputs'][key].copy_(inputs.plan_metadata[key])
-        ds,dw=extra_workspace(torch,dummy_case,inputs.qli['query'].device)
+        ds,dw=dummy['buffers']['workspace'],dummy['state']['workspace']
         ready=torch.zeros(shape.rows,dtype=torch.int32,device=inputs.qli['query'].device)
         def kwargs(bundle,workspace=None):
             return operator_kwargs(inputs,bundle,ready,workspace)
         # Canonical ordered TopK is generated on NPU, never precomputed on CPU.
-        canonical=operators['split'](**kwargs(dummy,dw));torch.npu.synchronize()
+        canonical_role=canonical_indexer(names)
+        if canonical_role=='final4':
+            target=torch.empty((shape.rows,1,2048),dtype=torch.int32,device=inputs.qli['query'].device)
+            canonical=operators['final4'](**inputs.qli,topk_out=target)
+        else:
+            canonical=operators[canonical_role](**kwargs(dummy,dw))
+        torch.npu.synchronize()
         canonical_cpu=canonical.cpu().numpy().reshape(shape.rows,2048)
         visible_seq_lens=inputs.plan_metadata['visible_seq_lens'].cpu().numpy()
         check_ordered_topk(canonical_cpu,visible_seq_lens)
+        native_equivalence=None
+        if canonical_role=='final4':
+            native_output=torch.empty_like(canonical)
+            operators['baseline'](**inputs.qli,topk_out=native_output)
+            torch.npu.synchronize()
+            native_equivalence=check_native_topk(native_output.cpu().numpy().reshape(shape.rows,2048),
+                                                canonical_cpu,visible_seq_lens)
+            if native_equivalence['topk_rows_with_different_sets']:
+                raise RuntimeError('final4 changed the original Indexer TopK token set')
         wall[f'fixture/context{context}/mtp{mtp}']=time.monotonic()-begin
         for scenario in args.scenarios:
             case=make_plan_case(inputs,canonical_cpu,mtp,scenario,args.seed)
@@ -247,7 +289,9 @@ def main_run(args,report):
                     inp=common.upload_inputs(torch,case)
                     inp['topk_indices']=topk_outputs[n].reshape(shape.rows,2048)
                     inp['topk_indices'].copy_(canonical.reshape(shape.rows,2048))
-                    bundles[n]=common.prepare(torch,case,BASE,inputs=inp) if n=='split' else prepare_fused(torch,case,inp)
+                    if n=='peer':
+                        inp['block_table']=inputs.plan_metadata['host_block_table']
+                    bundles[n]=common.prepare(torch,case,BASE,inputs=inp) if n in split_roles else prepare_fused(torch,case,inp,peer=n=='peer')
             extras={};calls={n:0 for n in names};raw={n:[] for n in names}
             for n in names:
                 extras[n]=[torch.npu.Event(enable_timing=True),torch.npu.Event(enable_timing=True)]
@@ -260,25 +304,28 @@ def main_run(args,report):
                     common.restore(torch,b);ready.zero_();torch.npu.synchronize()
                 topk_outputs[n].fill_(-777);torch.npu.synchronize()
                 start,end=extras[n];host=time.monotonic();start.record()
-                if n=='baseline':
+                if n in NATIVE_ABI:
                     kw=inputs.qli
-                elif n=='ordered4':
+                elif n in {'ordered4','topk_control4','split4'}:
                     # The shared registration ABI expects these tensors. The
                     # generated Indexer has its Plan hook disabled at compile time.
                     kw=kwargs(dummy,dw)
                 else:
                     kw=kwargs(b,dw if n=='split' else None)
                 result=operators[n](**kw,topk_out=topk_outputs[n]) if n!='peer' else operators[n](**kw)
-                if n=='split':
+                if n in split_roles:
                     # Current stream; no synchronize/D2H between the two kernels.
                     common.invoke(b)
                 end.record();end.synchronize();event_us=start.elapsed_time(end)*1000.;host_us=(time.monotonic()-host)*1e6
                 calls[n]+=1
                 indices=result.cpu().numpy().reshape(shape.rows,2048)
-                if n=='baseline':
+                if n in {'baseline','topk_control4'}:
                     result_info=check_native_topk(indices,canonical_cpu,visible_seq_lens)
+                    if (isolate_topk or fast_split) and result_info['topk_rows_with_different_sets']:
+                        raise RuntimeError('matched comparison changed TopK token sets')
                 else:
                     np.testing.assert_array_equal(indices,canonical_cpu,err_msg='ordered TopK changed')
+                    result_info={'status':'passed','topk_exact_match':True}
                 if n=='peer':b['inputs']['topk_indices'].copy_(result.reshape(shape.rows,2048)) # checking only, after end Event
                 for k,before in readonly.items():
                     if not torch.equal(inputs.qli[k].view(torch.uint8),before.view(torch.uint8)):raise RuntimeError('read-only QLI input modified: '+k)
@@ -288,13 +335,15 @@ def main_run(args,report):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('split QLI workspace guard changed')
                 for guard in (topk_guards[n][:16],topk_guards[n][-16:]):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('TopK output guard changed')
-                if n=='ordered4':
+                if n in {'ordered4','topk_control4'}:
                     for key in dummy['host_initial']:
                         if key!='workspace' and not torch.equal(dummy['state'][key], dummy['initial'][key]):
                             raise RuntimeError('ordered4 modified Plan state: '+key)
-                    result_info={'status':'passed', 'topk_exact_match':True, 's1_base':4}
+                    result_info.update(s1_base=4)
                 elif b is not None:
                     result_info=common.check(case,b)
+                    if n in {'split4','final4'} and (result_info['joint_groups']!=shape.batch or result_info['overflow_groups']):
+                        raise RuntimeError(f'{n}: expected {shape.batch} joint groups and zero fallback')
                 return event_us,host_us,result_info
             begin=time.monotonic()
             try:
@@ -320,7 +369,7 @@ def main_run(args,report):
                         for n in order:
                             event_us,host_us,info=invoke(n,'sample')
                             sample={'event_us':event_us,'host_us':host_us}
-                            if n=='baseline':sample['topk_check']=info
+                            if n in {'baseline','topk_control4'}:sample['topk_check']=info
                             raw[n].append(sample);orders.append(n);checks[n]=info
                         prof.step()
                 wall[tag+'/capture_check_export']=time.monotonic()-begin
@@ -332,6 +381,10 @@ def main_run(args,report):
                         for row in csv.DictReader(stream):inventory.add(row.get('Name',row.get('Kernel Name','')))
                 write_json(directory/'kernel_inventory.json',sorted(inventory))
                 pairs,inventory=read_csvs(csvs,orders,args.repeat,json.loads(args.kernel_map.read_text()) if args.kernel_map else None)
+                if isolate_topk:
+                    launch_shapes={(z['block_num'],z['mix_block_num']) for p in pairs for z in p['components']}
+                    if len(launch_shapes)!=1 or any(v is None or not v.isdecimal() for v in next(iter(launch_shapes))):
+                        raise RuntimeError(f'inconsistent or missing AIC/AIV launch geometry: {launch_shapes}')
                 stats={}
                 for n in names:
                     samples=[p for p in pairs if p['implementation']==n]
@@ -339,27 +392,51 @@ def main_run(args,report):
                     for key in ('indexer_span_us','plan_us','between_kernel_gap_us'):
                         if key in samples[0]:stats[n][key]=summary([p[key] for p in samples])
                     stats[n].update(event=summary([p['event_us'] for p in raw[n]]),host=summary([p['host_us'] for p in raw[n]]),checks=checks[n],raw_interface=raw[n],raw_device=samples)
-                split_span=stats['split']['span_us']['p50_us']
-                for s in stats.values():
-                    s['span_p50_over_split']=s['span_us']['p50_us']/split_span
+                    if n in {'baseline','topk_control4'}:
+                        topk_checks=[s['topk_check'] for s in raw[n]]
+                        stats[n]['topk_set_comparison']={
+                            'min_sample_overlap':min(s['topk_set_overlap'] for s in topk_checks),
+                            'min_row_overlap':min(s['topk_min_row_overlap'] for s in topk_checks),
+                            'max_different_rows':max(s['topk_rows_with_different_sets'] for s in topk_checks),
+                        }
+                if split_reference:
+                    split_span=stats[split_reference]['span_us']['p50_us']
+                    for s in stats.values():
+                        s['span_p50_over_split']=s['span_us']['p50_us']/split_span
                 if 'baseline' in stats:
                     baseline_span=stats['baseline']['span_us']['p50_us']
                     for s in stats.values():
                         span=s['span_us']['p50_us']
                         s['span_p50_over_native_indexer']=span/baseline_span
                         s['span_p50_delta_vs_native_indexer_us']=span-baseline_span
-                    topk_checks=[s['topk_check'] for s in raw['baseline']]
-                    stats['baseline']['native_topk_comparison']={
-                        'min_sample_overlap':min(s['topk_set_overlap'] for s in topk_checks),
-                        'min_row_overlap':min(s['topk_min_row_overlap'] for s in topk_checks),
-                        'max_different_rows':max(s['topk_rows_with_different_sets'] for s in topk_checks),
-                    }
+                    stats['baseline']['native_topk_comparison']=stats['baseline']['topk_set_comparison']
                 data={'tag':tag,'context':context,'mtp':mtp,'capacity':capacity,'requests':args.requests,
                     'timing_arithmetic':TIMING_ARITHMETIC,
-                    'qli_input_sha256':qli_hash,'qli_s1_base':2,
+                    'qli_input_sha256':qli_hash,
+                    'qli_s1_base_by_implementation':{
+                        n:{'baseline':'upstream','peer':'upstream_auto','ordered4':4,'topk_control4':4,
+                           'split4':4,'final4':2 if shape.rows<=64 else 4}.get(n,2)
+                        for n in names},
                     'input':describe(case),'logical_input_sha256':hashlib.sha256(b''.join(case[k].tobytes() for k in common.INPUTS)).hexdigest(),
                     'statistics':stats,'execution_orders':orders,'csv_paths':[str(p) for p in csvs],'kernel_inventory':inventory}
-                if 'ordered4' in stats:
+                if split_reference:
+                    data['split_reference']=split_reference
+                if 'split' in stats:
+                    data['qli_s1_base']=2
+                if native_equivalence is not None:
+                    data['final4_native_topk_comparison']=native_equivalence
+                if 'peer' in stats:
+                    data['peer_plan_layout']=bundles['peer']['layout']
+                if isolate_topk:
+                    control=stats['topk_control4']['span_us']['p50_us']
+                    ordered=stats['ordered4']['span_us']['p50_us']
+                    data['topk_isolation']={
+                        'ordered_minus_control_p50_us':ordered-control,
+                        'ordered_over_control_p50':ordered/control,
+                        'block_num':int(next(iter(launch_shapes))[0]),
+                        'mix_block_num':int(next(iter(launch_shapes))[1]),
+                    }
+                if 'split' in stats and 'ordered4' in stats:
                     ordered2=stats['split']['indexer_span_us']['p50_us']
                     ordered4=stats['ordered4']['span_us']['p50_us']
                     data['indexer_comparison']={
@@ -400,17 +477,30 @@ def main_run(args,report):
     write_json(out/'data_index.json',{'status':'complete','cases':[{'tag':r['tag'],'metadata':str(out/r['tag']/'capture_metadata.json'),'csv_paths':r['csv_paths']} for r in all_results]})
     lines=['# Indexer与Plan性能对照','','设备时间单位μs。busy为目标设备区间的并集长度，避免把重叠AIC/AIV重复相加；span为首个目标开始至最后目标结束。Event包含接口下发及辅助任务，单独报告。',
            'CSV使用十进制解析并先扣除共同时间原点；原始时间字符串与小范围时间戳重叠容差保留在逐样本元数据。',
-           'split为同一保序Indexer实现＋冻结rankpipe AC，Indexer分块固定S1Base=2。状态恢复、校验不计入目标Duration；固定地址预热。',
+           '状态恢复、校验不计入目标Duration；固定地址预热。',
            '75%标签仅约束首行初始命中；其他行使用真实Indexer选择，实际命中与descriptor见元数据。未测Transfer/SFA。']
+    if 'split' in names:
+        lines+=['split为同一保序Indexer实现＋冻结rankpipe AC，Indexer分块固定S1Base=2。']
+    if fast_split:
+        lines+=['final4沿用原始Indexer tiling，在输出前只对选中的2048个token位置排序，再下发独立rankpipe AC。',
+                'split4是固定S1Base=4的同事保序Indexer，接同一个独立Plan。两路使用同一份初始状态和严格TopK验证。']
+    if isolate_topk:
+        lines+=['两路均为固定 S1Base=4 的同源 Indexer，Plan 已关闭。topk_control4 只替换成上游原始 TopK 头文件。']
+    if 'peer' in names:
+        lines+=['peer为同事原融合算子（保序Indexer＋原Plan），沿用上游自动tiling。']
+        if not split_roles:
+            lines+=['保序参考只在采集前运行一次，用于验证TopK和构造相同初态。']
     with_baseline = 'baseline' in names
     if with_baseline:
         lines+=['baseline只运行上游原始quant_lightning_indexer，使用原始tiling。冷/热标签只描述Plan的缓存初态。',
-                'span/拆分用于评估融合收益。span/原始Indexer和差值反映两种不同计算范围的整段耗时。']
+                'span/原始Indexer和差值反映两种计算范围的整段耗时。']
     baseline_columns = ' span/原始Indexer | 对原始Indexer Δspan P50 (μs) |' if with_baseline else ''
     baseline_align = '---:|---:|' if with_baseline else ''
-    lines+=['',f'| 工况 | 实现 | busy P50/P95 | span P50/P95 | Event P50/P95 | span/拆分 |'
+    split_column = f' span/{split_reference} |' if split_reference else ''
+    split_align = '---:|' if split_reference else ''
+    lines+=['',f'| 工况 | 实现 | busy P50/P95 | span P50/P95 | Event P50/P95 |{split_column}'
             f'{baseline_columns} 样本数 | 联合/回退/单行有序 | descriptor数 |',
-            f'|---|---|---:|---:|---:|---:|{baseline_align}---:|---|---:|']
+            f'|---|---|---:|---:|---:|{split_align}{baseline_align}---:|---|---:|']
     for r in all_results:
         for n,s in r['statistics'].items():
             fmt=lambda x:f"{x['p50_us']:.3f}/{x['p95_us']:.3f}"
@@ -423,9 +513,12 @@ def main_run(args,report):
             if with_baseline:
                 comparison=(f" {s['span_p50_over_native_indexer']:.3f} |"
                             f" {s['span_p50_delta_vs_native_indexer_us']:+.3f} |")
-            lines.append(f"| {r['tag']} | {n} | {fmt(s['busy_us'])} | {fmt(s['span_us'])} | {fmt(s['event'])} | "
-                         f"{s['span_p50_over_split']:.3f} |{comparison} {args.repeat} | {paths} | {descriptors} |")
-        s=r['statistics']['split'];lines+=['',f"拆分详情 {r['tag']}：Indexer span P50={s['indexer_span_us']['p50_us']:.3f}，Plan P50={s['plan_us']['p50_us']:.3f}，两者间隙P50={s['between_kernel_gap_us']['p50_us']:.3f}。",'']
+            split_ratio=f" {s['span_p50_over_split']:.3f} |" if split_reference else ''
+            lines.append(f"| {r['tag']} | {n} | {fmt(s['busy_us'])} | {fmt(s['span_us'])} | {fmt(s['event'])} |"
+                         f"{split_ratio}{comparison} {args.repeat} | {paths} | {descriptors} |")
+        for n in (name for name in names if name in split_roles):
+            s=r['statistics'][n]
+            lines+=['',f"{r['tag']} 的 {n} 分段 P50（μs）为 Indexer {s['indexer_span_us']['p50_us']:.3f}、Plan {s['plan_us']['p50_us']:.3f}、间隙 {s['between_kernel_gap_us']['p50_us']:.3f}。",'']
         if 'indexer_comparison' in r:
             indexer=r['indexer_comparison']
             lines.append(f"Indexer 对照 {r['tag']}：保序 S1Base=4 单跑 P50 "
@@ -441,6 +534,13 @@ def main_run(args,report):
             lines+= [f"原始Indexer TopK折算为集合后，{r['tag']} 的最小样本重合率为 "
                      f"{topk['min_sample_overlap']:.4%}，最小行重合率为 {topk['min_row_overlap']:.4%}，"
                      f"单个样本最多 {topk['max_different_rows']} 行集合有差异。",'']
+        if 'topk_isolation' in r:
+            result=r['topk_isolation']
+            topk=r['statistics']['topk_control4']['topk_set_comparison']
+            lines+=['',f"{r['tag']} 的保序 TopK 相对原始 TopK 的 span P50 差值为 "
+                    f"{result['ordered_minus_control_p50_us']:+.3f} μs，比值 {result['ordered_over_control_p50']:.3f}。"
+                    f"两路 Block Num / Mix Block Num 为 {result['block_num']} / {result['mix_block_num']}。"
+                    f"TopK 集合最小样本重合率 {topk['min_sample_overlap']:.4%}。"]
     (out/'report.md').write_text('\n'.join(lines)+'\n')
 
 
@@ -450,7 +550,7 @@ def main():
     p.add_argument('--output',type=Path,required=True);p.add_argument('--requests',type=int,default=32)
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7]);p.add_argument('--contexts',nargs='+',type=int,default=[262144])
     p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
-    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered4','split','a','b','c','peer'),
+    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered4','topk_control4','split','split4','final4','a','b','c','peer'),
                    default=['split','a','b','c'],
                    help='baseline: upstream Indexer only; ordered4: ordered Indexer only, S1Base=4')
     p.add_argument('--warmup',type=int,default=2);p.add_argument('--repeat',type=int,default=5);p.add_argument('--regression-repeat',type=int,default=1)
@@ -458,10 +558,18 @@ def main():
     p.add_argument('--gate-only',action='store_true',help='只验证融合A/B/C，可测短序列尾部-1；不运行独立Plan或生成性能数字')
     args=p.parse_args()
     if args.gate_only:
-        args.implementations=[n for n in args.implementations if n not in INDEXER_ONLY | {'split','peer'}]
+        args.implementations=[n for n in args.implementations if n not in INDEXER_ONLY | SPLIT_ROLES | {'peer'}]
         if args.scenarios!=['cold_reset']:p.error('--gate-only requires --scenarios cold_reset')
     if args.requests<1 or args.repeat<1 or args.regression_repeat<1 or args.warmup<0 or any(x<(8 if args.gate_only else 2048) for x in args.contexts):p.error('invalid sizes/counts')
-    if (not args.gate_only and 'split' not in args.implementations) or not args.implementations or len(set(args.implementations))!=len(args.implementations):p.error('split baseline is mandatory for performance; implementations must be unique')
+    implementations=set(args.implementations)
+    if not implementations or len(implementations)!=len(args.implementations):
+        p.error('implementations must be nonempty and unique')
+    if not args.gate_only and not implementations.intersection(SPLIT_ROLES) and implementations not in ({'baseline','peer'},TOPK_ISOLATION):
+        p.error('performance requires a split Plan, baseline/peer, or ordered4/topk_control4')
+    if {'ordered4','split4'}<=implementations:
+        p.error('ordered4 and split4 use the same Indexer kernel and cannot be profiled together')
+    if implementations.intersection({'split4','final4'}) and not set(args.mtp)<={3,7}:
+        p.error('split4/final4 are for MTP3 (8K) and MTP7 (16K)')
     args.output=args.output.resolve()
     if (args.output/'RUN_STATUS.json').exists():p.error('output already contains a run; choose a new directory')
     report={'status':'running','configuration':{k:str(v) if isinstance(v,Path) else v for k,v in vars(args).items()}}

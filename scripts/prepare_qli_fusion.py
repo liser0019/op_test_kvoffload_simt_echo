@@ -18,11 +18,14 @@ else:
 COMMIT='9ec2110969a9e8502bf6d579c027ac4ea9572016'
 SOURCE='attention/quant_lightning_indexer_ordered_fused'
 NATIVE_INDEXER='quant_lightning_indexer'
+FINAL_SORT4='quant_lightning_indexer_plan_final4'
 NATIVE_SOURCE=f'attention/{NATIVE_INDEXER}'
 NATIVE_BINDING=ROOT/'fusion/native_indexer_binding'
 NAMES={0:'quant_lightning_indexer_plan_split',1:'quant_lightning_indexer_plan_a',
        2:'quant_lightning_indexer_plan_b',3:'quant_lightning_indexer_plan_c'}
 ORDERED4='quant_lightning_indexer_plan_split4'
+TOPK_CONTROL4='quant_lightning_indexer_plan_topk_control4'
+TOPK_HEADER=Path('op_kernel/arch35/vf/quant_lightning_indexer_topk.h')
 
 def source_id():
     files=[ROOT/'scripts/export_fusion_plan.py',ROOT/'scripts/prepare_qli_fusion.py',
@@ -36,6 +39,83 @@ def source_id():
 
 
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def install_native_binding(repo, operator, digest):
+    dest=repo/'attention'/operator/'torch_extension'
+    (dest/'csrc').mkdir(parents=True)
+    native_camel='QuantLightningIndexer'
+    camel=native_camel if operator==NATIVE_INDEXER else 'QuantLightningIndexerPlanFinal4'
+    for source in NATIVE_BINDING.iterdir():
+        if source.suffix not in ('.py','.cpp'):
+            continue
+        code=source.read_text().replace(NATIVE_INDEXER,operator).replace(native_camel,camel)
+        code=code.replace('qli_native_indexer_baseline','qli_native_indexer_final4' if operator==FINAL_SORT4
+                          else 'qli_native_indexer_baseline')
+        if source.suffix=='.cpp':
+            code=replace(code,'@FUSION_SOURCE_ID@',digest)
+        parent=dest/'csrc' if source.suffix=='.cpp' else dest
+        (parent/(operator+source.suffix)).write_text(code)
+
+
+def install_final_sort_indexer(repo):
+    source=repo/NATIVE_SOURCE
+    dest=repo/'attention'/FINAL_SORT4
+    shutil.copytree(source,dest,ignore=shutil.ignore_patterns('torch_extension','tests','docs','examples'))
+    for file in sorted(dest.rglob('*'),key=lambda path:len(path.parts),reverse=True):
+        if file.is_file():
+            code=file.read_text().replace(NATIVE_INDEXER,FINAL_SORT4).replace(
+                'QuantLightningIndexer','QuantLightningIndexerPlanFinal4')
+            code=code.replace('QUANT_LIGHTNING_INDEXER','QUANT_LIGHTNING_INDEXER_PLAN_FINAL4')
+            if file.is_relative_to(dest/'op_host'):
+                # Both native-derived operators link into the same host library.
+                code=code.replace('QLIInfoParser','QLIFinal4InfoParser')
+            if file.is_relative_to(dest/'op_host') or file.is_relative_to(dest/'op_kernel'):
+                code=code.replace('QLITilingData','QLIFinal4TilingData')
+            file.write_text(code)
+        if NATIVE_INDEXER in file.name:
+            file.rename(file.with_name(file.name.replace(NATIVE_INDEXER,FINAL_SORT4)))
+    vector=dest/'op_kernel/arch35'/f'{FINAL_SORT4}_service_vector_arch35.h'
+    code=vector.read_text()
+    anchor='#include "../arch35/vf/quant_lightning_indexer_plan_final4_topk.h"'
+    code=replace(code,anchor,anchor+'\n#include "include/adv_api/sort/sort.h"')
+    # The early no-visible-tokens copy and the short sequence branch stay native.
+    anchor='''        SetFlag<HardEvent::V_MTE2>(TOPK_V_MTE2_EVENT);
+        SetFlag<HardEvent::V_MTE3>(TOPK_V_MTE3_EVENT);
+        WaitFlag<HardEvent::V_MTE3>(TOPK_V_MTE3_EVENT);
+        AscendC::DataCopyPad(indiceOutGm[info.indiceOutOffset + (qliCurS1Idx + qliRowIdx) * topkCount_],
+                             indicesOutLocal_.ReinterpretCast<int32_t>(), qliCopyOutParams);'''
+    epilogue=(ROOT/'csrc/qli_fusion/native_final_sort.inc').read_text().rstrip()
+    copy=anchor.replace('indicesOutLocal_.ReinterpretCast<int32_t>()','orderedIndices.ReinterpretCast<int32_t>()')
+    vector.write_text(replace(code,anchor,epilogue+'\n'+copy))
+
+
+def verify_topk_isolation(repo):
+    """Check both source trees after normalizing generated registration names."""
+    replacements = (
+        (b'QuantLightningIndexerPlanTopkControl4', b'QuantLightningIndexerPlanSplit4'),
+        (b'QLIPlanTopkControl4', b'QLIPlanSplit4'),
+        (b'quant_lightning_indexer_plan_topk_control4', b'quant_lightning_indexer_plan_split4'),
+        (b'QLI_PLAN_TOPKCONTROL4', b'QLI_PLAN_SPLIT4'),
+        (b'qli_plan_resources_topkcontrol4', b'qli_plan_resources_split4'),
+    )
+    def normalize(value):
+        for actual, ordered in replacements:
+            value=value.replace(actual,ordered)
+        return value
+
+    def files_for(operator):
+        root=repo/'attention'/operator
+        return {normalize(str(p.relative_to(root)).encode()):normalize(p.read_bytes())
+                for tree in ('op_host','op_kernel','torch_extension') for p in (root/tree).rglob('*')
+                if p.is_file() and p.relative_to(root)!=TOPK_HEADER}
+
+    if files_for(ORDERED4)!=files_for(TOPK_CONTROL4):
+        raise RuntimeError('matched Indexers differ outside the TopK implementation')
+    control=(repo/'attention'/TOPK_CONTROL4/TOPK_HEADER).read_bytes()
+    native=(repo/NATIVE_SOURCE/TOPK_HEADER).read_bytes()
+    if control!=native:
+        raise RuntimeError('fixed-4 original TopK control differs from pinned native TopK')
 
 
 def overlay(folder,mode,suffix,s1_base):
@@ -217,9 +297,11 @@ def main():
     variants=[(mode,name,'Split' if mode==0 else 'ABC'[mode-1],2)
               for mode,name in NAMES.items()]
     variants.append((0,ORDERED4,'Split4',4))
-    destinations=[repo/'attention'/name for _,name,_,_ in variants]+[baseline_binding]
+    variants.append((0,TOPK_CONTROL4,'TopkControl4',4))
+    destinations=[repo/'attention'/name for _,name,_,_ in variants]+[baseline_binding,repo/'attention'/FINAL_SORT4]
     for dest in destinations:
         if dest.exists():raise SystemExit('refusing to overwrite existing directory: '+str(dest))
+    install_final_sort_indexer(repo)
     for mode,name,suffix,s1_base in variants:
         dest=repo/'attention'/name
         shutil.copytree(source,dest)
@@ -232,31 +314,35 @@ def main():
                 f.write_text(s)
             if old in f.name:f.rename(f.with_name(f.name.replace(old,name)))
         overlay(dest,mode,suffix,s1_base)
+        if name == TOPK_CONTROL4:
+            # Keep the ordered4 kernel and host layout; change only the TopK implementation.
+            shutil.copyfile(repo/NATIVE_SOURCE/TOPK_HEADER,dest/TOPK_HEADER)
         # All host tiling objects are linked into one vendor library. Distinct
         # constexpr definitions must NOT share a mangled name across A/B/C.
         for f in dest.rglob('*'):
             if f.is_file() and f.suffix in ('.h','.cpp','.inc'):
                 s=f.read_text().replace('qli_fusion_resource',name+'_resource').replace('qli_fused_host',name+'_host')
                 f.write_text(s)
+    verify_topk_isolation(repo)
     digest=source_id()
-    (baseline_binding/'csrc').mkdir(parents=True)
-    python_binding=NATIVE_BINDING/f'{NATIVE_INDEXER}.py'
-    cpp_binding=NATIVE_BINDING/f'{NATIVE_INDEXER}.cpp'
-    shutil.copy2(python_binding,baseline_binding/python_binding.name)
-    (baseline_binding/'csrc'/cpp_binding.name).write_text(
-        replace(cpp_binding.read_text(),'@FUSION_SOURCE_ID@',digest)
-    )
+    for operator in (NATIVE_INDEXER,FINAL_SORT4):
+        install_native_binding(repo,operator,digest)
     manifest={'upstream':COMMIT,'source_id':digest,'plan_parent':'44ee66caed1ceb58fad4190887b1e07fae0d4281',
               'native_indexer':{'operator':NATIVE_INDEXER,'source':NATIVE_SOURCE,
                                 'upstream':COMMIT,'tiling':'upstream'},
+              'native_final_sort':{'operator':FINAL_SORT4,'source':NATIVE_SOURCE,
+                                   'upstream':COMMIT,'tiling':'upstream','topk':2048},
               'operators':NAMES,'qli_s1_base':2,
               'ordered_indexer_4':{'operator':ORDERED4,'s1_base':4,'plan_enabled':False},
+              'topk_control_4':{'operator':TOPK_CONTROL4,'parent':ORDERED4,'s1_base':4,
+                                'plan_enabled':False,'replaced_file':str(TOPK_HEADER)},
               'files':{}}
     for _,name,_,_ in variants:
         for f in (repo/'attention'/name).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
-    for f in (repo/NATIVE_SOURCE).rglob('*'):
-        if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
+    for operator in (NATIVE_INDEXER,FINAL_SORT4):
+        for f in (repo/'attention'/operator).rglob('*'):
+            if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
     (repo/'qli_fusion_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print('prepared experiment operators and the native Indexer binding; manifest:',repo/'qli_fusion_manifest.json')
 

@@ -40,27 +40,33 @@ def add_runtime_arguments(parser):
     parser.add_argument("--library", type=Path, default=ROOT / "build_joint_plan/libmtp_joint_plan_ops.so")
 
 
-def load_runtime(args):
+def load_runtime(args, *, require_plan=True):
     if args.device < 0:
         raise ValueError("device必须非负")
-    from checks.joint_build_info import identity
-    expected = identity()  # 源码身份先检查，过期源码不能以旧库继续跑。
+    if require_plan:
+        from checks.joint_build_info import identity
+        expected = identity()  # 源码身份先检查，过期源码不能以旧库继续跑。
     import torch
     import torch_npu
-    if not torch.npu.is_available() or not args.library.is_file():
-        raise RuntimeError("需要可用NPU和本分支build_joint_plan产物，不允许跳过设备验证")
+    if not torch.npu.is_available():
+        raise RuntimeError("需要可用NPU")
+    if require_plan and not args.library.is_file():
+        raise RuntimeError("需要本分支build_joint_plan产物")
     torch.npu.set_device(args.device)
     torch.empty(1, dtype=torch.int32, device=f"npu:{args.device}")
     torch.npu.synchronize()
-    torch.ops.load_library(str(args.library.resolve()))
-    info = json.loads(torch.ops.mtp_joint_plan.source_info())
-    if info["source"] != expected:
-        raise RuntimeError("联合Plan共享库身份过期，请用build_joint_plan.sh重建")
-    return torch, torch_npu, {"device": args.device, "device_name": torch.npu.get_device_name(args.device),
+    device = {"device": args.device, "device_name": torch.npu.get_device_name(args.device),
         "hostname": platform.node(),
         "cann_package_home": os.environ.get("ASCEND_CANN_PACKAGE_HOME", os.environ.get("ASCEND_HOME_PATH")),
-        "torch": torch.__version__, "torch_npu": torch_npu.__version__, "identity": info,
-        "library": str(args.library.resolve()), "library_sha256": hashlib.sha256(args.library.read_bytes()).hexdigest()}
+        "torch": torch.__version__, "torch_npu": torch_npu.__version__}
+    if require_plan:
+        torch.ops.load_library(str(args.library.resolve()))
+        info = json.loads(torch.ops.mtp_joint_plan.source_info())
+        if info["source"] != expected:
+            raise RuntimeError("联合Plan共享库身份过期，请用build_joint_plan.sh重建")
+        device.update(identity=info, library=str(args.library.resolve()),
+                      library_sha256=hashlib.sha256(args.library.read_bytes()).hexdigest())
+    return torch, torch_npu, device
 
 
 def upload_inputs(torch, case):
