@@ -18,7 +18,8 @@ import peer_plan
 from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
 from fusion.metrics import read_csvs,SPLIT_ROLES,TIMING_ARITHMETIC
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
-from scripts.prepare_qli_fusion import FINAL_SORT4,NAMES,NATIVE_INDEXER,ORDERED4,PEER4,TOPK_CONTROL4,source_id
+from scripts.prepare_qli_fusion import (FACTORIAL_NAMES,FACTORIALS,FINAL_SORT4,NAMES,
+                                        NATIVE_INDEXER,ORDERED4,PEER4,TOPK_CONTROL4,source_id)
 
 ROOT=Path(__file__).resolve().parent
 BASE='joint_rankpipe_ac_512'
@@ -26,6 +27,7 @@ INDEXER_ONLY = {'baseline', 'ordered4', 'topk_control4'}
 TOPK_ISOLATION = {'ordered4', 'topk_control4'}
 PEER_OPERATORS = {'peer': 'quant_lightning_indexer_ordered_fused', 'peer4': PEER4}
 NATIVE_ABI = {'baseline', 'final4'}
+FACTORIAL_ROLES = frozenset(FACTORIAL_NAMES)
 
 
 def canonical_indexer(implementations):
@@ -91,6 +93,7 @@ def load_operators(manifest, vendor, implementations):
     if manifest['source_id']!=source_id():raise RuntimeError('fusion source/manifest mismatch; rebuild required')
     operators={};identities={}
     names = {'split' if mode == 0 else 'abc'[mode-1]: name for mode, name in NAMES.items()}
+    names.update(FACTORIAL_NAMES)
     if 'baseline' in implementations or 'final4' in implementations:
         if manifest.get('native_indexer', {}).get('operator') != NATIVE_INDEXER:
             raise RuntimeError('native Indexer missing from build manifest; rebuild the fusion package')
@@ -229,7 +232,7 @@ def main_run(args,report):
         return custom
     # Global sitecustomize/backend autoload can prepend fla_npu during imports.
     # Restore this dedicated vendor immediately before and after runtime loading.
-    prefer_vendor();torch,torch_npu,device=common.load_runtime(args,require_plan=bool(split_roles));custom=prefer_vendor()
+    prefer_vendor();torch,torch_npu,device=common.load_runtime(args,require_plan=bool(split_roles or FACTORIAL_ROLES.intersection(names)));custom=prefer_vendor()
     if Path(custom.split(':')[0]).resolve()!=vendor:
         raise RuntimeError('failed to place dedicated vendor first in ASCEND_CUSTOM_OPP_PATH')
     if not manifest.get('installed_files'):raise RuntimeError('installed package identity missing; rebuild with scripts/build_qli_fusion.sh')
@@ -246,6 +249,24 @@ def main_run(args,report):
       for mtp in args.mtp:
         capacity=max(4096,(mtp+1)*2048)
         shape=Shape(batch=args.requests,width=mtp+1,seq_len=context,capacity=capacity)
+        # The generated host uses tSize_ <= 64 ? 2 : 4. This is a source-derived
+        # value, not an inference from a successful Block Num.
+        auto_s1=2 if shape.rows<=64 else 4
+        def s1_record(role):
+            if role in {'baseline','final4'}:
+                return {'kind':'upstream_native','t_size':shape.rows,'s1_base':4,
+                        'formula':'pinned DAV_3510 Indexer has a four-row tile'}
+            fixed={'ordered4':4,'split4':4,'peer4':4,'split':2,'a':2,'b':2}
+            if role in fixed:
+                return {'kind':'fixed_host_rule','t_size':shape.rows,'s1_base':fixed[role],
+                        'formula':f'fusedS1BaseSize_={fixed[role]}U'}
+            if role=='peer':
+                return {'kind':'upstream_fused_resource_rule','t_size':shape.rows,'s1_base':None,
+                        'formula':'tSize_ <= 64 ? 2 : 4, falling back to 2 if UB exceeds the limit'}
+            if role in FACTORIAL_ROLES or role=='c':
+                return {'kind':'generated_host_auto_formula','t_size':shape.rows,'s1_base':auto_s1,
+                        'formula':'fusedS1BaseSize_ = tSize_ <= 64 ? 2U : 4U'}
+            return {'kind':'upstream','t_size':shape.rows,'s1_base':None,'formula':None}
         begin=time.monotonic();inputs=make_inputs(shape,device=f'npu:{args.device}',seed=args.seed,quantizer=quantize)
         # Exact snapshots stay on device; comparisons occur outside target timing.
         readonly={k:v.clone() for k,v in inputs.qli.items() if torch.is_tensor(v)}
@@ -348,6 +369,8 @@ def main_run(args,report):
                     result_info=common.check(case,b)
                     if n in {'split4','final4'} and (result_info['joint_groups']!=shape.batch or result_info['overflow_groups']):
                         raise RuntimeError(f'{n}: expected {shape.batch} joint groups and zero fallback')
+                    if n in FACTORIAL_ROLES and (result_info['joint_groups']!=shape.batch or result_info['overflow_groups']):
+                        raise RuntimeError(f'{n}: expected {shape.batch} joint groups and zero fallback')
                 return event_us,host_us,result_info
             begin=time.monotonic()
             try:
@@ -414,13 +437,12 @@ def main_run(args,report):
                         s['span_p50_over_native_indexer']=span/baseline_span
                         s['span_p50_delta_vs_native_indexer_us']=span-baseline_span
                     stats['baseline']['native_topk_comparison']=stats['baseline']['topk_set_comparison']
-                data={'tag':tag,'context':context,'mtp':mtp,'capacity':capacity,'requests':args.requests,
+                data={'tag':tag,'scenario':scenario,'context':context,'mtp':mtp,'capacity':capacity,'requests':args.requests,
                     'timing_arithmetic':TIMING_ARITHMETIC,
                     'qli_input_sha256':qli_hash,
-                    'qli_s1_base_by_implementation':{
-                        n:{'baseline':'upstream','peer':'upstream_auto','ordered4':4,'topk_control4':4,
-                           'split4':4,'final4':2 if shape.rows<=64 else 4}.get(n,2)
-                        for n in names},
+                    'qli_s1_base_by_implementation':{n:s1_record(n)['s1_base'] for n in names},
+                    'qli_s1_base_evidence':{n:s1_record(n) for n in names},
+                    'factorial_ub_bytes':{n:manifest.get('factorial_ub_bytes',{}).get(n) for n in names if n in FACTORIAL_ROLES},
                     'input':describe(case),'logical_input_sha256':hashlib.sha256(b''.join(case[k].tobytes() for k in common.INPUTS)).hexdigest(),
                     'statistics':stats,'execution_orders':orders,'csv_paths':[str(p) for p in csvs],'kernel_inventory':inventory}
                 if split_reference:
@@ -431,6 +453,14 @@ def main_run(args,report):
                     data['final4_native_topk_comparison']=native_equivalence
                 if 'peer' in stats:
                     data['peer_plan_layout']=bundles['peer']['layout']
+                if 'c0' in stats:
+                    c0_span=stats['c0']['span_us']['p50_us']
+                    factorial_here=sorted(FACTORIAL_ROLES.intersection(stats))
+                    for n in factorial_here:
+                        stats[n]['span_p50_delta_vs_c0_us']=stats[n]['span_us']['p50_us']-c0_span
+                        stats[n]['span_p50_over_c0']=stats[n]['span_us']['p50_us']/c0_span
+                    data['factorial']={'roles':factorial_here,
+                        'factors':{n:FACTORIALS[n][1] for n in factorial_here}}
                 if isolate_topk:
                     control=stats['topk_control4']['span_us']['p50_us']
                     ordered=stats['ordered4']['span_us']['p50_us']
@@ -502,9 +532,12 @@ def main_run(args,report):
     baseline_align = '---:|---:|' if with_baseline else ''
     split_column = f' span/{split_reference} |' if split_reference else ''
     split_align = '---:|' if split_reference else ''
+    factorial_columns = (' Δspan P50 vs c0 (μs) | span/c0 |'
+                         if any('c0' in r['statistics'] for r in all_results) else '')
+    factorial_align = '---:|---:|' if factorial_columns else ''
     lines+=['',f'| 工况 | 实现 | busy P50/P95 | span P50/P95 | Event P50/P95 |{split_column}'
-            f'{baseline_columns} 样本数 | 联合/回退/单行有序 | descriptor数 |',
-            f'|---|---|---:|---:|---:|{split_align}{baseline_align}---:|---|---:|']
+            f'{baseline_columns}{factorial_columns} 样本数 | 联合/回退/单行有序 | descriptor数 |',
+            f'|---|---|---:|---:|---:|{split_align}{baseline_align}{factorial_align}---:|---|---:|']
     for r in all_results:
         for n,s in r['statistics'].items():
             fmt=lambda x:f"{x['p50_us']:.3f}/{x['p95_us']:.3f}"
@@ -518,8 +551,14 @@ def main_run(args,report):
                 comparison=(f" {s['span_p50_over_native_indexer']:.3f} |"
                             f" {s['span_p50_delta_vs_native_indexer_us']:+.3f} |")
             split_ratio=f" {s['span_p50_over_split']:.3f} |" if split_reference else ''
+            factorial_delta=''
+            if factorial_columns:
+                if n in FACTORIAL_ROLES:
+                    factorial_delta=(f" {s.get('span_p50_delta_vs_c0_us',0.0):+.3f} |"
+                                     f" {s.get('span_p50_over_c0',1.0):.3f} |")
+                else:factorial_delta=' — | — |'
             lines.append(f"| {r['tag']} | {n} | {fmt(s['busy_us'])} | {fmt(s['span_us'])} | {fmt(s['event'])} |"
-                         f"{split_ratio}{comparison} {args.repeat} | {paths} | {descriptors} |")
+                         f"{split_ratio}{comparison}{factorial_delta} {args.repeat} | {paths} | {descriptors} |")
         for n in (name for name in names if name in split_roles):
             s=r['statistics'][n]
             lines+=['',f"{r['tag']} 的 {n} 分段 P50（μs）为 Indexer {s['indexer_span_us']['p50_us']:.3f}、Plan {s['plan_us']['p50_us']:.3f}、间隙 {s['between_kernel_gap_us']['p50_us']:.3f}。",'']
@@ -545,6 +584,23 @@ def main_run(args,report):
                     f"{result['ordered_minus_control_p50_us']:+.3f} μs，比值 {result['ordered_over_control_p50']:.3f}。"
                     f"两路 Block Num / Mix Block Num 为 {result['block_num']} / {result['mix_block_num']}。"
                     f"TopK 集合最小样本重合率 {topk['min_sample_overlap']:.4%}。"]
+    factorial_cases=[r for r in all_results if 'c0' in r['statistics']]
+    if factorial_cases:
+        lines+=['','## Factorial 路由与最佳候选','',
+                'S1Base 为生成 Host 同一公式 `tSize_ <= 64 ? 2 : 4` 的静态推算，并已由生成源码/探针检查；没有使用 Block Num 反推。']
+        best={}
+        for r in factorial_cases:
+            roles=sorted(n for n in FACTORIAL_ROLES if n in r['statistics'])
+            winner=min(roles,key=lambda n:r['statistics'][n]['span_us']['p50_us'])
+            best[(r['requests'],r['context'],r['mtp'],r['scenario'])]=winner
+            evidence=r['qli_s1_base_evidence']['c0']
+            ub=r['factorial_ub_bytes']
+            ub_text=', '.join(f"{n}={ub[n]['s1_base'+str(evidence['s1_base'])]}B" for n in roles)
+            lines.append(f"- batch{r['requests']} context{r['context']} MTP{r['mtp']} {r['scenario']}："
+                         f"S1Base={evidence['s1_base']}；c0={r['statistics']['c0']['span_us']['p50_us']:.3f}μs；"
+                         f"最佳 {winner}={r['statistics'][winner]['span_us']['p50_us']:.3f}μs；"
+                         f"UB {ub_text}。")
+        lines+=['',f"汇总最佳：{json.dumps({f'batch{k[0]}/ctx{k[1]}/mtp{k[2]}/{k[3]}':v for k,v in sorted(best.items())},ensure_ascii=False)}"]
     (out/'report.md').write_text('\n'.join(lines)+'\n')
 
 
@@ -554,7 +610,7 @@ def main():
     p.add_argument('--output',type=Path,required=True);p.add_argument('--requests',type=int,default=32)
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7]);p.add_argument('--contexts',nargs='+',type=int,default=[262144])
     p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
-    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered4','topk_control4','split','split4','final4','a','b','c','peer','peer4'),
+    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered4','topk_control4','split','split4','final4','a','b','c','c0','A','B','C','AB','AC','BC','ABC','peer','peer4'),
                    default=['split','a','b','c'],
                    help='baseline: upstream Indexer only; ordered4: ordered Indexer only, S1Base=4')
     p.add_argument('--warmup',type=int,default=2);p.add_argument('--repeat',type=int,default=5);p.add_argument('--regression-repeat',type=int,default=1)
@@ -568,8 +624,10 @@ def main():
     implementations=set(args.implementations)
     if not implementations or len(implementations)!=len(args.implementations):
         p.error('implementations must be nonempty and unique')
-    if not args.gate_only and not implementations.intersection(SPLIT_ROLES) and implementations not in ({'baseline'},TOPK_ISOLATION) and not implementations.intersection(PEER_OPERATORS):
-        p.error('performance requires a split Plan, fused peer, baseline, or TopK isolation')
+    if not args.gate_only and not implementations.intersection(SPLIT_ROLES) and implementations not in ({'baseline'},TOPK_ISOLATION) and not implementations.intersection(PEER_OPERATORS) and not implementations.intersection(FACTORIAL_ROLES):
+        p.error('performance requires a split Plan, fused factorial/peer, baseline, or TopK isolation')
+    if 'c' in implementations and 'c0' in implementations:
+        p.error('c and c0 are the same operator identity and cannot be profiled together')
     if {'ordered4','split4'}<=implementations:
         p.error('ordered4 and split4 use the same Indexer kernel and cannot be profiled together')
     if implementations.intersection({'split4','final4'}) and not set(args.mtp)<={3,7}:

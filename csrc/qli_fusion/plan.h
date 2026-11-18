@@ -39,6 +39,13 @@
 #define JOINT_STAGE_EXEC_BITS 15
 #define JOINT_RANKPIPE 1
 #define JOINT_RANKPIPE_BITS 5
+#ifndef QLI_HOT_UB_MAP
+#define QLI_HOT_UB_MAP 0
+#endif
+#if QLI_HOT_UB_MAP && QLI_PLAN_STORAGE != 3
+#error "QLI_HOT_UB_MAP is defined only for the rankpipe AC storage"
+#endif
+#define QLI_USE_HOT_UB_MAP(c,t,r) (QLI_HOT_UB_MAP && (c)==8192U && (t)==2048U && (r)==4)
 #define EIGHT_MAP_ARGUMENT(q,t) , (d.capacity/2U)
 #define QLI_OWNER_OFFSET(value) ((static_cast<uint32_t>(value)/2U)+(QLI_PLAN_STORAGE==3?2048U:static_cast<uint32_t>(value)/2U))
 #define QLI_MAP_WORDS(requests,topk) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(topk)/2U)
@@ -820,11 +827,13 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
     __ubuf__ int32_t* scan,__gm__ int32_t* workspace) {
   const uint32_t t=threadIdx.x,c=a.capacity,topk=a.topk,q=(end-first)*topk,u=ctx[1];
   auto* map=reinterpret_cast<__ubuf__ uint16_t*>(data);
+  const bool hotUbMap=QLI_USE_HOT_UB_MAP(c,topk,end-first);
   auto unique=FusionUnique{data,workspace+QLI_MAP_WORDS(a.maxRequests,a.topk)+first*c,a.topkIndices,first*a.topk,c,0U,end-first==1,ctx+48};
   auto* owner=data+QLI_OWNER_OFFSET(c);
   auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
   auto* bits=reinterpret_cast<__ubuf__ uint32_t*>(part+c);
-  auto* flags=map;
+  // The old hot path aliases flags with map. C moves flags out of the live map.
+  auto* flags=hotUbMap?reinterpret_cast<__ubuf__ uint16_t*>(owner+12288U):map;
   const bool directRank=(QLI_PLAN_STORAGE!=2) && a.maxToken<=262144;
   auto* slotLookup=directRank?reinterpret_cast<__ubuf__ uint16_t*>(owner+16384U):part;
   const int64_t qb=first*topk,cb=first*c;
@@ -840,7 +849,7 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   int32_t stable=a.stablePrefixLens[first];
   for(int64_t r=first+1;r<end;++r)if(a.stablePrefixLens[r]<stable)stable=a.stablePrefixLens[r];
   if(stable<0)stable=0;if(stable>a.maxToken)stable=a.maxToken;
-  for(uint32_t i=t;i<q/2;i+=SORTED_THREADS)workspace[qb/2+i]=data[i];
+  if(!hotUbMap){for(uint32_t i=t;i<q/2;i+=SORTED_THREADS)workspace[qb/2+i]=data[i];}
   asc_syncthreads();
   if(directRank){
     auto* masks=reinterpret_cast<__ubuf__ uint32_t*>(owner);
@@ -867,6 +876,8 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
       }
       slotLookup[slot]=static_cast<uint16_t>(encoded);
     }
+    // slotLookup has consumed firstUid. From here flags may overwrite the
+    // overlapping second half of firstUid [48K,64K) relative to owner.
     asc_syncthreads();
   }else{
   const uint32_t directoryBins=(15&8U) && c==4096U ? 512U : 1024U;
@@ -932,12 +943,15 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
     if(missing){int32_t slot=owner[uid]&0xffff;a.slotToToken[cb+slot]=unique[uid];a.missTokens[qb+rank]=unique[uid];a.missSlots[qb+rank]=slot;}
   }
   for(uint32_t pair=t;pair<q/2;pair+=SORTED_THREADS){
-    const uint32_t packed=static_cast<uint32_t>(workspace[qb/2+pair]);
+    const uint32_t packed=hotUbMap?reinterpret_cast<__ubuf__ uint32_t*>(data)[pair]
+                                  :static_cast<uint32_t>(workspace[qb/2+pair]);
     const uint32_t lo=packed&65535U,hi=packed>>16;
     a.currentSlots[qb+2*pair]=lo==65535U?-1:owner[lo]&0xffff;
     a.currentSlots[qb+2*pair+1]=hi==65535U?-1:owner[hi]&0xffff;
   }
   asc_syncthreads();
+  // Phase9 is the last reader of the UB map. RankPipeCopyOutputs later reuses
+  // data[0] for its bounded miss-token/miss-slot staging.
   for(uint32_t i=t;i<2048U;i+=SORTED_THREADS)data[i]=-1;
   const uint32_t unused=evicts-misses;
   for(uint32_t order=t;order<c;order+=SORTED_THREADS){
@@ -960,10 +974,11 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
 
 __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void RankPipeCompactVf(
     __ubuf__ int32_t* data,__ubuf__ int32_t* ctx,__ubuf__ int32_t* scan,
-    uint32_t c,uint32_t u){
+    uint32_t c,uint32_t u,bool hotUbMap){
   const uint32_t t=threadIdx.x;
-  auto* flags=reinterpret_cast<__ubuf__ uint16_t*>(data);
   auto* owner=data+QLI_OWNER_OFFSET(c);
+  auto* flags=hotUbMap?reinterpret_cast<__ubuf__ uint16_t*>(owner+12288U)
+                      :reinterpret_cast<__ubuf__ uint16_t*>(data);
   auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
   uint32_t hits=0U,misses=0U,parity=0U;
   for(uint32_t block=0;block<c;block+=32U*SORTED_THREADS){
@@ -2082,9 +2097,10 @@ __simd_callee__ inline void LayoutPut(__ubuf__ int32_t* ctx,
   AscendC::Reg::Scatter<uint32_t,uint32_t>(reinterpret_cast<__ubuf__ uint32_t*>(ctx),value,lane,chosen);
 }
 __simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32_t* ctx,
-    uint32_t c,uint32_t u){
+    uint32_t c,uint32_t u,bool hotUbMap){
   using namespace AscendC;
   const uint32_t ow=QLI_OWNER_OFFSET(c),pa=ow+c;
+  const uint32_t flagsOffset=hotUbMap?ow+12288U:0U;
   Reg::RegTensor<uint32_t> lane,zero,one,idx,oddBit,packed,high,f,mask,slot,invalid;
   Reg::RegTensor<uint32_t> hf,ef,hp,ep,hc,ec,hi,ei,last,entry,safe,tmp,mc,rank,inc,owner,index16,status;
   Reg::RegTensor<int32_t> signedOwner;
@@ -2093,7 +2109,7 @@ __simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32
   Reg::Duplicate(hc,uint32_t{0});Reg::Duplicate(ec,uint32_t{0});Reg::Duplicate(last,uint32_t{63});
   Reg::Duplicate(mask,uint32_t{1});Reg::And(oddBit,lane,mask,full);Reg::Compares<uint32_t,CMPMODE::NE>(odd,oddBit,uint32_t{0},full);
   for(uint32_t base=0;base<c;base+=64U){
-    Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_UNPACK_B16>(f,reinterpret_cast<__ubuf__ uint32_t*>(data)+(base/2U));
+    Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_UNPACK_B16>(f,reinterpret_cast<__ubuf__ uint32_t*>(data+flagsOffset)+(base/2U));
     Reg::Compares<uint32_t,CMPMODE::NE>(valid,f,uint32_t{65535},full);
     Reg::Duplicate(mask,uint32_t{0x4000});Reg::And(tmp,f,mask,full);Reg::Compares<uint32_t,CMPMODE::NE>(hit,tmp,uint32_t{0},valid);
     Reg::Select(hf,one,zero,hit);Reg::Select(ef,one,zero,valid);Reg::Sub(ef,ef,hf,full);
@@ -2139,7 +2155,9 @@ __aicore__ inline void RankPipeCopyOutputs(AscendC::TPipe& pipe,
     AscendC::LocalTensor<int32_t> local,__ubuf__ int32_t* ctx,
     int64_t first,uint32_t topk,uint32_t c,__gm__ uint8_t* lruSlots,__gm__ uint8_t* missTokens,__gm__ uint8_t* missSlots){
   const uint32_t n=static_cast<uint32_t>(ctx[46]),misses=PrivateUniqueCount(ctx);
-  const uint32_t uniqueOffset=0U; // map is dead: bounded descriptor-tail staging
+  // Phase9 has consumed the UB map for currentSlots. The V_MTE3 event below
+  // orders those reads before this MTE3 tail staging overwrites data[0].
+  const uint32_t uniqueOffset=0U;
   const uint32_t ownerOffset=PLAN_SCAN_STORAGE_ELEMENTS+EIGHT_CTX+QLI_OWNER_OFFSET(c);
   AscendC::GlobalTensor<int32_t> lru,mt,ms;
   lru.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t*>(lruSlots)+first*c,c);
@@ -2231,6 +2249,7 @@ __aicore__ inline void RunFusionGroupImpl(const Buffers& b,const TilingData& d,
   auto tokenToReq=b.tokenToReq,lastReqIds=b.lastReqIds,slotToToken=b.slotToToken,lruSlots=b.lruSlots;
   auto currentSlots=b.currentSlots,missCount=b.missCount,missTokens=b.missTokens,missSlots=b.missSlots;
   auto compactWorkspace=b.compactWorkspace,rowModes=b.rowModes,residentRows=b.residentRows,residentBlockTable=b.residentBlockTable;
+  const bool hotUbMap=QLI_USE_HOT_UB_MAP(d.capacity,d.topk,end-first);
 #define SORTED_CALL(PHASE) asc_vf_call<SortedStageVf<PHASE>>(dim3((PHASE)==4?PLAN_THREADS:SORTED_THREADS), scan, reinterpret_cast<__gm__ int64_t*>(reqIds), reinterpret_cast<__gm__ int64_t*>(lastReqIds), \
       reinterpret_cast<__gm__ int32_t*>(topkIndices),reinterpret_cast<__gm__ int32_t*>(stablePrefixLens), \
       reinterpret_cast<__gm__ int32_t*>(visibleSeqLens),reinterpret_cast<__gm__ int32_t*>(tokenToReq), \
@@ -2435,9 +2454,9 @@ __aicore__ inline void RunFusionGroupImpl(const Buffers& b,const TilingData& d,
           SORTED_CALL(6);SortedVectorToScalar(pipe);
           if(ctx[0]==1){
 #if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 2)
-            asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
+            asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);
 #else
-            asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
+            asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);
 #endif
             SortedVectorToScalar(pipe);
             if(ctx[0]==1){SORTED_CALL(9);SortedVectorToScalar(pipe);}

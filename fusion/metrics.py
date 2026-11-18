@@ -7,6 +7,11 @@ from decimal import Decimal, InvalidOperation
 
 TOKENS={'split':'quant_lightning_indexer_plan_split','a':'quant_lightning_indexer_plan_a',
         'b':'quant_lightning_indexer_plan_b','c':'quant_lightning_indexer_plan_c',
+        'c0':'quant_lightning_indexer_plan_c',
+        'A':'quant_lightning_indexer_plan_cfa','B':'quant_lightning_indexer_plan_cfb',
+        'C':'quant_lightning_indexer_plan_cfc','AB':'quant_lightning_indexer_plan_cfab',
+        'AC':'quant_lightning_indexer_plan_cfac','BC':'quant_lightning_indexer_plan_cfbc',
+        'ABC':'quant_lightning_indexer_plan_cfabc',
         'peer':'quant_lightning_indexer_ordered_fused',
         'peer4':'quant_lightning_indexer_plan_peer4',
         'ordered4':'quant_lightning_indexer_plan_split4',
@@ -19,7 +24,8 @@ SPLIT_ROLES = frozenset({'split', 'split4', 'final4'})
 
 
 def kernel_pattern(role, token):
-    camel = ''.join(word.title() for word in token.split('_'))
+    camel = (f'QuantLightningIndexerPlanCF{role}' if role in {'A','B','C','AB','AC','BC','ABC'}
+             else ''.join(word.title() for word in token.split('_')))
     snake = re.escape(token)
     if role == 'baseline':
         # The native snake-case name is a prefix of several other operators.
@@ -72,7 +78,12 @@ def read_csvs(paths,orders,repeat,exact=None):
                         match=name in exact.get(key,exact.get(role,[]))
                     else:
                         match=bool(pattern.search(name))
-                    if match:hits.append(role)
+                    if not match:continue
+                    # c and c0 are the same historical operator exposed under two
+                    # factorial role names. Select only the requested spelling.
+                    if role=='c' and 'c0' in expected and 'c' not in expected:continue
+                    if role=='c0' and 'c0' not in expected and 'c' in expected:continue
+                    hits.append(role)
                 if not hits:continue
                 if len(hits)!=1:raise RuntimeError('ambiguous target kernel: '+name)
                 role=hits[0]

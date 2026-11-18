@@ -24,6 +24,19 @@ NATIVE_SOURCE=f'attention/{NATIVE_INDEXER}'
 NATIVE_BINDING=ROOT/'fusion/native_indexer_binding'
 NAMES={0:'quant_lightning_indexer_plan_split',1:'quant_lightning_indexer_plan_a',
        2:'quant_lightning_indexer_plan_b',3:'quant_lightning_indexer_plan_c'}
+# New factorial identities are deliberately independent of the historical
+# storage-only A/B names above. c0 is the existing rankpipe AC operator.
+FACTORIALS={
+    'c0':('quant_lightning_indexer_plan_c',dict(final_sort=False,vector_reuse=False,hot_ub_map=False)),
+    'A':('quant_lightning_indexer_plan_cfa',dict(final_sort=True,vector_reuse=False,hot_ub_map=False)),
+    'B':('quant_lightning_indexer_plan_cfb',dict(final_sort=False,vector_reuse=True,hot_ub_map=False)),
+    'C':('quant_lightning_indexer_plan_cfc',dict(final_sort=False,vector_reuse=False,hot_ub_map=True)),
+    'AB':('quant_lightning_indexer_plan_cfab',dict(final_sort=True,vector_reuse=True,hot_ub_map=False)),
+    'AC':('quant_lightning_indexer_plan_cfac',dict(final_sort=True,vector_reuse=False,hot_ub_map=True)),
+    'BC':('quant_lightning_indexer_plan_cfbc',dict(final_sort=False,vector_reuse=True,hot_ub_map=True)),
+    'ABC':('quant_lightning_indexer_plan_cfabc',dict(final_sort=True,vector_reuse=True,hot_ub_map=True)),
+}
+FACTORIAL_NAMES={role:name for role,(name,_) in FACTORIALS.items()}
 ORDERED4='quant_lightning_indexer_plan_split4'
 TOPK_CONTROL4='quant_lightning_indexer_plan_topk_control4'
 TOPK_HEADER=Path('op_kernel/arch35/vf/quant_lightning_indexer_topk.h')
@@ -91,6 +104,39 @@ def install_final_sort_indexer(repo):
     vector.write_text(replace(code,anchor,epilogue+'\n'+copy))
 
 
+def install_final_sort_ordered(vector):
+    """Order only the selected TopK positions, then write them back to the
+    dedicated output buffer. The Plan-owned sort scratch is never passed to the
+    fused Plan; short/empty rows retain their ascending index prefix and -1 tail.
+    """
+    s=vector.read_text()
+    anchor='#include "../arch35/vf/quant_lightning_indexer_topk.h"'
+    s=replace(s,anchor,anchor+'\n#include "include/adv_api/sort/sort.h"')
+    anchor='''        SetFlag<HardEvent::V_MTE2>(TOPK_V_MTE2_EVENT);
+        SetFlag<HardEvent::V_MTE3>(TOPK_V_MTE3_EVENT);
+        WaitFlag<HardEvent::V_MTE3>(TOPK_V_MTE3_EVENT);
+        AscendC::DataCopyPad(indiceOutGm[info.indiceOutOffset + (qliCurS1Idx + qliRowIdx) * topkCount_],
+                             indicesOutLocal_.ReinterpretCast<int32_t>(), qliCopyOutParams);'''
+    ordered='''        // A: the original score TopK has finished. Reuse its Plan-owned
+        // scratch only as sort output/temp, then copy ordered positions back to
+        // the dedicated indices buffer. The token set is unchanged, including
+        // every score tie chosen by the original TopK.
+        if (topkCount_ == 2048U && qliValidS2Len >= topkCount_) {
+            auto orderedIndices = topkSharedTmpLocal_;
+            PipeBarrier<PIPE_V>();
+            AscendC::Sort<uint32_t>(orderedIndices, indicesOutLocal_,
+                                    mrgValueLocal_.template ReinterpretCast<uint8_t>(), topkCount_);
+            PipeBarrier<PIPE_V>();
+            AscendC::DataCopy(indicesOutLocal_, orderedIndices, topkCount_);
+            // DataCopy completion is fully ordered before both GM and Plan read
+            // indicesOutLocal_; do not publish an alias of Plan scratch.
+            PipeBarrier<PIPE_ALL>();
+        }
+'''+anchor
+    s=replace(s,anchor,ordered)
+    vector.write_text(s)
+
+
 def install_peer4_fused(repo):
     """Clone the pinned fused operator with request-aligned four-row tiling.
 
@@ -152,7 +198,7 @@ def verify_topk_isolation(repo):
         raise RuntimeError('fixed-4 original TopK control differs from pinned native TopK')
 
 
-def overlay(folder,mode,suffix,s1_base):
+def overlay(folder,mode,suffix,s1_base,*,final_sort=False,vector_reuse=False,hot_ub_map=False):
     op=folder.name
     kernel=folder/'op_kernel';host=folder/'op_host'
     for name in ('plan.h','storage.h','resources.h'):
@@ -162,7 +208,14 @@ def overlay(folder,mode,suffix,s1_base):
     (kernel/'plan/sparse_kv_plan_config.h').write_text(config)
     plan=kernel/'plan/sparse_kv_plan_fused.h'
     if mode:
-        plan.write_text(f'#define QLI_PLAN_STORAGE {mode}\n#include "plan.h"\n')
+        if final_sort:
+            vector=kernel/'arch35/quant_lightning_indexer_service_vector_arch35.h'
+            install_final_sort_ordered(vector)
+        if hot_ub_map and mode!=3:
+            raise RuntimeError('hot UB query map is only valid for rankpipe AC storage')
+        plan.write_text(f'#define QLI_PLAN_STORAGE {mode}\n'+
+                        ('#define QLI_HOT_UB_MAP 1\n' if hot_ub_map else '')+
+                        '#include "plan.h"\n')
     else:
         plan.write_text('#include "kernel_operator.h"\n#include "sparse_kv_plan_config.h"\nnamespace qli_fused_plan {\n'+(ROOT/'csrc/qli_fusion/public.inc').read_text()+
             '\n__aicore__ inline void RunGroup(const Buffers&,const TilingData&,int64_t,int64_t,int64_t,AscendC::TPipe&,AscendC::LocalTensor<int32_t>,__ubuf__ int32_t*,int64_t){}\n}\n')
@@ -254,7 +307,7 @@ def overlay(folder,mode,suffix,s1_base):
     # checkedProduct is still used by shape-product validation below.
     s=s[:start]+s[start:end].replace('    constexpr uint64_t kPlanRowUbLimitBytes = qli_fused_plan::config::PLAN_ROW_UB_LIMIT_BYTES;\n','')+s[end:]
     tiling.write_text(s)
-    if mode in (1,2):
+    if vector_reuse:
         # Keep the full Cube-owned resMm allocation pinned. Only the five
         # Vector-only arrays share the larger TopK/Plan arena.
         vf=kernel/'arch35/quant_lightning_indexer_service_vector_arch35.h';s=vf.read_text()
@@ -331,16 +384,22 @@ def main():
         expected=subprocess.check_output(['git','-C',str(repo),'show',f'{COMMIT}:{name}'])
         if not (repo/name).is_file() or (repo/name).read_bytes()!=expected:raise SystemExit('upstream file differs: '+name)
     baseline_binding=repo/NATIVE_SOURCE/'torch_extension'
-    variants=[(mode,name,'Split' if mode==0 else 'ABC'[mode-1],None if mode==3 else 2)
-              for mode,name in NAMES.items()]
-    variants.append((0,ORDERED4,'Split4',4))
-    variants.append((0,TOPK_CONTROL4,'TopkControl4',4))
-    destinations=[repo/'attention'/name for _,name,_,_ in variants]+[baseline_binding,repo/'attention'/FINAL_SORT4,repo/'attention'/PEER4]
+    variants=[]
+    for mode,name in NAMES.items():
+        factors=FACTORIALS['c0'][1] if mode==3 else dict(final_sort=False,vector_reuse=False,hot_ub_map=False)
+        variants.append((mode,name,'Split' if mode==0 else 'ABC'[mode-1],
+                         None if mode==3 else 2,factors))
+    for role,(name,factors) in FACTORIALS.items():
+        if role!='c0':
+            variants.append((3,name,'CF'+role,None,factors))
+    variants.append((0,ORDERED4,'Split4',4,dict(final_sort=False,vector_reuse=False,hot_ub_map=False)))
+    variants.append((0,TOPK_CONTROL4,'TopkControl4',4,dict(final_sort=False,vector_reuse=False,hot_ub_map=False)))
+    destinations=[repo/'attention'/name for _,name,_,_,_ in variants]+[baseline_binding,repo/'attention'/FINAL_SORT4,repo/'attention'/PEER4]
     for dest in destinations:
         if dest.exists():raise SystemExit('refusing to overwrite existing directory: '+str(dest))
     install_final_sort_indexer(repo)
     install_peer4_fused(repo)
-    for mode,name,suffix,s1_base in variants:
+    for mode,name,suffix,s1_base,factors in variants:
         dest=repo/'attention'/name
         shutil.copytree(source,dest)
         old='quant_lightning_indexer_ordered_fused';camel='QuantLightningIndexerOrderedFused'
@@ -351,9 +410,12 @@ def main():
                 s=s.replace(camel,'QuantLightningIndexerPlan'+suffix).replace(old,name).replace('QLIOrderedFused','QLIPlan'+suffix).replace('QLI_ORDERED_FUSED','QLI_PLAN_'+suffix.upper())
                 f.write_text(s)
             if old in f.name:f.rename(f.with_name(f.name.replace(old,name)))
-        overlay(dest,mode,suffix,s1_base)
-        if name == TOPK_CONTROL4:
-            # Keep the ordered4 kernel and host layout; change only the TopK implementation.
+        overlay(dest,mode,suffix,s1_base,
+                final_sort=factors['final_sort'],vector_reuse=factors['vector_reuse'] or mode in (1,2),
+                hot_ub_map=factors['hot_ub_map'])
+        if name == TOPK_CONTROL4 or factors['final_sort']:
+            # The control isolates native selection. Factorial A also sorts the
+            # selected token positions before publishing them to the fused Plan.
             shutil.copyfile(repo/NATIVE_SOURCE/TOPK_HEADER,dest/TOPK_HEADER)
         # All host tiling objects are linked into one vendor library. Distinct
         # constexpr definitions must NOT share a mangled name across A/B/C.
@@ -374,12 +436,19 @@ def main():
                                's1_base':4,'fallback_s1_base':2},
               'auto_rankpipe_c':{'operator':NAMES[3],'source':SOURCE,'upstream':COMMIT,
                                  'plan':'rankpipe_ac','tiling':'upstream_auto'},
+              'factorial_roles':['c0','A','B','C','AB','AC','BC','ABC'],
+              'factorial_operators':FACTORIAL_NAMES,
+              'factorial_factors':{role:factors for role,(_,factors) in FACTORIALS.items()},
+              'factorial_ub_bytes':{role:{'plan_c8192':123648,
+                  's1_base4':197632 if factors['vector_reuse'] else 221184,
+                  's1_base2':164864 if factors['vector_reuse'] else 184832}
+                  for role,(_,factors) in FACTORIALS.items()},
               'operators':NAMES,'qli_s1_base':2,
               'ordered_indexer_4':{'operator':ORDERED4,'s1_base':4,'plan_enabled':False},
               'topk_control_4':{'operator':TOPK_CONTROL4,'parent':ORDERED4,'s1_base':4,
                                 'plan_enabled':False,'replaced_file':str(TOPK_HEADER)},
               'files':{}}
-    for _,name,_,_ in variants:
+    for _,name,_,_,_ in variants:
         for f in (repo/'attention'/name).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
     for operator in (NATIVE_INDEXER,FINAL_SORT4,PEER4):

@@ -241,6 +241,118 @@ def port(text):
     controller=controller.replace('OwnerOffset(', 'QLI_OWNER_OFFSET(')
     controller=controller.replace('qli_fusion_resource::MapWords(', 'QLI_MAP_WORDS(')
     controller=controller.replace('qli_fusion_resource::UniqueGmWords(', 'QLI_UNIQUE_GM_WORDS(')
+
+    # Factorial C keeps the 16 KiB query->UID map in UB for the only regular
+    # shape (capacity8192, four TopK2048 rows). The map occupies data[0,16KiB);
+    # keep the original owner at data+24KiB. All offsets below are relative to
+    # owner, not to the ABI's data pointer:
+    #   owner [0,32K), partition [32K,48K), flags [48K,64K),
+    #   directRank firstUid [32K,64K), slotLookup [64K,80K).
+    # firstUid and flags overlap in [48K,64K), so the existing barrier after
+    # slotLookup publication is the required lifetime handoff. RankPipeCopyOutputs
+    # is called after Phase9 and can safely reuse data[0] for bounded tail staging.
+    text=replace(text,
+'''  auto* map=reinterpret_cast<__ubuf__ uint16_t*>(data);
+  auto unique=FusionUnique{data,workspace+QLI_MAP_WORDS(a.maxRequests,a.topk)+first*c,a.topkIndices,first*a.topk,c,0U,end-first==1,ctx+48};
+  auto* owner=data+QLI_OWNER_OFFSET(c);
+  auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
+  auto* bits=reinterpret_cast<__ubuf__ uint32_t*>(part+c);
+  auto* flags=map;
+  const bool directRank=(QLI_PLAN_STORAGE!=2) && a.maxToken<=262144;
+  auto* slotLookup=directRank?reinterpret_cast<__ubuf__ uint16_t*>(owner+16384U):part;
+  const int64_t qb=first*topk,cb=first*c;
+  const uint32_t rows=end-first;''',
+'''  auto* map=reinterpret_cast<__ubuf__ uint16_t*>(data);
+  const bool hotUbMap=QLI_USE_HOT_UB_MAP(c,topk,end-first);
+  auto unique=FusionUnique{data,workspace+QLI_MAP_WORDS(a.maxRequests,a.topk)+first*c,a.topkIndices,first*a.topk,c,0U,end-first==1,ctx+48};
+  auto* owner=data+QLI_OWNER_OFFSET(c);
+  auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
+  auto* bits=reinterpret_cast<__ubuf__ uint32_t*>(part+c);
+  // The old hot path aliases flags with map. C moves flags out of the live map.
+  auto* flags=hotUbMap?reinterpret_cast<__ubuf__ uint16_t*>(owner+12288U):map;
+  const bool directRank=(QLI_PLAN_STORAGE!=2) && a.maxToken<=262144;
+  auto* slotLookup=directRank?reinterpret_cast<__ubuf__ uint16_t*>(owner+16384U):part;
+  const int64_t qb=first*topk,cb=first*c;
+  const uint32_t rows=end-first;''')
+    text=replace(text,
+        '  for(uint32_t i=t;i<q/2;i+=SORTED_THREADS)workspace[qb/2+i]=data[i];\n  asc_syncthreads();',
+        '''  if(!hotUbMap){for(uint32_t i=t;i<q/2;i+=SORTED_THREADS)workspace[qb/2+i]=data[i];}
+  asc_syncthreads();''')
+    text=replace(text,
+        '    asc_syncthreads();\n  }else{\n  const uint32_t directoryBins=',
+        '''    // slotLookup has consumed firstUid. From here flags may overwrite the
+    // overlapping second half of firstUid [48K,64K) relative to owner.
+    asc_syncthreads();
+  }else{
+  const uint32_t directoryBins=''')
+    text=replace(text,
+'''  for(uint32_t pair=t;pair<q/2;pair+=SORTED_THREADS){
+    const uint32_t packed=static_cast<uint32_t>(workspace[qb/2+pair]);
+    const uint32_t lo=packed&65535U,hi=packed>>16;
+    a.currentSlots[qb+2*pair]=lo==65535U?-1:owner[lo]&0xffff;
+    a.currentSlots[qb+2*pair+1]=hi==65535U?-1:owner[hi]&0xffff;
+  }
+  asc_syncthreads();
+  for(uint32_t i=t;i<2048U;i+=SORTED_THREADS)data[i]=-1;''',
+'''  for(uint32_t pair=t;pair<q/2;pair+=SORTED_THREADS){
+    const uint32_t packed=hotUbMap?reinterpret_cast<__ubuf__ uint32_t*>(data)[pair]
+                                  :static_cast<uint32_t>(workspace[qb/2+pair]);
+    const uint32_t lo=packed&65535U,hi=packed>>16;
+    a.currentSlots[qb+2*pair]=lo==65535U?-1:owner[lo]&0xffff;
+    a.currentSlots[qb+2*pair+1]=hi==65535U?-1:owner[hi]&0xffff;
+  }
+  asc_syncthreads();
+  // Phase9 is the last reader of the UB map. RankPipeCopyOutputs later reuses
+  // data[0] for its bounded miss-token/miss-slot staging.
+  for(uint32_t i=t;i<2048U;i+=SORTED_THREADS)data[i]=-1;''')
+
+    # RankPipeCompactVf (AC) and LayoutHotCompactVf (the alternate shell) must
+    # read the relocated flags while preserving the original Phase6/9 boundary.
+    text=replace(text,
+'''    uint32_t c,uint32_t u){
+  const uint32_t t=threadIdx.x;
+  auto* flags=reinterpret_cast<__ubuf__ uint16_t*>(data);
+  auto* owner=data+QLI_OWNER_OFFSET(c);
+  auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);''',
+'''    uint32_t c,uint32_t u,bool hotUbMap){
+  const uint32_t t=threadIdx.x;
+  auto* owner=data+QLI_OWNER_OFFSET(c);
+  auto* flags=hotUbMap?reinterpret_cast<__ubuf__ uint16_t*>(owner+12288U)
+                      :reinterpret_cast<__ubuf__ uint16_t*>(data);
+  auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);''')
+    text=replace(text,
+'''__simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32_t* ctx,
+    uint32_t c,uint32_t u){
+  using namespace AscendC;
+  const uint32_t ow=QLI_OWNER_OFFSET(c),pa=ow+c;''',
+'''__simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32_t* ctx,
+    uint32_t c,uint32_t u,bool hotUbMap){
+  using namespace AscendC;
+  const uint32_t ow=QLI_OWNER_OFFSET(c),pa=ow+c;
+  const uint32_t flagsOffset=hotUbMap?ow+12288U:0U;''')
+    text=replace(text,
+        'Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_UNPACK_B16>(f,reinterpret_cast<__ubuf__ uint32_t*>(data)+(base/2U));',
+        'Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_UNPACK_B16>(f,reinterpret_cast<__ubuf__ uint32_t*>(data+flagsOffset)+(base/2U));')
+
+    # Controller computes the one runtime shape gate once and passes it to every
+    # affected consumer; no block count is used to infer S1Base or layout.
+    controller=replace(controller,
+        '  auto compactWorkspace=b.compactWorkspace,rowModes=b.rowModes,residentRows=b.residentRows,residentBlockTable=b.residentBlockTable;\n',
+        '''  auto compactWorkspace=b.compactWorkspace,rowModes=b.rowModes,residentRows=b.residentRows,residentBlockTable=b.residentBlockTable;
+  const bool hotUbMap=QLI_USE_HOT_UB_MAP(d.capacity,d.topk,end-first);
+''')
+    controller=replace(controller,
+        'asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));',
+        'asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);')
+    controller=replace(controller,
+        'asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));',
+        'asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);')
+    text=replace(text,
+        '  const uint32_t uniqueOffset=0U; // map is dead: bounded descriptor-tail staging\n',
+        '''  // Phase9 has consumed the UB map for currentSlots. The V_MTE3 event below
+  // orders those reads before this MTE3 tail staging overwrites data[0].
+  const uint32_t uniqueOffset=0U;
+''')
     return text,controller
 
 
@@ -274,7 +386,18 @@ def main():
 #include "storage.h"
 '''
     header+='\n'.join(f'#define {k} {v}' for k,v in FLAGS.items())+'\n'
-    header+='#define EIGHT_MAP_ARGUMENT(q,t) , (d.capacity/2U)\n#define QLI_OWNER_OFFSET(value) ((static_cast<uint32_t>(value)/2U)+(QLI_PLAN_STORAGE==3?2048U:static_cast<uint32_t>(value)/2U))\n#define QLI_MAP_WORDS(requests,topk) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(topk)/2U)\n#define QLI_UNIQUE_GM_WORDS(requests,capacity) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(capacity))\n'
+    header+='''#ifndef QLI_HOT_UB_MAP
+#define QLI_HOT_UB_MAP 0
+#endif
+#if QLI_HOT_UB_MAP && QLI_PLAN_STORAGE != 3
+#error "QLI_HOT_UB_MAP is defined only for the rankpipe AC storage"
+#endif
+#define QLI_USE_HOT_UB_MAP(c,t,r) (QLI_HOT_UB_MAP && (c)==8192U && (t)==2048U && (r)==4)
+#define EIGHT_MAP_ARGUMENT(q,t) , (d.capacity/2U)
+#define QLI_OWNER_OFFSET(value) ((static_cast<uint32_t>(value)/2U)+(QLI_PLAN_STORAGE==3?2048U:static_cast<uint32_t>(value)/2U))
+#define QLI_MAP_WORDS(requests,topk) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(topk)/2U)
+#define QLI_UNIQUE_GM_WORDS(requests,capacity) (static_cast<uint64_t>(requests)*8U*static_cast<uint64_t>(capacity))
+'''
     public=(ROOT/'csrc/qli_fusion/public.inc').read_text()
     wrappers=(ROOT/'csrc/qli_fusion/packet.inc').read_text()
     output=header+text+public+wrappers+controller+'''

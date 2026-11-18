@@ -2,19 +2,21 @@
 # Dedicated upstream checkout/package: never patch an existing user's source tree.
 set -euo pipefail
 if [[ $# -gt 1 ]]; then
-  echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --peer-aligned-only | --auto-rankpipe-only]" >&2
+  echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only]" >&2
   exit 2
 fi
 OPS=quant_lightning_indexer,quant_lightning_indexer_plan_split
 case "${1:-}" in
-  "") OPS+=,quant_lightning_indexer_plan_split4,quant_lightning_indexer_plan_a,quant_lightning_indexer_plan_b,quant_lightning_indexer_plan_c,quant_lightning_indexer_ordered_fused ;;
+  "") OPS+=,quant_lightning_indexer_plan_split4,quant_lightning_indexer_plan_a,quant_lightning_indexer_plan_b,quant_lightning_indexer_plan_c,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_cfa,quant_lightning_indexer_plan_cfb,quant_lightning_indexer_plan_cfc,quant_lightning_indexer_plan_cfab,quant_lightning_indexer_plan_cfac,quant_lightning_indexer_plan_cfbc,quant_lightning_indexer_plan_cfabc ;;
   --indexer-compare-only) OPS+=,quant_lightning_indexer_plan_split4 ;;
   --peer-compare-only) OPS+=,quant_lightning_indexer_ordered_fused ;;
   --topk-compare-only) OPS=quant_lightning_indexer_plan_split4,quant_lightning_indexer_plan_topk_control4 ;;
   --fast-split-only) OPS=quant_lightning_indexer,quant_lightning_indexer_plan_final4,quant_lightning_indexer_plan_split4 ;;
   --peer-aligned-only) OPS=quant_lightning_indexer,quant_lightning_indexer_plan_final4,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_peer4 ;;
   --auto-rankpipe-only) OPS=quant_lightning_indexer,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_c ;;
-  *) echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --peer-aligned-only | --auto-rankpipe-only]" >&2; exit 2 ;;
+  --factorial-only) OPS=quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_c,quant_lightning_indexer_plan_cfa,quant_lightning_indexer_plan_cfb,quant_lightning_indexer_plan_cfc,quant_lightning_indexer_plan_cfab,quant_lightning_indexer_plan_cfac,quant_lightning_indexer_plan_cfbc,quant_lightning_indexer_plan_cfabc ;;
+  --factorial-compare-only) OPS=quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_c,quant_lightning_indexer_plan_cfa,quant_lightning_indexer_plan_cfb,quant_lightning_indexer_plan_cfc,quant_lightning_indexer_plan_cfab,quant_lightning_indexer_plan_cfac,quant_lightning_indexer_plan_cfbc,quant_lightning_indexer_plan_cfabc,quant_lightning_indexer,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_final4 ;;
+  *) echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only]" >&2; exit 2 ;;
 esac
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PYTHON=${PYTHON:-python3}
@@ -30,8 +32,16 @@ if [[ -e "$WORK" ]]; then
   echo "构建目录已存在，为保留原产物请指定新的 QLI_FUSION_BUILD_DIR：$WORK" >&2;exit 2
 fi
 mkdir -p "$WORK"
-git clone --single-branch --branch wzj_qli_order_fused https://gitcode.com/sparse/ops-transformer.git "$WORK/upstream"
+if [[ -n "${QLI_UPSTREAM_SOURCE:-}" ]]; then
+  git clone --local --no-checkout "$QLI_UPSTREAM_SOURCE" "$WORK/upstream"
+else
+  git clone --single-branch --branch wzj_qli_order_fused https://gitcode.com/sparse/ops-transformer.git "$WORK/upstream"
+fi
 git -C "$WORK/upstream" checkout --detach "$PIN"
+if [[ -n "${QLI_THIRD_PARTY_CACHE:-}" ]]; then
+  mkdir -p "$WORK/upstream/third_party"
+  cp -a "$QLI_THIRD_PARTY_CACHE"/. "$WORK/upstream/third_party"/
+fi
 "$PYTHON" -B "$ROOT/scripts/export_fusion_plan.py" --check
 "$PYTHON" -B "$ROOT/scripts/prepare_qli_fusion.py" --upstream "$WORK/upstream"
 cd "$WORK/upstream"
@@ -40,6 +50,7 @@ PACKAGES=(build_out/cann-ops-transformer-qlifusion*.run)
 [[ ${#PACKAGES[@]} -eq 1 && -f "${PACKAGES[0]}" ]] || { echo "vendor包数量异常" >&2;exit 1; }
 bash "${PACKAGES[0]}" --install-path="$WORK/install"
 export ASCEND_CUSTOM_OPP_PATH="${ASCEND_CUSTOM_OPP_PATH:-}"
+export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-$WORK/torch_extensions}"
 source "$WORK/install/vendors/qlifusion_transformer/bin/set_env.bash"
 bash build.sh --torch_extension --ops="$OPS" --vendor_name=qlifusion
 WHEELS=(build_out/cann_ops_transformer_qlifusion*.whl)
@@ -60,5 +71,6 @@ cat > "$WORK/env.sh" <<EOF
 export ASCEND_CUSTOM_OPP_PATH="\${ASCEND_CUSTOM_OPP_PATH:-}"
 source "$WORK/install/vendors/qlifusion_transformer/bin/set_env.bash"
 export QLI_FUSION_BUILD_DIR="$WORK"
+export TORCH_EXTENSIONS_DIR="\${TORCH_EXTENSIONS_DIR:-$WORK/torch_extensions}"
 EOF
 echo "构建完成；请 source $WORK/env.sh，再运行 scripts/test_qli_fusion.sh"

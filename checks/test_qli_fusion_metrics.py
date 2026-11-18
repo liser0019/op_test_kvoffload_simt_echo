@@ -152,6 +152,18 @@ class Metrics(unittest.TestCase):
         self.assertEqual([sample['implementation'] for sample in parsed], ['peer', 'peer4'])
         self.assertEqual([sample['span_us'] for sample in parsed], [10, 11])
 
+    def test_factorial_identities_do_not_capture_c0_or_each_other(self):
+        rows = [
+            [TOKENS['c0'] + '_mix_aic', 0, 8, 'AI_CORE', 1, 0],
+            [TOKENS['A'] + '_mix_aic', 10, 9, 'AI_CORE', 1, 0],
+            [TOKENS['AB'] + '_mix_aic', 20, 10, 'AI_CORE', 1, 0],
+            [TOKENS['ABC'] + '_mix_aic', 30, 11, 'AI_CORE', 1, 0],
+            ['QuantLightningIndexerPlanCFB_mix_aiv', 50, 12, 'AI_VECTOR_CORE', 1, 0],
+        ]
+        parsed = self.parse(rows, ('c0', 'A', 'AB', 'ABC', 'B'))
+        self.assertEqual([sample['implementation'] for sample in parsed], ['c0', 'A', 'AB', 'ABC', 'B'])
+        self.assertEqual([sample['span_us'] for sample in parsed], [8, 9, 10, 11, 12])
+
     def test_wrong_order(self):
         with self.assertRaises(RuntimeError):self.parse(self.rows(),orders=('a','split'))
     def test_wrong_units(self):
