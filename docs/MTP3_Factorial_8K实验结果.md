@@ -104,7 +104,7 @@
 | 32 | 262144 | cold | 4 | BC | 679.578/680.469 | 687.610/688.457 | 0.9883 |
 | 32 | 262144 | warm | 4 | BC | 713.033/717.001 | 723.717/724.844 | 0.9852 |
 
-稳定路由结论：`tSize<=64` 使用 c0；`tSize>64` 使用 BC。该规则覆盖本次 batch6/8/10/16/17/32；没有为了某一场景牺牲其它已测 batch。
+本轮的融合候选选型与分块阈值一致。batch 6/8/10/16 选择 c0，batch 17/32 选择 BC。两个候选保留独立入口，实际采集由测试框架显式选择。
 
 ## 同卡参考
 
@@ -127,7 +127,7 @@ P50/P95 span μs：
 | 32 | 262144 | cold | 688.003/689.972 | 679.121/679.750 | 706.046/706.911 | 623.455/626.174 |
 | 32 | 262144 | warm | 723.178/724.037 | 713.448/714.285 | 761.865/763.014 | 643.655/645.034 |
 
-final4+独立 rankpipe AC 仍是这些 MTP3 大上下文下最强参考；peer 原融合壳更慢。BC 只在本任务 fused c 壳内是稳定的大 batch 改进，不应被解释成超过 final4 拆分路径。
+final4＋独立 rankpipe AC 在 12 个参考工况中拿到 11 个最低 span P50。100K、batch 17 冷启动由 BC 领先 2.057 μs，该工况的拆分 kernel 间隙 P50/P95 为 25.110/120.176 μs。256K 的 6 个工况均由拆分方案领先。这里的 100K 指 100000 个 token。
 
 ## 正确性证书
 
@@ -145,19 +145,25 @@ final4+独立 rankpipe AC 仍是这些 MTP3 大上下文下最强参考；peer �
 - 汇总：`results/factorial_summary.json`。
 - 构建：`build/factorial_final`、`build/factorial_compare`、`build_joint_plan`。
 
-复测命令骨架：
+### 复用服务器现有构建，复测 batch 32
 
 ```bash
+RUN=/workspace/qli_mtp3_factorial_JiuyXu
+cd "$RUN/src"
 source /usr/local/Ascend/cann-9.2.1/set_env.sh
-source build/factorial_final/env.sh
-export TORCH_EXTENSIONS_DIR=$PWD/build/factorial_final/torch_extensions
-../venv/cann921/bin/python -B profile_qli_fusion.py \
-  --fusion-build build/factorial_final --device 4 \
-  --library build_joint_plan/libmtp_joint_plan_ops.so \
+source "$RUN/build/factorial_final/env.sh"
+export TORCH_EXTENSIONS_DIR="$RUN/build/factorial_final/torch_extensions"
+export TORCH_DEVICE_BACKEND_AUTOLOAD=0 TASK_QUEUE_ENABLE=1
+unset ASCEND_LAUNCH_BLOCKING ASCEND_RT_VISIBLE_DEVICES
+OUT=$(mktemp -d "$RUN/results/retest_XXXXXX")
+mkdir "$OUT/tmp"
+"$RUN/venv/cann921/bin/python" -B profile_qli_fusion.py \
+  --fusion-build "$RUN/build/factorial_final" --device 4 \
+  --library "$RUN/src/build_joint_plan/libmtp_joint_plan_ops.so" \
   --requests 32 --mtp 3 --contexts 100000 262144 \
   --scenarios cold_reset full_cache_75pct \
   --implementations c0 A C BC --warmup 10 --repeat 20 --regression-repeat 1 \
-  --output <new-output-dir>
+  --output "$OUT/batch32" --temp-dir "$OUT/tmp"
 ```
 
 ## 失败记录与环境局限
