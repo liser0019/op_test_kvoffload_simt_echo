@@ -18,6 +18,8 @@ else:
 COMMIT='9ec2110969a9e8502bf6d579c027ac4ea9572016'
 SOURCE='attention/quant_lightning_indexer_ordered_fused'
 NATIVE_INDEXER='quant_lightning_indexer'
+NATIVE_ORDERED='quant_lightning_indexer_ordered'
+NATIVE_ORDERED_TREE='2f3532304e78af4325d77c7160c50d9d24cbf776'
 FINAL_SORT4='quant_lightning_indexer_plan_final4'
 PEER4='quant_lightning_indexer_plan_peer4'
 NATIVE_SOURCE=f'attention/{NATIVE_INDEXER}'
@@ -56,16 +58,28 @@ def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
 def install_native_binding(repo, operator, digest):
+    """Install the preallocated-output benchmark ABI for a native operator.
+
+    The upstream ordered operator already owns a torch_extension directory.
+    This overwrites only that dedicated build tree's Python/C++ adapter; its
+    kernel, host tiling and ACLNN implementation stay untouched. The unique
+    builder name prevents the ordered and baseline extensions from sharing a
+    TORCH namespace.
+    """
     dest=repo/'attention'/operator/'torch_extension'
-    (dest/'csrc').mkdir(parents=True)
+    (dest/'csrc').mkdir(parents=True,exist_ok=operator==NATIVE_ORDERED)
     native_camel='QuantLightningIndexer'
-    camel=native_camel if operator==NATIVE_INDEXER else 'QuantLightningIndexerPlanFinal4'
+    bindings={NATIVE_INDEXER:('QuantLightningIndexer','qli_native_indexer_baseline'),
+              NATIVE_ORDERED:('QuantLightningIndexerOrdered','qli_native_indexer_ordered'),
+              FINAL_SORT4:('QuantLightningIndexerPlanFinal4','qli_native_indexer_final4')}
+    if operator not in bindings:
+        raise RuntimeError('no benchmark binding template for '+operator)
+    camel,builder_name=bindings[operator]
     for source in NATIVE_BINDING.iterdir():
         if source.suffix not in ('.py','.cpp'):
             continue
         code=source.read_text().replace(NATIVE_INDEXER,operator).replace(native_camel,camel)
-        code=code.replace('qli_native_indexer_baseline','qli_native_indexer_final4' if operator==FINAL_SORT4
-                          else 'qli_native_indexer_baseline')
+        code=code.replace('qli_native_indexer_baseline',builder_name)
         if source.suffix=='.cpp':
             code=replace(code,'@FUSION_SOURCE_ID@',digest)
         parent=dest/'csrc' if source.suffix=='.cpp' else dest
@@ -146,6 +160,12 @@ def install_peer4_fused(repo):
     resource fallback to two rows for larger QLI/Plan footprints.
     """
     source=repo/SOURCE
+    ordered_source=f'attention/{NATIVE_ORDERED}'
+    ordered_tree=subprocess.check_output(
+        ['git','-C',str(repo),'rev-parse',f'{COMMIT}:{ordered_source}'],text=True,
+    ).strip()
+    if ordered_tree!=NATIVE_ORDERED_TREE:
+        raise SystemExit('pinned standalone Ordered Indexer differs from wzj_qli_order')
     dest=repo/'attention'/PEER4
     shutil.copytree(source,dest)
     old='quant_lightning_indexer_ordered_fused'
@@ -375,9 +395,15 @@ def main():
     head=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()
     if head!=COMMIT:raise SystemExit(f'expected upstream {COMMIT}, got {head}')
     source=repo/SOURCE
+    ordered_source=f'attention/{NATIVE_ORDERED}'
+    ordered_tree=subprocess.check_output(
+        ['git','-C',str(repo),'rev-parse',f'{COMMIT}:{ordered_source}'],text=True,
+    ).strip()
+    if ordered_tree!=NATIVE_ORDERED_TREE:
+        raise SystemExit('pinned standalone Ordered Indexer differs from wzj_qli_order')
     # Enforce exact public upstream files, including the QLI/TopK implementation.
     tracked=subprocess.check_output(
-        ['git','-C',str(repo),'ls-tree','-r','--name-only',COMMIT,SOURCE,NATIVE_SOURCE],
+        ['git','-C',str(repo),'ls-tree','-r','--name-only',COMMIT,SOURCE,NATIVE_SOURCE,ordered_source],
         text=True,
     ).splitlines()
     for name in tracked:
@@ -425,11 +451,15 @@ def main():
                 f.write_text(s)
     verify_topk_isolation(repo)
     digest=source_id()
-    for operator in (NATIVE_INDEXER,FINAL_SORT4):
+    for operator in (NATIVE_INDEXER,NATIVE_ORDERED,FINAL_SORT4):
         install_native_binding(repo,operator,digest)
     manifest={'upstream':COMMIT,'source_id':digest,'plan_parent':'44ee66caed1ceb58fad4190887b1e07fae0d4281',
               'native_indexer':{'operator':NATIVE_INDEXER,'source':NATIVE_SOURCE,
                                 'upstream':COMMIT,'tiling':'upstream'},
+              'native_ordered_indexer':{'operator':NATIVE_ORDERED,'source':f'attention/{NATIVE_ORDERED}',
+                                        'upstream':COMMIT,'tree':NATIVE_ORDERED_TREE,'tiling':'upstream',
+                                        'benchmark_adapter':'preallocated_topk_out'},
+
               'native_final_sort':{'operator':FINAL_SORT4,'source':NATIVE_SOURCE,
                                    'upstream':COMMIT,'tiling':'upstream','topk':2048},
               'peer_aligned4':{'operator':PEER4,'source':SOURCE,'upstream':COMMIT,
@@ -451,7 +481,7 @@ def main():
     for _,name,_,_,_ in variants:
         for f in (repo/'attention'/name).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
-    for operator in (NATIVE_INDEXER,FINAL_SORT4,PEER4):
+    for operator in (NATIVE_INDEXER,NATIVE_ORDERED,FINAL_SORT4,PEER4):
         for f in (repo/'attention'/operator).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
     (repo/'qli_fusion_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

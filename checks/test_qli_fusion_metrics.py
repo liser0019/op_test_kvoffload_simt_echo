@@ -5,15 +5,15 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from fusion.metrics import TOKENS,read_csvs
+from fusion.metrics import SPLIT_ROLES,TOKENS,read_csvs
 
 class Metrics(unittest.TestCase):
-    def parse(self,rows,orders=('split','a'),repeat=1,header=None):
+    def parse(self,rows,orders=('split','a'),repeat=1,header=None,split_roles=None):
         with tempfile.TemporaryDirectory() as td:
             p=Path(td)/'kernel_details.csv'
             with p.open('w',newline='') as f:
                 w=csv.writer(f);w.writerow(header or ['Name','Start Time(us)','Duration(us)','Task Type','Stream ID','Device ID']);w.writerows(rows)
-            return read_csvs([p],list(orders),repeat)[0]
+            return read_csvs([p],list(orders),repeat,split_roles=SPLIT_ROLES if split_roles is None else split_roles)[0]
     def rows(self):
         return [[TOKENS['split']+'_mix_aic',0,10,'AI_CORE',1,0],
                 [TOKENS['split']+'_mix_aiv',1,11,'AI_VECTOR_CORE',1,0],
@@ -143,6 +143,30 @@ class Metrics(unittest.TestCase):
         self.assertTrue(all(sample['between_kernel_gap_us'] == 2 for sample in result))
         with self.assertRaisesRegex(RuntimeError, 'split Indexer changed before Plan'):
             self.parse(rows[:2]+rows[3:], orders, repeat=2)
+    def test_ordered_native_is_not_captured_as_baseline_or_split4(self):
+        rows = [
+            [TOKENS['ordered_native'] + '_mix_aic', 0, 11, 'AI_CORE', 1, 0],
+            [TOKENS['baseline'] + '_mix_aic', 12, 8, 'AI_CORE', 1, 0],
+            [TOKENS['ordered4'] + '_mix_aic', 21, 9, 'AI_CORE', 1, 0],
+        ]
+        parsed = self.parse(rows, ('ordered_native', 'baseline', 'ordered4'))
+        self.assertEqual([p['implementation'] for p in parsed], ['ordered_native', 'baseline', 'ordered4'])
+        self.assertEqual([p['span_us'] for p in parsed], [11, 8, 9])
+
+    def test_indexer_only_final4_does_not_require_plan(self):
+        rows = [
+            [TOKENS['final4'] + '_mix_aic', 0, 8, 'AI_CORE', 1, 0],
+            [TOKENS['ordered4'] + '_mix_aic', 10, 9, 'AI_CORE', 1, 0],
+        ]
+        parsed = self.parse(rows, ('final4', 'ordered4'), split_roles=frozenset())
+        self.assertEqual([p['implementation'] for p in parsed], ['final4', 'ordered4'])
+        self.assertTrue(all('plan_us' not in p for p in parsed))
+
+    def test_default_final4_still_requires_plan(self):
+        rows = [[TOKENS['final4'] + '_mix_aic', 0, 8, 'AI_CORE', 1, 0]]
+        with self.assertRaisesRegex(RuntimeError, 'independent Plan missing'):
+            self.parse(rows, ('final4',))
+
     def test_peer_aligned4_names_do_not_capture_original_peer(self):
         rows = [
             [TOKENS['peer'], 0, 10, 'AI_CORE', 1, 0],

@@ -14,6 +14,7 @@ TOKENS={'split':'quant_lightning_indexer_plan_split','a':'quant_lightning_indexe
         'ABC':'quant_lightning_indexer_plan_cfabc',
         'peer':'quant_lightning_indexer_ordered_fused',
         'peer4':'quant_lightning_indexer_plan_peer4',
+        'ordered_native':'quant_lightning_indexer_ordered',
         'ordered4':'quant_lightning_indexer_plan_split4',
         'final4':'quant_lightning_indexer_plan_final4',
         'topk_control4':'quant_lightning_indexer_plan_topk_control4',
@@ -30,6 +31,9 @@ def kernel_pattern(role, token):
     if role == 'baseline':
         # The native snake-case name is a prefix of several other operators.
         snake += r'(?!_(?:plan|ordered|v[0-9]+)(?:_|$))'
+    elif role == 'ordered_native':
+        # The independent operator name prefixes the fused registration.
+        snake += r'(?!_(?:fused|plan)(?:_|$))'
     return re.compile(r'(?<![A-Za-z0-9])(?:' + snake + '|' + camel + r')(?![A-Za-z0-9])')
 
 
@@ -59,7 +63,7 @@ def public_component(record):
             'duration_us':float(record['duration_us'])}
 
 
-def read_csvs(paths,orders,repeat,exact=None):
+def read_csvs(paths,orders,repeat,exact=None,split_roles=SPLIT_ROLES):
     records=[];inventory=set();expected=Counter(orders)
     if any(v!=repeat for v in expected.values()):raise ValueError('invocation schedule/count mismatch')
     for path in paths:
@@ -122,7 +126,7 @@ def read_csvs(paths,orders,repeat,exact=None):
                 raise RuntimeError('Plan has no preceding split Indexer')
             record['implementation']=pending
             pending=None
-        elif role in SPLIT_ROLES:
+        elif role in split_roles:
             if pending is not None and pending!=role:
                 raise RuntimeError('split Indexer changed before Plan was recorded')
             pending=role
@@ -136,7 +140,7 @@ def read_csvs(paths,orders,repeat,exact=None):
         if not counts or any(n!=repeat for n in counts.values()):
             raise RuntimeError(f'{impl}: target component sample mismatch: {counts}; inventory={sorted(inventory)}')
         if len(counts)>3:raise RuntimeError(f'{impl}: unexpected number of target components')
-        if impl in SPLIT_ROLES and not any(k[0]=='plan' for k in counts):raise RuntimeError('independent Plan missing')
+        if impl in split_roles and not any(k[0]=='plan' for k in counts):raise RuntimeError('independent Plan missing')
         schema[impl]=counts
     position=0;pairs=[];previous_end=None
     for impl in orders:
@@ -148,7 +152,7 @@ def read_csvs(paths,orders,repeat,exact=None):
         result=dict(implementation=impl,span_us=float(end-start),busy_us=float(interval_union(group)),
             timestamp_origin_us=str(origin),component_start_basis='relative_to_timestamp_origin_us',
             components=[public_component(r) for r in group])
-        if impl in SPLIT_ROLES:
+        if impl in split_roles:
             indexer=[r for r in group if r['role']==impl];plan=[r for r in group if r['role']=='plan']
             if not indexer or len(plan)!=1:raise RuntimeError('split Indexer/Plan cardinality mismatch')
             finish=max(r['start_us']+r['duration_us'] for r in indexer)
