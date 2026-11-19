@@ -12,8 +12,10 @@ import shutil
 import subprocess
 if __package__:
     from .export_fusion_plan import ROOT,replace
+    from . import native_plan_overlay
 else:
     from export_fusion_plan import ROOT,replace
+    import native_plan_overlay
 
 COMMIT='9ec2110969a9e8502bf6d579c027ac4ea9572016'
 SOURCE='attention/quant_lightning_indexer_ordered_fused'
@@ -22,6 +24,9 @@ NATIVE_ORDERED='quant_lightning_indexer_ordered'
 NATIVE_ORDERED_TREE='2f3532304e78af4325d77c7160c50d9d24cbf776'
 FINAL_SORT4='quant_lightning_indexer_plan_final4'
 PEER4='quant_lightning_indexer_plan_peer4'
+NATIVE_SHELL='quant_lightning_indexer_plan_native_shell'
+NATIVE_FUSED='quant_lightning_indexer_plan_native_fused'
+NATIVE_GROUP='quant_lightning_indexer_plan_native_group'
 NATIVE_SOURCE=f'attention/{NATIVE_INDEXER}'
 NATIVE_BINDING=ROOT/'fusion/native_indexer_binding'
 NAMES={0:'quant_lightning_indexer_plan_split',1:'quant_lightning_indexer_plan_a',
@@ -42,9 +47,18 @@ FACTORIAL_NAMES={role:name for role,(name,_) in FACTORIALS.items()}
 ORDERED4='quant_lightning_indexer_plan_split4'
 TOPK_CONTROL4='quant_lightning_indexer_plan_topk_control4'
 TOPK_HEADER=Path('op_kernel/arch35/vf/quant_lightning_indexer_topk.h')
+ORDERED_TOPK_HEADER=Path('op_kernel/arch35/vf/quant_lightning_indexer_ordered_topk.h')
+# Route 2 deliberately starts from the standalone ordered Indexer.  The old
+# fused tree contributes only its reviewed Plan ABI/host/hook surface.
+NATIVE_PLAN_VARIANTS=(
+    (NATIVE_SHELL,'NativeShell',False),
+    (NATIVE_FUSED,'NativeFused',True),
+    (NATIVE_GROUP,'NativeGroup',True),
+)
 
 def source_id():
     files=[ROOT/'scripts/export_fusion_plan.py',ROOT/'scripts/prepare_qli_fusion.py',
+           ROOT/'scripts/native_plan_overlay.py',
            ROOT/'csrc/joint_plan/sparse_kv_plan_config.h',
            *sorted(NATIVE_BINDING.iterdir()),
            *sorted((ROOT/'csrc/qli_fusion').glob('*'))]
@@ -188,6 +202,54 @@ def install_peer4_fused(repo):
     code=replace(code,'fusedS1BaseSize_ = tSize_ <= 64 ? 2U : 4U;',
                  'fusedS1BaseSize_ = 4U;  // request-aligned candidate; resource fallback remains below')
     tiling.write_text(code)
+
+
+def install_native_plan_variant(repo,name,camel,enabled):
+    """Generate a dedicated operator from the standalone ordered device tree."""
+    native=repo/'attention'/NATIVE_ORDERED
+    fused=repo/SOURCE
+    dest=repo/'attention'/name
+    shutil.copytree(native,dest)
+    native_plan_overlay.rename_sources(dest,native_plan_overlay.ordered_names(name,camel))
+    # The ordered comparator/TopK header is frozen byte-for-byte. Identifier
+    # rewriting may touch every other generated file, never this implementation.
+    shutil.copyfile(native/ORDERED_TOPK_HEADER,
+                    dest/'op_kernel/arch35/vf'/f'{name}_topk.h')
+
+    # The standalone QLI host/public entry does not carry the Plan ABI. Reuse
+    # the already audited fused registration/tiling/binding layer verbatim.
+    shutil.rmtree(dest/'op_host')
+    shutil.copytree(fused/'op_host',dest/'op_host')
+    shutil.rmtree(dest/'torch_extension')
+    shutil.copytree(fused/'torch_extension',dest/'torch_extension')
+    shutil.copyfile(fused/'CMakeLists.txt',dest/'CMakeLists.txt')
+    shutil.copyfile(fused/'op_kernel/quant_lightning_indexer_fused_hook.h',
+                    dest/'op_kernel/quant_lightning_indexer_fused_hook.h')
+    native_plan_overlay.rename_sources(dest,native_plan_overlay.fused_names(name,camel))
+    (dest/'op_kernel/plan').mkdir(parents=True,exist_ok=True)
+    native_plan_overlay.write_provenance(
+        dest,COMMIT,NATIVE_ORDERED_TREE,SOURCE,f'attention/{NATIVE_ORDERED}')
+
+    grouped=name==NATIVE_GROUP
+    native_plan_overlay.patch_entry(dest,enabled)
+    native_plan_overlay.patch_kernel(dest,camel,enabled)
+    native_plan_overlay.patch_vector(dest,enabled,grouped=grouped)
+    overlay(dest,3 if enabled else 0,camel,None,
+            final_sort=False,vector_reuse=False,hot_ub_map=False)
+    native_plan_overlay.patch_tiling(dest)
+    if grouped:
+        native_plan_overlay.patch_group_hook(dest)
+    if not enabled:
+        native_plan_overlay.patch_shell_workspace(dest)
+
+
+def verify_native_plan_sources(repo):
+    """Prove every variant retains the standalone ordered TopK byte-for-byte."""
+    native=(repo/'attention'/NATIVE_ORDERED/ORDERED_TOPK_HEADER).read_bytes()
+    for name,_,_ in NATIVE_PLAN_VARIANTS:
+        path=repo/'attention'/name/'op_kernel/arch35/vf'/f'{name}_topk.h'
+        if path.read_bytes()!=native:
+            raise RuntimeError(f'{name} no longer carries the standalone ordered TopK header')
 
 
 def verify_topk_isolation(repo):
@@ -420,7 +482,9 @@ def main():
             variants.append((3,name,'CF'+role,None,factors))
     variants.append((0,ORDERED4,'Split4',4,dict(final_sort=False,vector_reuse=False,hot_ub_map=False)))
     variants.append((0,TOPK_CONTROL4,'TopkControl4',4,dict(final_sort=False,vector_reuse=False,hot_ub_map=False)))
-    destinations=[repo/'attention'/name for _,name,_,_,_ in variants]+[baseline_binding,repo/'attention'/FINAL_SORT4,repo/'attention'/PEER4]
+    destinations=[repo/'attention'/name for _,name,_,_,_ in variants]
+    destinations+=[repo/'attention'/name for name,_,_ in NATIVE_PLAN_VARIANTS]
+    destinations+=[baseline_binding,repo/'attention'/FINAL_SORT4,repo/'attention'/PEER4]
     for dest in destinations:
         if dest.exists():raise SystemExit('refusing to overwrite existing directory: '+str(dest))
     install_final_sort_indexer(repo)
@@ -449,7 +513,14 @@ def main():
             if f.is_file() and f.suffix in ('.h','.cpp','.inc'):
                 s=f.read_text().replace('qli_fusion_resource',name+'_resource').replace('qli_fused_host',name+'_host')
                 f.write_text(s)
+    for name,camel,enabled in NATIVE_PLAN_VARIANTS:
+        install_native_plan_variant(repo,name,camel,enabled)
+        for f in (repo/'attention'/name).rglob('*'):
+            if f.is_file() and f.suffix in ('.h','.cpp','.inc'):
+                s=f.read_text().replace('qli_fusion_resource',name+'_resource').replace('qli_fused_host',name+'_host')
+                f.write_text(s)
     verify_topk_isolation(repo)
+    verify_native_plan_sources(repo)
     digest=source_id()
     for operator in (NATIVE_INDEXER,NATIVE_ORDERED,FINAL_SORT4):
         install_native_binding(repo,operator,digest)
@@ -477,6 +548,14 @@ def main():
               'ordered_indexer_4':{'operator':ORDERED4,'s1_base':4,'plan_enabled':False},
               'topk_control_4':{'operator':TOPK_CONTROL4,'parent':ORDERED4,'s1_base':4,
                                 'plan_enabled':False,'replaced_file':str(TOPK_HEADER)},
+              'native_ordered_plan':{
+                  'source':f'attention/{NATIVE_ORDERED}','source_tree':NATIVE_ORDERED_TREE,
+                  'plan':'rankpipe_ac','plan_storage':3,'topk':2048,
+                  'tiling_rule':'rows<=64:2 else:4',
+                  'roles':{camel:{'operator':name,'plan_enabled':enabled,
+                                   'device_source':f'attention/{NATIVE_ORDERED}'}
+                           for name,camel,enabled in NATIVE_PLAN_VARIANTS},
+                  'ordered_topk_sha256':sha(repo/'attention'/NATIVE_ORDERED/ORDERED_TOPK_HEADER)},
               'files':{}}
     for _,name,_,_,_ in variants:
         for f in (repo/'attention'/name).rglob('*'):
@@ -484,6 +563,14 @@ def main():
     for operator in (NATIVE_INDEXER,NATIVE_ORDERED,FINAL_SORT4,PEER4):
         for f in (repo/'attention'/operator).rglob('*'):
             if f.is_file():manifest['files'][str(f.relative_to(repo))]=sha(f)
+    for operator,_,_ in NATIVE_PLAN_VARIANTS:
+        rows=[f for f in (repo/'attention'/operator).rglob('*') if f.is_file()]
+        for f in rows:manifest['files'][str(f.relative_to(repo))]=sha(f)
+        fingerprint=hashlib.sha256()
+        for f in sorted(rows):
+            fingerprint.update(str(f.relative_to(repo/"attention"/operator)).encode()+b'\0'+f.read_bytes())
+        manifest['native_ordered_plan']['roles'][dict(
+            (name,camel) for name,camel,_ in NATIVE_PLAN_VARIANTS)[operator]]['source_fingerprint']=fingerprint.hexdigest()
     (repo/'qli_fusion_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print('prepared experiment operators and the native Indexer binding; manifest:',repo/'qli_fusion_manifest.json')
 
