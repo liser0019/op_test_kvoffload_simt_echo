@@ -765,6 +765,9 @@ def main():
             p.error('the native ordered matrix accepts ordered_native and MTP3 experiment roles')
         if set(args.mtp)!={3}:
             p.error('the native ordered experiment uses MTP3')
+        specialized={name for name, plan in (MTP3_PLAN_ONLY | MTP3_CHAIN).items() if plan!=BASE}
+        if implementations & specialized and set(args.contexts)!={262144}:
+            p.error('specialized standalone MTP3 Plans require --contexts 262144; use ordered_ac or plan_ac for other lengths')
     if not args.gate_only and not implementations.intersection(MTP3_ROLES) and not implementations.intersection(effective_split_roles) and implementations not in ({'baseline'},TOPK_ISOLATION) and not implementations.intersection(PEER_OPERATORS) and not implementations.intersection(FACTORIAL_ROLES) and not implementations.intersection(INDEXER_ONLY):
         p.error('performance requires a split Plan, fused factorial/peer, baseline, ordered Indexer, or TopK isolation')
     if 'c' in implementations and 'c0' in implementations:

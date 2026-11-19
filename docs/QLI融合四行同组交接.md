@@ -4,7 +4,7 @@
 
 | 实现 | S1Base | 四行组的交接方式 |
 |---|---|---|
-| `ordered_full` | 独立保序 Indexer 的原生规则 | 后续独立四路整包 Plan，同一 stream |
+| `ordered_full` / `ordered_ac` | 独立保序 Indexer 的原生规则 | 256K 用四路整包 Plan，100K 用通用 rankpipe AC，同一 stream |
 | `native_group` | 总 query 行数 ≤64 时 2，否则 4 | 现有原子计数 |
 | `native_group4` | 固定 4，Host 和 AIC/AIV 读取同一 tiling 值 | 现有原子计数 |
 | `native_pair4` | 同 `native_group4` | 同一 AI Core 的双 AIV 硬件同步，固定 Plan 执行者 |
@@ -27,9 +27,14 @@ MTP3_BATCHES='8 17 32' bash scripts/test_native_ordered_mtp3.sh \
   --scenarios cold_reset --regression-repeat 2 --gate-only --prove-pair
 
 MTP3_BATCHES='8 17 32' bash scripts/test_native_ordered_mtp3.sh \
-  "$DEVICE" "$RUN/build" "$PLAN_LIBRARY" "$RUN/results" \
+  "$DEVICE" "$RUN/build" "$PLAN_LIBRARY" "$RUN/results_256k" \
   --implementations ordered_full native_group native_group4 native_pair4 \
-  --contexts 100000 262144 --warmup 2 --repeat 5 --regression-repeat 1
+  --contexts 262144 --warmup 2 --repeat 5 --regression-repeat 1
+
+MTP3_BATCHES='8 17 32' bash scripts/test_native_ordered_mtp3.sh \
+  "$DEVICE" "$RUN/build" "$PLAN_LIBRARY" "$RUN/results_100k" \
+  --implementations ordered_ac native_group native_group4 native_pair4 \
+  --contexts 100000 --warmup 2 --repeat 5 --regression-repeat 1
 ```
 
 `--prove-pair` 仅供完整四行组的门禁使用。它把 `native_pair4` 的 GM 就绪计数预填为 16。所有组的 Plan 输出正确且计数维持 16，才能证明这些组实际走了硬件交接。正式采样保持正常的零初态，并按设备 span 比较 P50/P95。
