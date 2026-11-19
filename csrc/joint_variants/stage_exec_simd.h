@@ -9,10 +9,16 @@ __simd_callee__ inline void LayoutPut(__ubuf__ int32_t* ctx,
   AscendC::Reg::Scatter<uint32_t,uint32_t>(reinterpret_cast<__ubuf__ uint32_t*>(ctx),value,lane,chosen);
 }
 __simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32_t* ctx,
+#if JOINT_MTP3_MAP
     uint32_t c,uint32_t u,bool hotUbMap){
+#else
+    uint32_t c,uint32_t u){
+#endif
   using namespace AscendC;
   const uint32_t ow=c/2U+c,pa=ow+c;
+#if JOINT_MTP3_MAP
   const uint32_t flagsOffset=hotUbMap?ow+12288U:0U;
+#endif
   Reg::RegTensor<uint32_t> lane,zero,one,idx,oddBit,packed,high,f,mask,slot,invalid;
   Reg::RegTensor<uint32_t> hf,ef,hp,ep,hc,ec,hi,ei,last,entry,safe,tmp,mc,rank,inc,owner,index16,status;
   Reg::RegTensor<int32_t> signedOwner;
@@ -23,7 +29,11 @@ __simd_vf__ inline void LayoutHotCompactVf(__ubuf__ int32_t* data,__ubuf__ int32
   for(uint32_t base=0;base<c;base+=64U){
 #if (JOINT_STAGE_EXEC_BITS & 1)
     // 每轮64个连续u16，128B加载后零扩展至64个u32；基址32B对齐。
+#if JOINT_MTP3_MAP
     Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_UNPACK_B16>(f,reinterpret_cast<__ubuf__ uint32_t*>(data+flagsOffset)+(base/2U));
+#else
+    Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_UNPACK_B16>(f,reinterpret_cast<__ubuf__ uint32_t*>(data)+(base/2U));
+#endif
 #else
     Reg::ShiftRights(idx,lane,int16_t{1},full);Reg::Adds(idx,idx,base/2U,full);
     Reg::Gather<uint32_t,uint32_t,uint32_t>(packed,reinterpret_cast<__ubuf__ uint32_t*>(data),idx,full);

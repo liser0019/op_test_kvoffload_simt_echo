@@ -8,20 +8,23 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
     int64_t first,int64_t end,__ubuf__ int32_t* data,__ubuf__ int32_t* ctx,
     __ubuf__ int32_t* scan,__gm__ int32_t* workspace) {
   const uint32_t t=threadIdx.x,c=a.capacity,topk=a.topk,q=(end-first)*topk,u=ctx[1];
-  const uint32_t rows=end-first;
-  // Only the fixed MTP3 shape keeps the 16KiB query map in UB through Phase9.
-  const bool hotUbMap=JOINT_MTP3_MAP && c==8192U && topk==2048U && rows==4U;
   auto* map=reinterpret_cast<__ubuf__ uint16_t*>(data);
   auto* unique=data+c/2U;
   auto* owner=unique+c;
   auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
   auto* bits=reinterpret_cast<__ubuf__ uint32_t*>(part+c);
-  // owner+12288 int32 is dead firstUid tail after slotLookup has consumed it.
+#if JOINT_MTP3_MAP
+  const bool hotUbMap=c==8192U && topk==2048U && end-first==4;
+  // This region of firstUid is dead once slotLookup has been built.
   auto* flags=hotUbMap?reinterpret_cast<__ubuf__ uint16_t*>(owner+12288U):map;
+#else
+  auto* flags=map;
+#endif
   // A's index and slot UID table use the dead merge packet region, at most96KiB.
   const bool directRank=(JOINT_RANKPIPE_BITS&1U) && a.maxToken<=262144;
   auto* slotLookup=directRank?reinterpret_cast<__ubuf__ uint16_t*>(owner+16384U):part;
   const int64_t qb=first*topk,cb=first*c;
+  const uint32_t rows=end-first;
   const int32_t req=a.tokenToReq[first];const int64_t reqid=a.reqIds[req];
   uint32_t evicts=Phase==9?ctx[43]:0,hits=Phase==9?ctx[44]:0,misses=Phase==9?ctx[45]:0,parity=0;
   if constexpr(Phase!=9){
@@ -38,9 +41,10 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   for(int64_t r=first+1;r<end;++r)if(a.stablePrefixLens[r]<stable)stable=a.stablePrefixLens[r];
   if(stable<0)stable=0;if(stable>a.maxToken)stable=a.maxToken;
 #if JOINT_LAYOUT16 == 1
-  if(!hotUbMap){
-    for(uint32_t i=t;i<q/2;i+=SORTED_THREADS)workspace[qb/2+i]=data[i];
-  }
+#if JOINT_MTP3_MAP
+  if(!hotUbMap)
+#endif
+  for(uint32_t i=t;i<q/2;i+=SORTED_THREADS)workspace[qb/2+i]=data[i];
   asc_syncthreads();
 #endif
   if(directRank){
@@ -219,8 +223,12 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   // Same thread reads the exact32-bit word it stored. No cross-warp GM exchange,
   // no Scalar/DMA reader, and no packed16-bit store race or cache handoff.
   for(uint32_t pair=t;pair<q/2;pair+=SORTED_THREADS){
+#if JOINT_MTP3_MAP
     const uint32_t packed=hotUbMap?reinterpret_cast<__ubuf__ uint32_t*>(data)[pair]
                                   :static_cast<uint32_t>(workspace[qb/2+pair]);
+#else
+    const uint32_t packed=static_cast<uint32_t>(workspace[qb/2+pair]);
+#endif
     const uint32_t lo=packed&65535U,hi=packed>>16;
     a.currentSlots[qb+2*pair]=lo==65535U?-1:owner[lo]&0xffff;
     a.currentSlots[qb+2*pair+1]=hi==65535U?-1:owner[hi]&0xffff;

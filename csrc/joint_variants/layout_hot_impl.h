@@ -1099,12 +1099,20 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
         if constexpr(JOINT_LAYOUT16==1 && (JOINT_LAYOUT_HOT_BITS&2U)){
           SORTED_CALL(6);SortedVectorToScalar(pipe);
           if(ctx[0]==1){
+#if JOINT_MTP3_MAP
             const bool hotUbMap=JOINT_MTP3_MAP && d.capacity==8192U && d.topk==2048U && (end-first)==4;
 #if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 2)
             asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);
 #else
             asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);
 #endif
+#else // frozen rankpipe launch ABI
+#if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 2)
+            asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
+#else
+            asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
+#endif
+#endif // JOINT_MTP3_MAP
             SortedVectorToScalar(pipe);
             if(ctx[0]==1){SORTED_CALL(9);SortedVectorToScalar(pipe);}
           }

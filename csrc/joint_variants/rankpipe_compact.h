@@ -5,13 +5,18 @@
 // support reduced-thread CPU semantic models, without changing the production tile.
 __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void RankPipeCompactVf(
     __ubuf__ int32_t* data,__ubuf__ int32_t* ctx,__ubuf__ int32_t* scan,
+#if JOINT_MTP3_MAP
     uint32_t c,uint32_t u,bool hotUbMap){
   const uint32_t t=threadIdx.x;
   auto* owner=data+c/2U+c;
-  // The target MTP3 candidate relocated flags past firstUid's dead tail so the
-  // original 16KiB query map can remain live until Phase9.
   auto* flags=hotUbMap?reinterpret_cast<__ubuf__ uint16_t*>(owner+12288U)
                       :reinterpret_cast<__ubuf__ uint16_t*>(data);
+#else
+    uint32_t c,uint32_t u){
+  const uint32_t t=threadIdx.x;
+  auto* flags=reinterpret_cast<__ubuf__ uint16_t*>(data);
+  auto* owner=data+c/2U+c;
+#endif
   auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
   uint32_t hits=0U,misses=0U,parity=0U;
   for(uint32_t block=0;block<c;block+=32U*SORTED_THREADS){
