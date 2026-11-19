@@ -2,13 +2,14 @@
 """Validate and summarize the official Indexer versus ordered+Plan matrix."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sys
 from pathlib import Path
 
 
-ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else "/workspace/official_vs_ordered_bt_plan_results")
+ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else "/workspace/official_vs_ordered_bt_plan_results").resolve()
 TARGET = "ordered_bt_direct_odd"
 BATCHES = range(8, 17)
 CONTEXTS = (102400, 358400)
@@ -19,16 +20,51 @@ def fmt(summary):
 
 
 rows = []
+environment = None
+build_identity = None
+artifact_index = {}
+
+def digest(path):
+    path = Path(path)
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
 for batch in BATCHES:
     metadata_path = ROOT / f"batch{batch}" / "capture_metadata.json"
     if not metadata_path.is_file():
         continue
     metadata = json.loads(metadata_path.read_text())
+    if environment is None:
+        environment = {
+            key: metadata["device"].get(key)
+            for key in ("device", "device_name", "hostname", "cann_package_home", "torch", "torch_npu")
+        }
+        environment["plan_library"] = metadata["device"].get("library")
+        environment["plan_library_sha256"] = metadata["device"].get("library_sha256")
+        build_identity = {
+            "qli_source_id": metadata["build_manifest"].get("source_id"),
+            "qli_upstream_commit": metadata["build_manifest"].get("upstream"),
+            "packaged_operators": metadata["build_manifest"].get("packaged_operators"),
+            "plan_source_commit": "88c06745b0260ef258ce3870945bdb7668d3d483",
+        }
+    artifact_index[str(metadata_path.relative_to(ROOT))] = digest(metadata_path)
+    repeat = metadata.get("configuration", {}).get("repeat")
+    assert repeat and int(repeat) > 0
     for case in metadata["cases"]:
         if case["context"] not in CONTEXTS or case["scenario"] != "full_cache_90pct":
             continue
         stats = case["statistics"]
         assert {"baseline", TARGET} <= set(stats), (batch, case["context"], sorted(stats))
+        assert case["requests"] == batch and case["mtp"] == 3
+        assert case["capacity"] == 8192 and case["context"] in CONTEXTS
+        for role in ("baseline", TARGET):
+            for metric in ("span_us",):
+                assert stats[role][metric]["count"] == int(repeat), (
+                    batch, case["context"], role, metric, stats[role][metric]["count"], repeat)
+        for metric in ("indexer_span_us", "plan_us", "between_kernel_gap_us"):
+            assert stats[TARGET][metric]["count"] == int(repeat), (
+                batch, case["context"], TARGET, metric, stats[TARGET][metric]["count"], repeat)
         topk = stats["baseline"]["topk_set_comparison"]
         assert topk["min_sample_overlap"] == 1 and topk["min_row_overlap"] == 1
         assert topk["max_different_rows"] == 0
@@ -44,6 +80,13 @@ for batch in BATCHES:
         assert len(hit_fractions) == batch * 4
         assert all(math.isclose(value, expected_hit_fraction, rel_tol=0, abs_tol=1e-12)
                    for value in hit_fractions)
+        evidence_paths = [case.get("samples_csv"), *case.get("csv_paths", [])]
+        for evidence in evidence_paths:
+            if not evidence:
+                continue
+            evidence_path = Path(evidence)
+            assert evidence_path.is_file(), evidence_path
+            artifact_index[str(evidence_path.relative_to(ROOT))] = digest(evidence_path)
         pair = case["official_vs_ordered_bt_plan_p50"]
         rows.append({
             "batch": batch,
@@ -68,7 +111,17 @@ missing = sorted(expected - found)
 if missing:
     raise SystemExit(f"missing cases: {missing}")
 
-payload = {"status": "complete", "target": TARGET, "scenario": "full_cache_90pct", "cases": rows}
+harness_commit_path = ROOT / "harness-commit.txt"
+payload = {
+    "status": "complete",
+    "target": TARGET,
+    "scenario": "full_cache_90pct",
+    "harness_commit": harness_commit_path.read_text().strip() if harness_commit_path.is_file() else None,
+    "environment": environment,
+    "build_identity": build_identity,
+    "artifact_sha256": artifact_index,
+    "cases": rows,
+}
 (ROOT / "summary.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 lines = [
