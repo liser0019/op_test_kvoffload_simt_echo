@@ -8,12 +8,12 @@ import unittest
 from fusion.metrics import SPLIT_ROLES,TOKENS,read_csvs
 
 class Metrics(unittest.TestCase):
-    def parse(self,rows,orders=('split','a'),repeat=1,header=None,split_roles=None):
+    def parse(self,rows,orders=('split','a'),repeat=1,header=None,split_roles=None,**kwargs):
         with tempfile.TemporaryDirectory() as td:
             p=Path(td)/'kernel_details.csv'
             with p.open('w',newline='') as f:
                 w=csv.writer(f);w.writerow(header or ['Name','Start Time(us)','Duration(us)','Task Type','Stream ID','Device ID']);w.writerows(rows)
-            return read_csvs([p],list(orders),repeat,split_roles=SPLIT_ROLES if split_roles is None else split_roles)[0]
+            return read_csvs([p],list(orders),repeat,split_roles=SPLIT_ROLES if split_roles is None else split_roles,**kwargs)[0]
     def rows(self):
         return [[TOKENS['split']+'_mix_aic',0,10,'AI_CORE',1,0],
                 [TOKENS['split']+'_mix_aiv',1,11,'AI_VECTOR_CORE',1,0],
@@ -187,6 +187,30 @@ class Metrics(unittest.TestCase):
         parsed = self.parse(rows, ('c0', 'A', 'AB', 'ABC', 'B'))
         self.assertEqual([sample['implementation'] for sample in parsed], ['c0', 'A', 'AB', 'ABC', 'B'])
         self.assertEqual([sample['span_us'] for sample in parsed], [8, 9, 10, 11, 12])
+
+    def test_native_indexer_pairs_with_the_scheduled_plan(self):
+        native = TOKENS['ordered_native']
+        kernels = {'plan:ac': TOKENS['plan'], 'plan:full': 'sparse_kv_plan_joint_kernel_mtp3_full_512'}
+        launches = {'plan_ac': ('plan:ac',), 'ordered_ac': ('ordered_native', 'plan:ac'),
+                    'ordered_full': ('ordered_native', 'plan:full'), 'ordered_native': ('ordered_native',)}
+        order = ('plan_ac', 'ordered_full', 'ordered_native', 'ordered_ac')
+        rows = [
+            [kernels['plan:ac'], 0, 3, 'AI_VECTOR_CORE', 1, 0],
+            [native, 10, 11, 'MIX_AIC', 1, 0],
+            [kernels['plan:full'], 22, 2, 'AI_VECTOR_CORE', 1, 0],
+            [native, 30, 10, 'MIX_AIC', 1, 0],
+            [native, 50, 11, 'MIX_AIC', 1, 0],
+            [kernels['plan:ac'], 62, 4, 'AI_VECTOR_CORE', 1, 0],
+        ]
+        kwargs = dict(split_roles={'ordered_ac', 'ordered_full'}, launches=launches, plan_kernels=kernels)
+        actual = self.parse(rows, order, **kwargs)
+        self.assertEqual([sample['implementation'] for sample in actual], list(order))
+        self.assertEqual([sample['span_us'] for sample in actual], [3, 14, 10, 16])
+        self.assertEqual([sample.get('plan_us') for sample in actual], [None, 2, None, 4])
+        self.assertEqual(actual[-1]['between_kernel_gap_us'], 1)
+        rows[2][0], rows[5][0] = rows[5][0], rows[2][0]
+        with self.assertRaisesRegex(RuntimeError, 'unexpected kernel or order'):
+            self.parse(rows, order, **kwargs)
 
     def test_wrong_order(self):
         with self.assertRaises(RuntimeError):self.parse(self.rows(),orders=('a','split'))

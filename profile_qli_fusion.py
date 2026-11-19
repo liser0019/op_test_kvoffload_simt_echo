@@ -24,15 +24,29 @@ from scripts.prepare_qli_fusion import (FACTORIAL_NAMES,FACTORIALS,FINAL_SORT4,N
 
 ROOT=Path(__file__).resolve().parent
 BASE='joint_rankpipe_ac_512'
-INDEXER_ONLY = {'baseline', 'ordered_native', 'ordered4', 'topk_control4'}
+INDEXER_ONLY = {'baseline', 'ordered_native', 'ordered4', 'topk_control4', 'native_shell'}
 TOPK_ISOLATION = {'ordered4', 'topk_control4'}
 PEER_OPERATORS = {'peer': 'quant_lightning_indexer_ordered_fused', 'peer4': PEER4}
 NATIVE_ABI = {'baseline', 'ordered_native', 'final4'}
 FACTORIAL_ROLES = frozenset(FACTORIAL_NAMES)
+MTP3_NATIVE_OPERATORS = {
+    role: 'quant_lightning_indexer_plan_' + role
+    for role in ('native_shell', 'native_fused', 'native_group', 'native_map')
+}
+MTP3_PLAN_CANDIDATES = {
+    'ac': BASE, 'map': 'joint_mtp3_map_512', 'load': 'joint_mtp3_load_512',
+    'full': 'joint_mtp3_full_512', 'full_load': 'joint_mtp3_full_load_512',
+}
+MTP3_PLAN_ONLY = {'plan_' + k: v for k, v in MTP3_PLAN_CANDIDATES.items()}
+MTP3_CHAIN = {'ordered_' + k: v for k, v in MTP3_PLAN_CANDIDATES.items()}
+MTP3_ROLES = set(MTP3_NATIVE_OPERATORS) | set(MTP3_PLAN_ONLY) | set(MTP3_CHAIN)
+DUMMY_PLAN_ROLES = {'ordered4', 'topk_control4', 'native_shell'}
 
 
 def canonical_indexer(implementations):
     selected=set(implementations)
+    if selected & MTP3_ROLES:
+        return 'ordered_native'
     if 'final4' in selected:
         return 'final4'
     if 'split4' in selected:
@@ -97,11 +111,12 @@ def load_operators(manifest, vendor, implementations):
     operators={};identities={}
     names = {'split' if mode == 0 else 'abc'[mode-1]: name for mode, name in NAMES.items()}
     names.update(FACTORIAL_NAMES)
+    names.update(MTP3_NATIVE_OPERATORS)
     if 'baseline' in implementations or 'final4' in implementations:
         if manifest.get('native_indexer', {}).get('operator') != NATIVE_INDEXER:
             raise RuntimeError('native Indexer missing from build manifest; rebuild the fusion package')
         names['baseline'] = NATIVE_INDEXER
-    if 'ordered_native' in implementations:
+    if 'ordered_native' in implementations or canonical_indexer(implementations)=='ordered_native':
         if manifest.get('native_ordered_indexer', {}).get('operator') != NATIVE_ORDERED:
             raise RuntimeError('independent ordered Indexer missing from build manifest')
         names['ordered_native'] = NATIVE_ORDERED
@@ -255,8 +270,23 @@ def main_run(args,report):
         # Reuse the final4/split4 registrations without handing their TopK
         # output to a Plan. Default final4 still includes the Plan below.
         indexer_only.update({'final4','split4'})
-    split_roles=SPLIT_ROLES.intersection(names).difference(indexer_only)
-    split_reference=next((n for n in ('split4','split','final4') if n in split_roles),None)
+    plan_only = set(MTP3_PLAN_ONLY).intersection(names)
+    ordered_chain = set(MTP3_CHAIN).intersection(names)
+    split_roles = SPLIT_ROLES.intersection(names).difference(indexer_only) | ordered_chain
+    split_reference=next((n for n in ('ordered_ac','split4','split','final4') if n in split_roles),None)
+    plan_names = {n: (MTP3_PLAN_ONLY | MTP3_CHAIN)[n] for n in plan_only | ordered_chain}
+    plan_kernels = {'plan:' + name: common.KERNELS[name]
+                    for name in MTP3_PLAN_CANDIDATES.values() if name in common.KERNELS}
+    launches = None
+    if set(names) & MTP3_ROLES:
+        launches = {}
+        for name in names:
+            if name in ordered_chain:
+                launches[name] = ('ordered_native', 'plan:' + plan_names[name])
+            elif name in plan_only:
+                launches[name] = ('plan:' + plan_names[name],)
+            else:
+                launches[name] = (name,)
     fast_split=bool(split_roles & {'split4','final4'})
     isolate_topk=set(names)==TOPK_ISOLATION
     def prefer_vendor():
@@ -266,7 +296,7 @@ def main_run(args,report):
         return custom
     # Global sitecustomize/backend autoload can prepend fla_npu during imports.
     # Restore this dedicated vendor immediately before and after runtime loading.
-    prefer_vendor();torch,torch_npu,device=common.load_runtime(args,require_plan=bool(split_roles or FACTORIAL_ROLES.intersection(names)));custom=prefer_vendor()
+    prefer_vendor();torch,torch_npu,device=common.load_runtime(args,require_plan=bool(split_roles or plan_only or FACTORIAL_ROLES.intersection(names)));custom=prefer_vendor()
     if Path(custom.split(':')[0]).resolve()!=vendor:
         raise RuntimeError('failed to place dedicated vendor first in ASCEND_CUSTOM_OPP_PATH')
     if not manifest.get('installed_files'):raise RuntimeError('installed package identity missing; rebuild with scripts/build_qli_fusion.sh')
@@ -287,7 +317,7 @@ def main_run(args,report):
         # value, not an inference from a successful Block Num.
         auto_s1=2 if shape.rows<=64 else 4
         def s1_record(role):
-            if role in {'baseline','ordered_native','final4'}:
+            if role in {'baseline','ordered_native','final4'} or role in ordered_chain:
                 return {'kind':'upstream_native','t_size':shape.rows,'s1_base':auto_s1,
                         'formula':'pinned DAV_3510 native kernel halves its four-row tile when tSize <= 64'}
             fixed={'ordered4':4,'split4':4,'peer4':4,'split':2,'a':2,'b':2}
@@ -297,7 +327,7 @@ def main_run(args,report):
             if role=='peer':
                 return {'kind':'upstream_fused_resource_rule','t_size':shape.rows,'s1_base':None,
                         'formula':'tSize_ <= 64 ? 2 : 4, falling back to 2 if UB exceeds the limit'}
-            if role in FACTORIAL_ROLES or role=='c':
+            if role in FACTORIAL_ROLES or role=='c' or role in MTP3_NATIVE_OPERATORS:
                 return {'kind':'generated_host_auto_formula','t_size':shape.rows,'s1_base':auto_s1,
                         'formula':'fusedS1BaseSize_ = tSize_ <= 64 ? 2U : 4U'}
             return {'kind':'upstream','t_size':shape.rows,'s1_base':None,'formula':None}
@@ -316,9 +346,9 @@ def main_run(args,report):
             return operator_kwargs(inputs,bundle,ready,workspace)
         # Canonical ordered TopK is generated on NPU, never precomputed on CPU.
         canonical_role=canonical_indexer(names)
-        if canonical_role=='final4':
+        if canonical_role in NATIVE_ABI:
             target=torch.empty((shape.rows,1,2048),dtype=torch.int32,device=inputs.qli['query'].device)
-            canonical=operators['final4'](**inputs.qli,topk_out=target)
+            canonical=operators[canonical_role](**inputs.qli,topk_out=target)
         else:
             canonical=operators[canonical_role](**kwargs(dummy,dw))
         torch.npu.synchronize()
@@ -350,7 +380,10 @@ def main_run(args,report):
                     inp['topk_indices'].copy_(canonical.reshape(shape.rows,2048))
                     if n in PEER_OPERATORS:
                         inp['block_table']=inputs.plan_metadata['host_block_table']
-                    bundles[n]=common.prepare(torch,case,BASE,inputs=inp) if n in split_roles else prepare_fused(torch,case,inp,peer=n in PEER_OPERATORS,name=n)
+                    if n in split_roles or n in plan_only:
+                        bundles[n] = common.prepare(torch, case, plan_names.get(n,BASE), inputs=inp)
+                    else:
+                        bundles[n] = prepare_fused(torch, case, inp, peer=n in PEER_OPERATORS, name=n)
             extras={};calls={n:0 for n in names};raw={n:[] for n in names}
             for n in names:
                 extras[n]=[torch.npu.Event(enable_timing=True),torch.npu.Event(enable_timing=True)]
@@ -361,20 +394,26 @@ def main_run(args,report):
                 b=bundles.get(n);current.update(implementation=n,phase=phase,call=calls[n]+1)
                 if b is not None:
                     common.restore(torch,b);ready.zero_();torch.npu.synchronize()
-                topk_outputs[n].fill_(-777);torch.npu.synchronize()
+                if n not in plan_only:
+                    topk_outputs[n].fill_(-777)
+                torch.npu.synchronize()
                 start,end=extras[n];host=time.monotonic();start.record()
-                if n in NATIVE_ABI:
-                    kw=inputs.qli
-                elif n in {'ordered4','topk_control4','split4'}:
-                    # The shared registration ABI expects these tensors. The
-                    # generated Indexer has its Plan hook disabled at compile time.
-                    kw=kwargs(dummy,dw)
-                else:
-                    kw=kwargs(b,dw if n=='split' else None)
-                result=operators[n](**kw,topk_out=topk_outputs[n]) if n not in PEER_OPERATORS else operators[n](**kw)
-                if n in split_roles:
-                    # Current stream; no synchronize/D2H between the two kernels.
+                if n in plan_only:
                     common.invoke(b)
+                    result = topk_outputs[n]
+                else:
+                    operator = operators['ordered_native'] if n in ordered_chain else operators[n]
+                    if n in NATIVE_ABI or n in ordered_chain:
+                        kw = inputs.qli
+                    elif n in DUMMY_PLAN_ROLES or n == 'split4':
+                        kw = kwargs(dummy,dw)
+                    else:
+                        kw = kwargs(b,dw if n=='split' else None)
+                    result = (operator(**kw,topk_out=topk_outputs[n])
+                              if n not in PEER_OPERATORS else operator(**kw))
+                    if n in split_roles:
+                        # The current stream orders Plan after the real Indexer output.
+                        common.invoke(b)
                 end.record();end.synchronize();event_us=start.elapsed_time(end)*1000.;host_us=(time.monotonic()-host)*1e6
                 calls[n]+=1
                 indices=result.cpu().numpy().reshape(shape.rows,2048)
@@ -394,16 +433,16 @@ def main_run(args,report):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('split QLI workspace guard changed')
                 for guard in (topk_guards[n][:16],topk_guards[n][-16:]):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('TopK output guard changed')
-                if n in {'ordered4','topk_control4'}:
+                if n in DUMMY_PLAN_ROLES:
                     for key in dummy['host_initial']:
                         if key!='workspace' and not torch.equal(dummy['state'][key], dummy['initial'][key]):
-                            raise RuntimeError('ordered4 modified Plan state: '+key)
-                    result_info.update(s1_base=4)
+                            raise RuntimeError(n+' modified Plan state: '+key)
+                    result_info.update(s1_base=s1_record(n)['s1_base'])
                 elif b is not None:
                     result_info=common.check(case,b)
                     if n in {'split4','final4'} and (result_info['joint_groups']!=shape.batch or result_info['overflow_groups']):
                         raise RuntimeError(f'{n}: expected {shape.batch} joint groups and zero fallback')
-                    if n in FACTORIAL_ROLES and (result_info['joint_groups']!=shape.batch or result_info['overflow_groups']):
+                    if (n in FACTORIAL_ROLES or n in MTP3_ROLES) and (result_info['joint_groups']!=shape.batch or result_info['overflow_groups']):
                         raise RuntimeError(f'{n}: expected {shape.batch} joint groups and zero fallback')
                 return event_us,host_us,result_info
             begin=time.monotonic()
@@ -447,7 +486,7 @@ def main_run(args,report):
                         raise RuntimeError('indexer-only capture contains target Plan kernels: '+repr(plan_hits))
                 pairs,inventory=read_csvs(csvs,orders,args.repeat,
                     json.loads(args.kernel_map.read_text()) if args.kernel_map else None,
-                    split_roles=split_roles)
+                    split_roles=split_roles,launches=launches,plan_kernels=plan_kernels)
                 if isolate_topk:
                     launch_shapes={(z['block_num'],z['mix_block_num']) for p in pairs for z in p['components']}
                     if len(launch_shapes)!=1 or any(v is None or not v.isdecimal() for v in next(iter(launch_shapes))):
@@ -574,6 +613,9 @@ def main_run(args,report):
     if fast_split:
         lines+=['final4沿用原始Indexer tiling，在输出前只对选中的2048个token位置排序，再下发独立rankpipe AC。',
                 'split4是固定S1Base=4的同事保序Indexer，接同一个独立Plan。两路使用同一份初始状态和严格TopK验证。']
+    if set(names) & MTP3_ROLES:
+        lines+=['ordered_ac 和其他 ordered_* 路径在同一 stream 上连续下发原生保序 Indexer 和独立 Plan。',
+                'plan_* 只执行独立 Plan，读取同一工况的原生 ordered 输出。native_* 来自原生 ordered 的融合接入。']
     if args.indexer_only:
         lines+=['三路均以 --indexer-only 运行。ordered4 的融合 ABI 仍接收用于正确性检查的占位参数。',
                 'ordered_native 是 pinned 上游真正独立 QuantLightningIndexerOrdered；ordered4 是与 split4 同 kernel 的关闭 Plan hook 单跑；final4 是原始 Indexer tiling 加末尾位置排序的单跑。']
@@ -682,7 +724,7 @@ def main():
     p.add_argument('--output',type=Path,required=True);p.add_argument('--requests',type=int,default=32)
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7]);p.add_argument('--contexts',nargs='+',type=int,default=[262144])
     p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
-    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered_native','ordered4','topk_control4','split','split4','final4','a','b','c','c0','A','B','C','AB','AC','BC','ABC','peer','peer4'),
+    p.add_argument('--implementations',nargs='+',choices=('baseline','ordered_native','ordered4','topk_control4','split','split4','final4','a','b','c','c0','A','B','C','AB','AC','BC','ABC','peer','peer4',*sorted(MTP3_ROLES)),
                    default=['split','a','b','c'],
                    help='baseline: upstream Indexer gate; ordered_native: true independent ordered Indexer; ordered4: generated split4 Indexer only')
     p.add_argument('--indexer-only',action='store_true',
@@ -694,6 +736,8 @@ def main():
     if args.gate_only:
         args.implementations=[n for n in args.implementations if n not in INDEXER_ONLY | SPLIT_ROLES | set(PEER_OPERATORS)]
         if args.scenarios!=['cold_reset']:p.error('--gate-only requires --scenarios cold_reset')
+        if set(args.implementations) & (set(MTP3_PLAN_ONLY) | set(MTP3_CHAIN)):
+            p.error('use a short profiling run for independent MTP3 Plan candidates')
     if args.requests<1 or args.repeat<1 or args.regression_repeat<1 or args.warmup<0 or any(x<(8 if args.gate_only else 2048) for x in args.contexts):p.error('invalid sizes/counts')
     implementations=set(args.implementations)
     if not implementations or len(implementations)!=len(args.implementations):
@@ -701,7 +745,12 @@ def main():
     effective_split_roles=SPLIT_ROLES - ({'split4','final4'} if args.indexer_only else set())
     if (args.indexer_only and not implementations <= INDEXER_ONLY | {'split4','final4'}):
         p.error('--indexer-only accepts Indexer roles only')
-    if not args.gate_only and not implementations.intersection(effective_split_roles) and implementations not in ({'baseline'},TOPK_ISOLATION) and not implementations.intersection(PEER_OPERATORS) and not implementations.intersection(FACTORIAL_ROLES) and not implementations.intersection(INDEXER_ONLY):
+    if implementations & MTP3_ROLES:
+        if not implementations <= MTP3_ROLES | {'ordered_native'}:
+            p.error('the native ordered matrix accepts ordered_native and MTP3 experiment roles')
+        if set(args.mtp)!={3}:
+            p.error('the native ordered experiment uses MTP3')
+    if not args.gate_only and not implementations.intersection(MTP3_ROLES) and not implementations.intersection(effective_split_roles) and implementations not in ({'baseline'},TOPK_ISOLATION) and not implementations.intersection(PEER_OPERATORS) and not implementations.intersection(FACTORIAL_ROLES) and not implementations.intersection(INDEXER_ONLY):
         p.error('performance requires a split Plan, fused factorial/peer, baseline, ordered Indexer, or TopK isolation')
     if 'c' in implementations and 'c0' in implementations:
         p.error('c and c0 are the same operator identity and cannot be profiled together')

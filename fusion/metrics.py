@@ -16,6 +16,10 @@ TOKENS={'split':'quant_lightning_indexer_plan_split','a':'quant_lightning_indexe
         'peer4':'quant_lightning_indexer_plan_peer4',
         'ordered_native':'quant_lightning_indexer_ordered',
         'ordered4':'quant_lightning_indexer_plan_split4',
+        'native_shell':'quant_lightning_indexer_plan_native_shell',
+        'native_fused':'quant_lightning_indexer_plan_native_fused',
+        'native_group':'quant_lightning_indexer_plan_native_group',
+        'native_map':'quant_lightning_indexer_plan_native_map',
         'final4':'quant_lightning_indexer_plan_final4',
         'topk_control4':'quant_lightning_indexer_plan_topk_control4',
         'baseline':'quant_lightning_indexer',
@@ -63,9 +67,44 @@ def public_component(record):
             'duration_us':float(record['duration_us'])}
 
 
-def read_csvs(paths,orders,repeat,exact=None,split_roles=SPLIT_ROLES):
+def assign_implementation_roles(records, orders, launches):
+    """Disambiguate a common native Indexer by its scheduled Plan partner."""
+    expected = Counter(kernel for implementation in orders for kernel in launches[implementation])
+    schema = {}
+    for kernel, count in expected.items():
+        seen = Counter((r['kernel'], r['task']) for r in records if r['role'] == kernel)
+        if not seen or any(n != count for n in seen.values()):
+            raise RuntimeError(f'{kernel}: expected {count} launches per component, found {seen}')
+        schema[kernel] = len(seen)
+    position = 0
+    for implementation in orders:
+        kernels = launches[implementation]
+        for index, kernel in enumerate(kernels):
+            end = position + schema[kernel]
+            group = records[position:end]
+            signatures = {(r['kernel'], r['task']) for r in group}
+            if len(group) != schema[kernel] or len(signatures) != len(group) or any(
+                    r['role'] != kernel for r in group):
+                raise RuntimeError(f'{implementation}: unexpected kernel or order at row {position}')
+            for record in group:
+                record['implementation'] = implementation
+                record['role'] = implementation if index == 0 else 'plan'
+            position = end
+    if position != len(records):
+        raise RuntimeError('unconsumed ordered chain records')
+
+
+def read_csvs(paths,orders,repeat,exact=None,split_roles=SPLIT_ROLES,*,launches=None,plan_kernels=None):
     records=[];inventory=set();expected=Counter(orders)
     if any(v!=repeat for v in expected.values()):raise ValueError('invocation schedule/count mismatch')
+    patterns = KERNEL_PATTERNS
+    expected_kernels = expected
+    if launches is not None:
+        if set(launches) != set(expected):
+            raise ValueError('invalid ordered chain roles')
+        expected_kernels = {kernel for launch in launches.values() for kernel in launch}
+        patterns = {role:pattern for role,pattern in KERNEL_PATTERNS.items() if role != 'plan'}
+        patterns.update({role:kernel_pattern(role, name) for role,name in plan_kernels.items()})
     for path in paths:
         with open(path,encoding='utf-8-sig',newline='') as f:
             reader=csv.DictReader(f)
@@ -76,7 +115,7 @@ def read_csvs(paths,orders,repeat,exact=None,split_roles=SPLIT_ROLES):
             for row in reader:
                 name=row[nk];inventory.add(name)
                 hits=[]
-                for role,pattern in KERNEL_PATTERNS.items():
+                for role,pattern in patterns.items():
                     if exact:
                         key='split4' if role=='ordered4' and 'split4' in expected else role
                         match=name in exact.get(key,exact.get(role,[]))
@@ -93,7 +132,7 @@ def read_csvs(paths,orders,repeat,exact=None,split_roles=SPLIT_ROLES):
                 role=hits[0]
                 if role=='ordered4' and 'split4' in expected:
                     role='split4'
-                if role!='plan' and role not in expected:
+                if role not in expected_kernels and (role!='plan' or launches is not None):
                     raise RuntimeError('unexpected target implementation: '+role)
                 try:
                     start,duration=Decimal(row[sk]),Decimal(row[dk])
@@ -116,24 +155,27 @@ def read_csvs(paths,orders,repeat,exact=None,split_roles=SPLIT_ROLES):
     for key in ('stream','device'):
         if len({r[key] for r in records if r[key] is not None})>1:raise RuntimeError('mixed target '+key)
     records.sort(key=lambda r:r['start_us'])
-    # Every split invocation launches the same Plan. Pair it with the preceding
-    # Indexer on this stream before counting components by implementation.
-    pending=None
-    for record in records:
-        role=record['role']
-        if role=='plan':
-            if pending is None:
-                raise RuntimeError('Plan has no preceding split Indexer')
-            record['implementation']=pending
-            pending=None
-        elif role in split_roles:
-            if pending is not None and pending!=role:
-                raise RuntimeError('split Indexer changed before Plan was recorded')
-            pending=role
-        elif pending is not None:
-            raise RuntimeError('split Plan missing before next implementation')
-    if pending is not None:
-        raise RuntimeError('independent Plan missing at end of sampling')
+    if launches is not None:
+        assign_implementation_roles(records, orders, launches)
+    else:
+        # Every split invocation launches the same Plan. Pair it with the preceding
+        # Indexer on this stream before counting components by implementation.
+        pending=None
+        for record in records:
+            role=record['role']
+            if role=='plan':
+                if pending is None:
+                    raise RuntimeError('Plan has no preceding split Indexer')
+                record['implementation']=pending
+                pending=None
+            elif role in split_roles:
+                if pending is not None and pending!=role:
+                    raise RuntimeError('split Indexer changed before Plan was recorded')
+                pending=role
+            elif pending is not None:
+                raise RuntimeError('split Plan missing before next implementation')
+        if pending is not None:
+            raise RuntimeError('independent Plan missing at end of sampling')
     schema={}
     for impl in expected:
         counts=Counter((r['role'],r['kernel'],r['task']) for r in records if r['implementation']==impl)
