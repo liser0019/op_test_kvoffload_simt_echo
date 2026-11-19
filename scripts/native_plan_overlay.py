@@ -228,7 +228,7 @@ def patch_kernel(dest: Path, camel: str, enabled: bool) -> None:
     path.write_text(code)
 
 
-def patch_vector(dest: Path, enabled: bool, grouped: bool = False) -> None:
+def patch_vector(dest: Path, enabled: bool, grouped: bool = False, paired: bool = False) -> None:
     path = dest / 'op_kernel/arch35/quant_lightning_indexer_service_vector_arch35.h'
     code = path.read_text()
     code = replace(
@@ -394,23 +394,33 @@ __aicore__ inline void QLIVector<QLIT>::ProcessInvalidRow(int64_t row, int64_t o
     else:
         # Publish after the complete AIV-local row group. The last row remains in
         # indicesOutLocal_; RunGroup reads the sibling row from visible GM.
+        publish = '''        SetFlag<HardEvent::MTE3_V>(TOPK_MTE3_V_EVENT);
+    }
+    if (planHook_ != nullptr && qliCurAivS1ProcNum > 0) {
+        // qliCurAivS1Idx already includes the tile's qliCurS1Idx.
+        const int64_t firstRow = info.indiceOutOffset / topkCount_ + qliCurAivS1Idx;
+        const int64_t lastRow = firstRow + qliCurAivS1ProcNum - 1;
+@PAIR@
+        planHook_->PublishRows(firstRow, qliCurAivS1ProcNum, planRows_, planStorage_,
+                               reinterpret_cast<__ubuf__ int32_t *>(indicesOutLocal_.GetPhyAddr()), lastRow);
+    }
+}
+} // namespace QLIKernel'''
+        paired_publish = '''        // The paired AIVs process the same complete S1 tile, two rows each.
+        if (!constInfo_.isLDOpen && s1BaseSize_ == 4 && qliCurS1ProcNum == 4 &&
+            planHook_->TryPublishPair(firstRow - (blockId_ % 2U) * 2,
+                                      (blockId_ & 1U) != 0U, planRows_, planStorage_,
+                                      reinterpret_cast<__ubuf__ int32_t *>(indicesOutLocal_.GetPhyAddr()), lastRow)) {
+            return;
+        }
+'''
         code = replace(
             code,
             '''        SetFlag<HardEvent::MTE3_V>(TOPK_MTE3_V_EVENT);
     }
 }
 } // namespace QLIKernel''',
-            '''        SetFlag<HardEvent::MTE3_V>(TOPK_MTE3_V_EVENT);
-    }
-    if (planHook_ != nullptr && qliCurAivS1ProcNum > 0) {
-        // qliCurAivS1Idx already includes the tile's qliCurS1Idx.
-        const int64_t firstRow = info.indiceOutOffset / topkCount_ + qliCurAivS1Idx;
-        const int64_t lastRow = firstRow + qliCurAivS1ProcNum - 1;
-        planHook_->PublishRows(firstRow, qliCurAivS1ProcNum, planRows_, planStorage_,
-                               reinterpret_cast<__ubuf__ int32_t *>(indicesOutLocal_.GetPhyAddr()), lastRow);
-    }
-}
-} // namespace QLIKernel''',
+            replace(publish, '@PAIR@\n', paired_publish if paired else ''),
         )
     path.write_text(code)
 
@@ -535,12 +545,67 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(QLI_PUBLICATION_THREADS) inline void Publish
     path.write_text(code)
 
 
-def patch_tiling(dest: Path) -> None:
+def patch_pair_hook(dest: Path) -> None:
+    path = dest / 'op_kernel/quant_lightning_indexer_fused_hook.h'
+    code = path.read_text()
+    method = '''    __aicore__ inline bool TryPublishPair(int64_t first, bool owner, int64_t rows,
+                                         AscendC::LocalTensor<int32_t> storage,
+                                         __ubuf__ int32_t *localTopk, int64_t localRow)
+    {
+        if (tiling_.jointHashCapacity == 0U || buffers_.activeRows == nullptr || buffers_.tokenToReq == nullptr) {
+            return false;
+        }
+        AscendC::GlobalTensor<int32_t> active;
+        active.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(buffers_.activeRows));
+        const int64_t activeCount = active.GetValue(0);
+        rows = rows < tiling_.maxRows ? rows : tiling_.maxRows;
+        rows = rows < activeCount ? rows : activeCount;
+        const int64_t end = first + 4;
+        if (first < 0 || end > rows) return false;
+
+        // Both AIVs use the same tile bounds and immutable Plan metadata.
+        // A partial, split, or adjacent run with the same request must use GM publication.
+        AscendC::GlobalTensor<int32_t> requests;
+        requests.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(buffers_.tokenToReq));
+        const int32_t request = requests.GetValue(first);
+        if ((first > 0 && requests.GetValue(first - 1) == request) ||
+            requests.GetValue(first + 1) != request || requests.GetValue(first + 2) != request ||
+            requests.GetValue(first + 3) != request || (end < rows && requests.GetValue(end) == request)) {
+            return false;
+        }
+
+        // Mode 1 is local to the two AIVs of this AI Core. Each AIV publishes
+        // after its two TopK MTE3 writes and consumes exactly one flag.
+        // The odd AIV owns Plan and still has its final TopK row in UB.
+        constexpr uint16_t pairReadyFlag = 8U;
+        AscendC::CrossCoreSetFlag<1, PIPE_MTE3>(pairReadyFlag);
+        AscendC::CrossCoreWaitFlag<1, PIPE_MTE3>(pairReadyFlag);
+        if (owner) {
+            auto ready = pipe_->AllocEventID<AscendC::HardEvent::MTE3_S>();
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(ready);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(ready);
+            pipe_->ReleaseEventID<AscendC::HardEvent::MTE3_S>(ready);
+            qli_fused_plan::RunGroup(buffers_, tiling_, first, end, rows, *pipe_, storage, localTopk, localRow);
+            auto finished = pipe_->AllocEventID<AscendC::HardEvent::V_S>();
+            AscendC::SetFlag<AscendC::HardEvent::V_S>(finished);
+            AscendC::WaitFlag<AscendC::HardEvent::V_S>(finished);
+            pipe_->ReleaseEventID<AscendC::HardEvent::V_S>(finished);
+        }
+        return true;
+    }
+
+'''
+    marker = '\nprivate:\n    qli_fused_plan::Buffers buffers_{};'
+    path.write_text(replace(code, marker, '\n' + method + marker))
+
+
+def patch_tiling(dest: Path, fixed_four: bool = False) -> None:
     path = dest / 'op_host' / f'{dest.name}_tiling.cpp'
     code = path.read_text()
     code = replace(
         code,
         'fusedS1BaseSize_ = tSize_ <= 64 ? 2U : 4U;',
+        'fusedS1BaseSize_ = 4U;  // four-query affinity experiment' if fixed_four else
         'fusedS1BaseSize_ = tSize_ <= 64 ? 2U : 4U;  // pinned standalone Ordered rule',
     )
     marker = '    if (resources.total > qli_fused_host::kUbLimitBytes) {'

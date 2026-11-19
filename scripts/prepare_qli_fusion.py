@@ -27,6 +27,9 @@ PEER4='quant_lightning_indexer_plan_peer4'
 NATIVE_SHELL='quant_lightning_indexer_plan_native_shell'
 NATIVE_FUSED='quant_lightning_indexer_plan_native_fused'
 NATIVE_GROUP='quant_lightning_indexer_plan_native_group'
+NATIVE_GROUP4='quant_lightning_indexer_plan_native_group4'
+NATIVE_PAIR4='quant_lightning_indexer_plan_native_pair4'
+NATIVE_FIXED_FOUR={NATIVE_GROUP4,NATIVE_PAIR4}
 NATIVE_SOURCE=f'attention/{NATIVE_INDEXER}'
 NATIVE_BINDING=ROOT/'fusion/native_indexer_binding'
 NAMES={0:'quant_lightning_indexer_plan_split',1:'quant_lightning_indexer_plan_a',
@@ -54,6 +57,8 @@ NATIVE_PLAN_VARIANTS=(
     (NATIVE_SHELL,'NativeShell',False),
     (NATIVE_FUSED,'NativeFused',True),
     (NATIVE_GROUP,'NativeGroup',True),
+    (NATIVE_GROUP4,'NativeGroup4',True),
+    (NATIVE_PAIR4,'NativePair4',True),
 )
 
 def source_id():
@@ -230,15 +235,19 @@ def install_native_plan_variant(repo,name,camel,enabled):
     native_plan_overlay.write_provenance(
         dest,COMMIT,NATIVE_ORDERED_TREE,SOURCE,f'attention/{NATIVE_ORDERED}')
 
-    grouped=name==NATIVE_GROUP
+    fixed_four=name in NATIVE_FIXED_FOUR
+    paired=name==NATIVE_PAIR4
+    grouped=name==NATIVE_GROUP or fixed_four
     native_plan_overlay.patch_entry(dest,enabled)
     native_plan_overlay.patch_kernel(dest,camel,enabled)
-    native_plan_overlay.patch_vector(dest,enabled,grouped=grouped)
+    native_plan_overlay.patch_vector(dest,enabled,grouped=grouped,paired=paired)
     overlay(dest,3 if enabled else 0,camel,None,
             final_sort=False,vector_reuse=False,hot_ub_map=False)
-    native_plan_overlay.patch_tiling(dest)
+    native_plan_overlay.patch_tiling(dest,fixed_four=fixed_four)
     if grouped:
         native_plan_overlay.patch_group_hook(dest)
+    if paired:
+        native_plan_overlay.patch_pair_hook(dest)
     if not enabled:
         native_plan_overlay.patch_shell_workspace(dest)
 
@@ -553,6 +562,8 @@ def main():
                   'plan':'rankpipe_ac','plan_storage':3,'topk':2048,
                   'tiling_rule':'rows<=64:2 else:4',
                   'roles':{camel:{'operator':name,'plan_enabled':enabled,
+                                   'fixed_s1_base':4 if name in NATIVE_FIXED_FOUR else None,
+                                   'local_aiv_pair':name==NATIVE_PAIR4,
                                    'device_source':f'attention/{NATIVE_ORDERED}'}
                            for name,camel,enabled in NATIVE_PLAN_VARIANTS},
                   'ordered_topk_sha256':sha(repo/'attention'/NATIVE_ORDERED/ORDERED_TOPK_HEADER)},

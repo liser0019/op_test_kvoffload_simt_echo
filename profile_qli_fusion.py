@@ -19,8 +19,8 @@ from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
 from fusion.metrics import KERNEL_PATTERNS,read_csvs,SPLIT_ROLES,TIMING_ARITHMETIC
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
 from scripts.prepare_qli_fusion import (FACTORIAL_NAMES,FACTORIALS,FINAL_SORT4,NAMES,
-                                        NATIVE_FUSED,NATIVE_GROUP,NATIVE_INDEXER,NATIVE_ORDERED,
-                                        NATIVE_SHELL,ORDERED4,PEER4,
+                                        NATIVE_FUSED,NATIVE_GROUP,NATIVE_GROUP4,NATIVE_INDEXER,
+                                        NATIVE_ORDERED,NATIVE_PAIR4,NATIVE_SHELL,ORDERED4,PEER4,
                                         TOPK_CONTROL4,source_id)
 
 ROOT=Path(__file__).resolve().parent
@@ -32,6 +32,7 @@ NATIVE_ABI = {'baseline', 'ordered_native', 'final4'}
 FACTORIAL_ROLES = frozenset(FACTORIAL_NAMES)
 MTP3_NATIVE_OPERATORS = {
     'native_shell': NATIVE_SHELL, 'native_fused': NATIVE_FUSED, 'native_group': NATIVE_GROUP,
+    'native_group4': NATIVE_GROUP4, 'native_pair4': NATIVE_PAIR4,
 }
 MTP3_PLAN_CANDIDATES = {
     'ac': BASE, 'map': 'joint_mtp3_map_512', 'load': 'joint_mtp3_load_512',
@@ -320,7 +321,8 @@ def main_run(args,report):
             if role in {'baseline','ordered_native','final4'} or role in ordered_chain:
                 return {'kind':'upstream_native','t_size':shape.rows,'s1_base':auto_s1,
                         'formula':'pinned DAV_3510 native kernel halves its four-row tile when tSize <= 64'}
-            fixed={'ordered4':4,'split4':4,'peer4':4,'split':2,'a':2,'b':2}
+            fixed={'ordered4':4,'split4':4,'peer4':4,'split':2,'a':2,'b':2,
+                   'native_group4':4,'native_pair4':4}
             if role in fixed:
                 return {'kind':'fixed_host_rule','t_size':shape.rows,'s1_base':fixed[role],
                         'formula':f'fusedS1BaseSize_={fixed[role]}U'}
