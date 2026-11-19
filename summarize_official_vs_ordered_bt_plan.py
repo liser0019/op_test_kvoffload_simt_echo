@@ -35,8 +35,15 @@ for batch in BATCHES:
         target = stats[TARGET]
         checks = target["checks"]
         assert checks["joint_groups"] == batch and checks["overflow_groups"] == 0
-        hit = case["input"].get("initial_hit_fraction_per_row", [])
-        assert len(hit) == batch * 4 and min(hit) == 0.9 and max(hit) == 0.9
+        hit_positions = case["input"].get("initial_hit_positions_per_row", [])
+        hit_fractions = case["input"].get("initial_hit_fraction_per_row", [])
+        expected_hit_positions = case["input"]["topk"] * 90 // 100
+        expected_hit_fraction = expected_hit_positions / case["input"]["topk"]
+        assert len(hit_positions) == batch * 4
+        assert all(value == expected_hit_positions for value in hit_positions)
+        assert len(hit_fractions) == batch * 4
+        assert all(math.isclose(value, expected_hit_fraction, rel_tol=0, abs_tol=1e-12)
+                   for value in hit_fractions)
         pair = case["official_vs_ordered_bt_plan_p50"]
         rows.append({
             "batch": batch,
