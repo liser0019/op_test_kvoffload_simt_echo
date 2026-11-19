@@ -109,3 +109,9 @@ NPU5 正式复测完成，每路每工况 5 个样本。`native_pair_scale_l2` �
 | vector1 | 659.182 | 77.71% | 81.69% | 14.91% | 41.83% | 58.79% | 26.48% | 3.145 GB/s | 1.860 GB/s |
 
 同一 Core 的 AIV duration 差中位为 36.62 μs，P95 为 38.62 μs。vector1 是原来所有请求组的 Plan owner，其额外尾部与 Plan 单路执行特征一致。vector0 的 Vector wait 反而更高，说明把部分 Plan 工作移到该侧有机会填充等待窗口。后续平衡 owner 候选据此生成，并保守地按逻辑 AI Core 交替分配，保证同一 Core 两侧作出相同选择。
+
+### 两项后续实验
+
+`native_pair_balanced` 尝试按逻辑 AI Core 交替选择 Plan owner。短门禁中，odd owner 的 scale 对照正常，balanced 候选执行后 `miss_count` 仍保持调用前的哨兵值，表示该编译路径没有启动 Plan。该候选未进入性能采集，也未证明底层硬件禁止 even AIV 执行 Plan；结论只限于当前源码、UB 参数和编译结构，因此不保留为可用版本。
+
+`native_pair_l2_reuse` 在 QLI Vector 输入缓冲与 TopK/Plan arena 之间做分阶段复用，并沿用 scaled L2 设置。batch17 门禁覆盖 8/2048/8192，连续两次通过，四行组均由硬件交接证明。batch17/32、100K/256K 的正式对照中，P50 相对不复用版本全部变慢：100K 为 1.03%～1.86%，256K 为 1.23%～1.58%。该方向被数据否决，不进入主路径。
