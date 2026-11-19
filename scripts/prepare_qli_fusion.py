@@ -333,9 +333,13 @@ def overlay(folder,mode,suffix,s1_base,*,final_sort=False,vector_reuse=False,hot
         s=replace(s,'using OrderedFusedPlan = OrderedFusedPlanHook<true>;','using OrderedFusedPlan = OrderedFusedPlanHook<false>;')
     else:
         # Publication is at the arena tail, outside QLI Vector-only values. Its
-        # result is read before RunGroup starts using the entire arena.
-        s=replace(s,'reinterpret_cast<__ubuf__ int64_t *>(storage.GetPhyAddr())',
-            'reinterpret_cast<__ubuf__ int64_t *>(storage.GetPhyAddr()) + (tiling_.localMemoryBytes-32U)/sizeof(int64_t)')
+        # result is read before RunGroup starts using the entire arena. Grouped
+        # publication adds a second, independent call site with the same rule.
+        publication='reinterpret_cast<__ubuf__ int64_t *>(storage.GetPhyAddr())'
+        if publication not in s:
+            raise RuntimeError('publication arena anchor changed')
+        s=s.replace(publication,
+            publication+' + (tiling_.localMemoryBytes-32U)/sizeof(int64_t)')
     hook.write_text(s)
     # Host and torch use the same resource formulas as the device.
     resource=f'#define QLI_PLAN_STORAGE {mode}\n'+(ROOT/'csrc/qli_fusion/resources.h').read_text()
