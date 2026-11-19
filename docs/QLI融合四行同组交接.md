@@ -103,7 +103,7 @@ NPU5 正式复测完成，每路每工况 5 个样本。`native_pair_scale_l2` �
 
 32 对 AIV 的中位指标如下。时间单位 μs，比例为 profiler 给出的 active-cycle 占比，不能直接换算成某个源码阶段的耗时。
 
-| AIV | duration | Vector busy | Scalar busy | MTE2 busy | MTE3 busy | Vector wait | L2 load conflict | GM read BW | GM write BW |
+| AIV | duration | Vector busy | Scalar busy | MTE2 busy | MTE3 busy | Vector wait | Vec load-use conflict | GM read BW | GM write BW |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | vector0 | 622.342 | 77.06% | 81.41% | 22.37% | 44.10% | 91.79% | 28.05% | 3.002 GB/s | 1.499 GB/s |
 | vector1 | 659.182 | 77.71% | 81.69% | 14.91% | 41.83% | 58.79% | 26.48% | 3.145 GB/s | 1.860 GB/s |
