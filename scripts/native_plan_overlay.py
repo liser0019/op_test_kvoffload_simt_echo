@@ -678,6 +678,18 @@ def patch_arena_drain(dest: Path) -> None:
     path.write_text(code)
 
 
+def patch_noinline_plan(dest: Path) -> None:
+    """Keep the Plan orchestrator out of the QLI hot function footprint."""
+    path = dest / 'op_kernel/plan/plan.h'
+    code = path.read_text()
+    code = replace(
+        code,
+        '__aicore__ inline void RunFusionGroupImpl',
+        'static __attribute__((noinline)) __aicore__ void RunFusionGroupImpl',
+    )
+    path.write_text(code)
+
+
 def patch_tiling(dest: Path, fixed_four: bool = False) -> None:
     path = dest / 'op_host' / f'{dest.name}_tiling.cpp'
     code = path.read_text()
