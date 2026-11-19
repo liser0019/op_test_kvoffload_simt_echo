@@ -685,7 +685,7 @@ def patch_noinline_plan(dest: Path) -> None:
     code = replace(
         code,
         '__aicore__ inline void RunFusionGroupImpl',
-        'static __attribute__((noinline)) __aicore__ void RunFusionGroupImpl',
+        '__aicore__ inline __attribute__((noinline)) void RunFusionGroupImpl',
     )
     path.write_text(code)
 
