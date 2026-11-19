@@ -506,7 +506,7 @@
     "checks/check_ab8k_context.py": "3a12e591f933adc263172937eaef4a843cd8b8d1d072aa338f6aeb0c91d3246b",
     "profile_ab8k_context.py": "7f739cd2f94c94f8c46aea2e8694bd5e01d17c97e8d69c345a7574b5b16e26af",
     "scripts/test_ab8k_context.sh": "9edd9c879d1bc4d0e94622cbdc88d2faafe3d2df9d73d4a7d3674bb770ae7768",
-    "checks/check_mtp3_candidates.py": "275feeddb1ce23bada569cd4ca736fd87c43393ba09e0209c3d522a3682b6a6d",
+    "checks/check_mtp3_candidates.py": "b3ecc76cd31993116ed7500d26afdba006bbd6a8dab6df1f8ecac0a7c6e69372",
     "checks/check_mtp3_npu.py": "2762f97291b07a1b84c8f4f72a4de80d6f6d630f6a017d24d936e5add57967a3",
     "scripts/test_mtp3_candidates.sh": "0340dd7288485b5fbb20bca257f34ef430fc9bd87dfc93daae67fb1ce97f4d3a"
   },
