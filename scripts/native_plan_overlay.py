@@ -436,7 +436,7 @@ __aicore__ inline void QLIVector<QLIT>::ProcessInvalidRow(int64_t row, int64_t o
     }
 }
 } // namespace QLIKernel'''
-        four_owner = ('(((firstRow - (blockId_ % 2U) * 2) >> 2) & 1LL) != 0LL'
+        four_owner = ('((blockId_ >> 1U) & 1U) != 0U'
                       if balance_four_owner else '(blockId_ & 1U) != 0U')
         paired_publish = f'''        // The paired AIVs process the same complete S1 tile, two rows each.
         if (!constInfo_.isLDOpen && s1BaseSize_ == 4 && qliCurS1ProcNum == 4 &&
