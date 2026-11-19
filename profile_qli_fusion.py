@@ -20,7 +20,7 @@ from fusion.metrics import KERNEL_PATTERNS,read_csvs,SPLIT_ROLES,TIMING_ARITHMET
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
 from scripts.prepare_qli_fusion import (FACTORIAL_NAMES,FACTORIALS,FINAL_SORT4,NAMES,
                                         NATIVE_FUSED,NATIVE_GROUP,NATIVE_GROUP4,NATIVE_INDEXER,
-                                        NATIVE_ORDERED,NATIVE_PAIR4,NATIVE_SHELL,ORDERED4,PEER4,
+                                        NATIVE_ORDERED,NATIVE_PAIR4,NATIVE_PAIR_AUTO,NATIVE_SHELL,ORDERED4,PEER4,
                                         TOPK_CONTROL4,source_id)
 
 ROOT=Path(__file__).resolve().parent
@@ -33,7 +33,9 @@ FACTORIAL_ROLES = frozenset(FACTORIAL_NAMES)
 MTP3_NATIVE_OPERATORS = {
     'native_shell': NATIVE_SHELL, 'native_fused': NATIVE_FUSED, 'native_group': NATIVE_GROUP,
     'native_group4': NATIVE_GROUP4, 'native_pair4': NATIVE_PAIR4,
+    'native_pair_auto': NATIVE_PAIR_AUTO,
 }
+FOUR_ROW_PAIR_ROLES = {'native_pair4', 'native_pair_auto'}
 MTP3_PLAN_CANDIDATES = {
     'ac': BASE, 'map': 'joint_mtp3_map_512', 'load': 'joint_mtp3_load_512',
     'full': 'joint_mtp3_full_512', 'full_load': 'joint_mtp3_full_load_512',
@@ -397,7 +399,7 @@ def main_run(args,report):
                 # In the pair-only gate, GM election cannot win from a count
                 # of 16. A correct Plan result with untouched counts proves
                 # the local handoff ran for every group in this fixture.
-                ready_initial=16 if args.prove_pair and n=='native_pair4' else 0
+                ready_initial=16 if args.prove_pair and n in FOUR_ROW_PAIR_ROLES else 0
                 if b is not None:
                     common.restore(torch,b);ready.fill_(ready_initial);torch.npu.synchronize()
                 if n not in plan_only:
@@ -744,7 +746,7 @@ def main():
     p.add_argument('--warmup',type=int,default=2);p.add_argument('--repeat',type=int,default=5);p.add_argument('--regression-repeat',type=int,default=1)
     p.add_argument('--seed',type=int,default=2026);p.add_argument('--kernel-map',type=Path)
     p.add_argument('--gate-only',action='store_true',help='只验证融合A/B/C，可测短序列尾部-1；不运行独立Plan或生成性能数字')
-    p.add_argument('--prove-pair',action='store_true',help='只在门禁中污染 native_pair4 的 GM 计数，验证完整四行组确实使用同组 AIV 交接')
+    p.add_argument('--prove-pair',action='store_true',help='只在门禁中污染硬件交接实现的 GM 计数，验证完整四行组确实使用同组 AIV 交接')
     args=p.parse_args()
     if args.gate_only:
         args.implementations=[n for n in args.implementations if n not in INDEXER_ONLY | SPLIT_ROLES | set(PEER_OPERATORS)]
@@ -753,8 +755,10 @@ def main():
             p.error('use a short profiling run for independent MTP3 Plan candidates')
     if args.requests<1 or args.repeat<1 or args.regression_repeat<1 or args.warmup<0 or any(x<(8 if args.gate_only else 2048) for x in args.contexts):p.error('invalid sizes/counts')
     implementations=set(args.implementations)
-    if args.prove_pair and (not args.gate_only or 'native_pair4' not in implementations):
-        p.error('--prove-pair requires --gate-only and native_pair4')
+    if args.prove_pair and (not args.gate_only or not implementations & FOUR_ROW_PAIR_ROLES):
+        p.error('--prove-pair requires --gate-only and a hardware pair implementation')
+    if args.prove_pair and 'native_pair_auto' in implementations and args.requests<=16:
+        p.error('--prove-pair requires a four-row tile; native_pair_auto needs at least 17 requests')
     if not implementations or len(implementations)!=len(args.implementations):
         p.error('implementations must be nonempty and unique')
     effective_split_roles=SPLIT_ROLES - ({'split4','final4'} if args.indexer_only else set())

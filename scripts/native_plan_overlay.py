@@ -245,7 +245,8 @@ def patch_kernel(dest: Path, camel: str, enabled: bool, fixed_four: bool = False
     path.write_text(code)
 
 
-def patch_vector(dest: Path, enabled: bool, grouped: bool = False, paired: bool = False) -> None:
+def patch_vector(dest: Path, enabled: bool, grouped: bool = False, paired: bool = False,
+                 pair_two_rows: bool = False) -> None:
     path = dest / 'op_kernel/arch35/quant_lightning_indexer_service_vector_arch35.h'
     code = path.read_text()
     code = replace(
@@ -431,6 +432,15 @@ __aicore__ inline void QLIVector<QLIT>::ProcessInvalidRow(int64_t row, int64_t o
             return;
         }
 '''
+        if pair_two_rows:
+            paired_publish += '''        // With a complete two-row tile, both AIVs arrive with one row.
+        if (!constInfo_.isLDOpen && s1BaseSize_ == 2 && qliCurS1ProcNum == 2) {
+            const bool owner = (blockId_ & 1U) != 0U;
+            planHook_->PublishPairRows(firstRow - static_cast<int64_t>(owner), owner, planRows_, planStorage_,
+                                        reinterpret_cast<__ubuf__ int32_t *>(indicesOutLocal_.GetPhyAddr()), lastRow);
+            return;
+        }
+'''
         code = replace(
             code,
             '''        SetFlag<HardEvent::MTE3_V>(TOPK_MTE3_V_EVENT);
@@ -562,7 +572,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(QLI_PUBLICATION_THREADS) inline void Publish
     path.write_text(code)
 
 
-def patch_pair_hook(dest: Path) -> None:
+def patch_pair_hook(dest: Path, pair_two_rows: bool = False) -> None:
     path = dest / 'op_kernel/quant_lightning_indexer_fused_hook.h'
     code = path.read_text()
     method = '''    __aicore__ inline bool TryPublishPair(int64_t first, bool owner, int64_t rows,
@@ -609,6 +619,23 @@ def patch_pair_hook(dest: Path) -> None:
             pipe_->ReleaseEventID<AscendC::HardEvent::V_S>(finished);
         }
         return true;
+    }
+
+'''
+    if pair_two_rows:
+        method += '''    __aicore__ inline void PublishPairRows(int64_t first, bool owner, int64_t rows,
+                                           AscendC::LocalTensor<int32_t> storage,
+                                           __ubuf__ int32_t *localTopk, int64_t localRow)
+    {
+        // Both AIVs reach this point for every complete two-row tile. MTE3
+        // writes for both rows must precede the owner's single GM publication.
+        // PublishRows still handles request boundaries and active-row tails.
+        constexpr uint16_t pairReadyFlag = 8U;
+        AscendC::CrossCoreSetFlag<1, PIPE_MTE3>(pairReadyFlag);
+        AscendC::CrossCoreWaitFlag<1, PIPE_MTE3>(pairReadyFlag);
+        if (owner) {
+            PublishRows(first, 2, rows, storage, localTopk, localRow);
+        }
     }
 
 '''
