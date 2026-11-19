@@ -1,0 +1,547 @@
+{
+  "scope": "batch 9/10/11 x context 102400, two independent 100-sample rounds",
+  "rounds": [
+    {
+      "round": "round1",
+      "execution_order": [
+        9,
+        10,
+        11
+      ],
+      "cases": [
+        {
+          "batch": 9,
+          "samples": 100,
+          "official_indexer": {
+            "count": 100,
+            "p50_us": 173.7165,
+            "p95_us": 174.4821,
+            "min_us": 172.638,
+            "max_us": 174.777
+          },
+          "ordered_indexer": {
+            "count": 100,
+            "p50_us": 174.6025,
+            "p95_us": 176.20135000000002,
+            "min_us": 173.643,
+            "max_us": 177.5
+          },
+          "plan": {
+            "count": 100,
+            "p50_us": 50.1395,
+            "p95_us": 50.86145,
+            "min_us": 49.184,
+            "max_us": 51.719
+          },
+          "gap": {
+            "count": 100,
+            "p50_us": 0.022,
+            "p95_us": 3.567799999999798,
+            "min_us": 0.022,
+            "max_us": 374.938
+          },
+          "chain": {
+            "count": 100,
+            "p50_us": 224.89999999999998,
+            "p95_us": 231.35984999999982,
+            "min_us": 223.475,
+            "max_us": 600.881
+          },
+          "gap_normal_0_022_count": 95,
+          "gap_gt_1us_count": 5,
+          "gap_gt_10us_count": 5,
+          "gap_gt_50us_count": 5,
+          "gap_gt_100us_count": 3,
+          "top_gaps": [
+            {
+              "sample": 93,
+              "gap_us": 374.93800000008196
+            },
+            {
+              "sample": 14,
+              "gap_us": 125.98500000004424
+            },
+            {
+              "sample": 45,
+              "gap_us": 113.1339999998454
+            },
+            {
+              "sample": 57,
+              "gap_us": 80.92400000011548
+            },
+            {
+              "sample": 34,
+              "gap_us": 70.93800000008196
+            },
+            {
+              "sample": 70,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 71,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 72,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 88,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 90,
+              "gap_us": 0.022000000346451998
+            }
+          ],
+          "metadata_sha256": "996cfba32b62adf3755e08225133b9e882c5e62b1e296176f6682663a53962bb"
+        },
+        {
+          "batch": 10,
+          "samples": 100,
+          "official_indexer": {
+            "count": 100,
+            "p50_us": 173.8065,
+            "p95_us": 174.7888,
+            "min_us": 172.846,
+            "max_us": 175.527
+          },
+          "ordered_indexer": {
+            "count": 100,
+            "p50_us": 174.493,
+            "p95_us": 175.7578,
+            "min_us": 173.47,
+            "max_us": 176.939
+          },
+          "plan": {
+            "count": 100,
+            "p50_us": 50.5805,
+            "p95_us": 51.1432,
+            "min_us": 49.622,
+            "max_us": 51.375
+          },
+          "gap": {
+            "count": 100,
+            "p50_us": 0.022,
+            "p95_us": 147.70214999999993,
+            "min_us": 0.022,
+            "max_us": 488.895
+          },
+          "chain": {
+            "count": 100,
+            "p50_us": 225.19549999999998,
+            "p95_us": 373.19269999999995,
+            "min_us": 223.565,
+            "max_us": 713.133
+          },
+          "gap_normal_0_022_count": 87,
+          "gap_gt_1us_count": 13,
+          "gap_gt_10us_count": 13,
+          "gap_gt_50us_count": 12,
+          "gap_gt_100us_count": 10,
+          "top_gaps": [
+            {
+              "sample": 37,
+              "gap_us": 488.8950000000186
+            },
+            {
+              "sample": 47,
+              "gap_us": 369.8950000000186
+            },
+            {
+              "sample": 91,
+              "gap_us": 220.52400000020862
+            },
+            {
+              "sample": 29,
+              "gap_us": 208.37300000002142
+            },
+            {
+              "sample": 35,
+              "gap_us": 170.20099999988452
+            },
+            {
+              "sample": 59,
+              "gap_us": 146.51799999992363
+            },
+            {
+              "sample": 77,
+              "gap_us": 120.50799999991432
+            },
+            {
+              "sample": 86,
+              "gap_us": 105.125
+            },
+            {
+              "sample": 46,
+              "gap_us": 102.7929999998305
+            },
+            {
+              "sample": 99,
+              "gap_us": 102.10699999984354
+            }
+          ],
+          "metadata_sha256": "5d78f767c8ae87b25b03adf9e1613e1efc1a50eaafba3254c7d215392ac106e0"
+        },
+        {
+          "batch": 11,
+          "samples": 100,
+          "official_indexer": {
+            "count": 100,
+            "p50_us": 174.249,
+            "p95_us": 175.1012,
+            "min_us": 173.172,
+            "max_us": 175.778
+          },
+          "ordered_indexer": {
+            "count": 100,
+            "p50_us": 174.8,
+            "p95_us": 176.1085,
+            "min_us": 173.806,
+            "max_us": 177.67
+          },
+          "plan": {
+            "count": 100,
+            "p50_us": 51.6415,
+            "p95_us": 52.27655,
+            "min_us": 50.798,
+            "max_us": 52.934
+          },
+          "gap": {
+            "count": 100,
+            "p50_us": 0.022,
+            "p95_us": 167.42129999999946,
+            "min_us": 0.022,
+            "max_us": 524.194
+          },
+          "chain": {
+            "count": 100,
+            "p50_us": 226.651,
+            "p95_us": 393.8607999999995,
+            "min_us": 225.312,
+            "max_us": 750.103
+          },
+          "gap_normal_0_022_count": 90,
+          "gap_gt_1us_count": 10,
+          "gap_gt_10us_count": 10,
+          "gap_gt_50us_count": 10,
+          "gap_gt_100us_count": 9,
+          "top_gaps": [
+            {
+              "sample": 39,
+              "gap_us": 524.1940000001341
+            },
+            {
+              "sample": 52,
+              "gap_us": 486.40299999993294
+            },
+            {
+              "sample": 37,
+              "gap_us": 459.1240000000689
+            },
+            {
+              "sample": 19,
+              "gap_us": 458.7589999999618
+            },
+            {
+              "sample": 31,
+              "gap_us": 344.2029999997467
+            },
+            {
+              "sample": 1,
+              "gap_us": 158.117000000002
+            },
+            {
+              "sample": 8,
+              "gap_us": 120.98100000002887
+            },
+            {
+              "sample": 87,
+              "gap_us": 111.74600000027567
+            },
+            {
+              "sample": 3,
+              "gap_us": 102.17900000000373
+            },
+            {
+              "sample": 92,
+              "gap_us": 90.03000000026077
+            }
+          ],
+          "metadata_sha256": "0b7de12738cd4bef3dd7538355598d984f31743f2af83d7ec24eac330917ee05"
+        }
+      ]
+    },
+    {
+      "round": "round2",
+      "execution_order": [
+        11,
+        10,
+        9
+      ],
+      "cases": [
+        {
+          "batch": 11,
+          "samples": 100,
+          "official_indexer": {
+            "count": 100,
+            "p50_us": 174.2945,
+            "p95_us": 175.2969,
+            "min_us": 173.112,
+            "max_us": 175.594
+          },
+          "ordered_indexer": {
+            "count": 100,
+            "p50_us": 174.809,
+            "p95_us": 176.3715,
+            "min_us": 173.838,
+            "max_us": 176.801
+          },
+          "plan": {
+            "count": 100,
+            "p50_us": 51.6365,
+            "p95_us": 52.1348,
+            "min_us": 51.013,
+            "max_us": 52.71
+          },
+          "gap": {
+            "count": 100,
+            "p50_us": 0.022,
+            "p95_us": 25.70074999999999,
+            "min_us": 0.022,
+            "max_us": 483.99
+          },
+          "chain": {
+            "count": 100,
+            "p50_us": 226.67399999999998,
+            "p95_us": 253.31175,
+            "min_us": 225.313,
+            "max_us": 710.348
+          },
+          "gap_normal_0_022_count": 91,
+          "gap_gt_1us_count": 9,
+          "gap_gt_10us_count": 8,
+          "gap_gt_50us_count": 4,
+          "gap_gt_100us_count": 3,
+          "top_gaps": [
+            {
+              "sample": 98,
+              "gap_us": 483.9900000002235
+            },
+            {
+              "sample": 34,
+              "gap_us": 119.1019999999553
+            },
+            {
+              "sample": 36,
+              "gap_us": 107.2960000000894
+            },
+            {
+              "sample": 38,
+              "gap_us": 99.14999999967404
+            },
+            {
+              "sample": 65,
+              "gap_us": 29.68599999975413
+            },
+            {
+              "sample": 35,
+              "gap_us": 25.49099999992177
+            },
+            {
+              "sample": 9,
+              "gap_us": 16.96999999997206
+            },
+            {
+              "sample": 96,
+              "gap_us": 11.00400000018999
+            },
+            {
+              "sample": 51,
+              "gap_us": 6.001000000163913
+            },
+            {
+              "sample": 64,
+              "gap_us": 0.022000000346451998
+            }
+          ],
+          "metadata_sha256": "008580732bb3bbf7ae4fef160fc2df4f0f9f2cef3a93268867d726c13148fea3"
+        },
+        {
+          "batch": 10,
+          "samples": 100,
+          "official_indexer": {
+            "count": 100,
+            "p50_us": 173.797,
+            "p95_us": 174.9511,
+            "min_us": 172.802,
+            "max_us": 175.61
+          },
+          "ordered_indexer": {
+            "count": 100,
+            "p50_us": 174.459,
+            "p95_us": 175.9106,
+            "min_us": 173.451,
+            "max_us": 176.544
+          },
+          "plan": {
+            "count": 100,
+            "p50_us": 50.635999999999996,
+            "p95_us": 51.17595,
+            "min_us": 49.848,
+            "max_us": 51.541
+          },
+          "gap": {
+            "count": 100,
+            "p50_us": 0.022,
+            "p95_us": 0.022,
+            "min_us": 0.022,
+            "max_us": 394.779
+          },
+          "chain": {
+            "count": 100,
+            "p50_us": 225.2195,
+            "p95_us": 226.70075,
+            "min_us": 223.863,
+            "max_us": 620.773
+          },
+          "gap_normal_0_022_count": 97,
+          "gap_gt_1us_count": 3,
+          "gap_gt_10us_count": 3,
+          "gap_gt_50us_count": 3,
+          "gap_gt_100us_count": 3,
+          "top_gaps": [
+            {
+              "sample": 28,
+              "gap_us": 394.77900000009686
+            },
+            {
+              "sample": 2,
+              "gap_us": 163.4649999999965
+            },
+            {
+              "sample": 35,
+              "gap_us": 160.20599999988917
+            },
+            {
+              "sample": 70,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 74,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 79,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 81,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 87,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 88,
+              "gap_us": 0.022000000346451998
+            },
+            {
+              "sample": 91,
+              "gap_us": 0.022000000346451998
+            }
+          ],
+          "metadata_sha256": "12b11cc1b3aafcdb4196928371837f2a6de3bc62ce5c7f110d4847a3f4d1a8c5"
+        },
+        {
+          "batch": 9,
+          "samples": 100,
+          "official_indexer": {
+            "count": 100,
+            "p50_us": 173.67899999999997,
+            "p95_us": 174.34785,
+            "min_us": 172.814,
+            "max_us": 174.987
+          },
+          "ordered_indexer": {
+            "count": 100,
+            "p50_us": 174.7945,
+            "p95_us": 176.2116,
+            "min_us": 173.388,
+            "max_us": 177.442
+          },
+          "plan": {
+            "count": 100,
+            "p50_us": 50.197500000000005,
+            "p95_us": 50.8067,
+            "min_us": 49.19,
+            "max_us": 50.977
+          },
+          "gap": {
+            "count": 100,
+            "p50_us": 0.022,
+            "p95_us": 88.79539999999999,
+            "min_us": 0.022,
+            "max_us": 113.92
+          },
+          "chain": {
+            "count": 100,
+            "p50_us": 225.123,
+            "p95_us": 312.84405,
+            "min_us": 223.025,
+            "max_us": 339.214
+          },
+          "gap_normal_0_022_count": 88,
+          "gap_gt_1us_count": 12,
+          "gap_gt_10us_count": 12,
+          "gap_gt_50us_count": 12,
+          "gap_gt_100us_count": 2,
+          "top_gaps": [
+            {
+              "sample": 5,
+              "gap_us": 113.9200000000128
+            },
+            {
+              "sample": 27,
+              "gap_us": 110.02299999992829
+            },
+            {
+              "sample": 10,
+              "gap_us": 94.54000000003725
+            },
+            {
+              "sample": 2,
+              "gap_us": 94.03600000000006
+            },
+            {
+              "sample": 57,
+              "gap_us": 93.81899999990128
+            },
+            {
+              "sample": 58,
+              "gap_us": 88.53100000019185
+            },
+            {
+              "sample": 24,
+              "gap_us": 86.36700000008568
+            },
+            {
+              "sample": 26,
+              "gap_us": 82.14100000006147
+            },
+            {
+              "sample": 63,
+              "gap_us": 81.99699999997392
+            },
+            {
+              "sample": 55,
+              "gap_us": 81.24399999994785
+            }
+          ],
+          "metadata_sha256": "f6b2a046c5d0e645b9479a21193bab74160b9c00f7061a9e0920ee7240eda03d"
+        }
+      ]
+    }
+  ]
+}
