@@ -102,3 +102,27 @@ Any change to `prepare_qli_fusion.py`, `native_plan_overlay.py`, `plan.h`, the
 Plan config, or the native binding changes the source identity. Rebuild and
 redeploy both the vendor package and torch extension wheel; do not reuse stale
 `TORCH_EXTENSIONS_DIR` artifacts.
+
+## MTP3 同场性能测试
+
+在 CANN 9.2.1 环境中构建普通版 Plan 和专用融合包。使用编译融合包时安装 wheel 的 Python。先检查目标卡处于空闲状态。
+
+```bash
+PYTHON=/path/to/venv/bin/python bash build_joint_plan.sh --soc=ascend950 --mtp3-only
+PYTHON=/path/to/venv/bin/python QLI_FUSION_BUILD_DIR=/workspace/native_qli_build \
+  bash scripts/build_qli_fusion.sh --native-plan-only
+
+PYTHON=/path/to/venv/bin/python MTP3_BATCHES="8 17 32" \
+  bash scripts/test_native_ordered_mtp3.sh 4 /workspace/native_qli_build \
+  "$PWD/build_joint_plan/libmtp_joint_plan_ops.so" /workspace/mtp3_screen \
+  --implementations plan_ac plan_full plan_map plan_load plan_full_load \
+  --warmup 2 --repeat 5
+
+PYTHON=/path/to/venv/bin/python \
+  bash scripts/test_native_ordered_mtp3.sh 4 /workspace/native_qli_build \
+  "$PWD/build_joint_plan/libmtp_joint_plan_ops.so" /workspace/mtp3_confirm \
+  --implementations ordered_native ordered_ac ordered_full native_shell native_fused native_group \
+  --warmup 10 --repeat 20
+```
+
+第二次采集可将 `ordered_full` 换成初筛入围的其他新 Plan。默认批次为 6、8、10、16、17、32。每个 batch 单独保存两种 Plan 缓存状态的 CSV 和报告。两种拆分调用在同一 stream 连续下发。融合壳沿用融合注册与 Host 资源配置，关闭设备 Plan hook。计划编译身份和融合包身份均由采集入口校验。
