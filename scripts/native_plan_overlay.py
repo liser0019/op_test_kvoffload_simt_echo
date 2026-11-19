@@ -403,7 +403,8 @@ __aicore__ inline void QLIVector<QLIT>::ProcessInvalidRow(int64_t row, int64_t o
             '''        SetFlag<HardEvent::MTE3_V>(TOPK_MTE3_V_EVENT);
     }
     if (planHook_ != nullptr && qliCurAivS1ProcNum > 0) {
-        const int64_t firstRow = info.indiceOutOffset / topkCount_ + qliCurS1Idx + qliCurAivS1Idx;
+        // qliCurAivS1Idx already includes the tile's qliCurS1Idx.
+        const int64_t firstRow = info.indiceOutOffset / topkCount_ + qliCurAivS1Idx;
         const int64_t lastRow = firstRow + qliCurAivS1ProcNum - 1;
         planHook_->PublishRows(firstRow, qliCurAivS1ProcNum, planRows_, planStorage_,
                                reinterpret_cast<__ubuf__ int32_t *>(indicesOutLocal_.GetPhyAddr()), lastRow);
@@ -482,6 +483,10 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(QLI_PUBLICATION_THREADS) inline void Publish
         if (count <= 0 || start < 0 || start >= rows || readyCounts_ == nullptr ||
             buffers_.activeRows == nullptr || buffers_.tokenToReq == nullptr) return;
         if (tiling_.maxRows > 0 && rows > tiling_.maxRows) rows = tiling_.maxRows;
+        if (count == 1) {
+            PublishGroup(start, start + 1, rows, storage, localTopk, localRow);
+            return;
+        }
         auto mte3ToScalar = pipe_->AllocEventID<AscendC::HardEvent::MTE3_S>();
         AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(mte3ToScalar);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(mte3ToScalar);

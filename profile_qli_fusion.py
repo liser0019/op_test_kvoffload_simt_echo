@@ -428,7 +428,10 @@ def main_run(args,report):
                 for k,before in readonly.items():
                     if not torch.equal(inputs.qli[k].view(torch.uint8),before.view(torch.uint8)):raise RuntimeError('read-only QLI input modified: '+k)
                 if not torch.equal(inputs.plan_metadata['host_block_table'],host_table_before):raise RuntimeError('read-only Plan host_block_table modified')
-                if not torch.equal(ready,torch.zeros_like(ready)):raise RuntimeError('publication counter not returned to zero')
+                if not torch.equal(ready,torch.zeros_like(ready)):
+                    counts = ready.cpu().numpy()
+                    raise RuntimeError(f'{n}: publication counter not returned to zero: '
+                                       f'{[(int(i), int(counts[i])) for i in np.flatnonzero(counts)]}')
                 for guard in (ds[:16],ds[-16:]):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('split QLI workspace guard changed')
                 for guard in (topk_guards[n][:16],topk_guards[n][-16:]):
