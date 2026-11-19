@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Dedicated upstream checkout/package: never patch an existing user's source tree.
 set -euo pipefail
+usage="$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only | --native-affinity-only | --native-adaptive-only | --native-scale-l2-only]"
 if [[ $# -gt 1 ]]; then
-  echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only | --native-affinity-only | --native-adaptive-only]" >&2
+  echo "用法：$usage" >&2
   exit 2
 fi
 OPS=quant_lightning_indexer,quant_lightning_indexer_plan_split
@@ -20,7 +21,8 @@ case "${1:-}" in
   --native-plan-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_shell,quant_lightning_indexer_plan_native_fused,quant_lightning_indexer_plan_native_group ;;
   --native-affinity-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_group,quant_lightning_indexer_plan_native_group4,quant_lightning_indexer_plan_native_pair4 ;;
   --native-adaptive-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_group,quant_lightning_indexer_plan_native_pair4,quant_lightning_indexer_plan_native_adaptive ;;
-  *) echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only | --native-affinity-only | --native-adaptive-only]" >&2; exit 2 ;;
+  --native-scale-l2-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_adaptive,quant_lightning_indexer_plan_native_scale ;;
+  *) echo "用法：$usage" >&2; exit 2 ;;
 esac
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PYTHON=${PYTHON:-python3}

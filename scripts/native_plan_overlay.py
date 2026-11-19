@@ -94,7 +94,8 @@ def patch_entry(dest: Path, enabled: bool) -> None:
     path.write_text(code)
 
 
-def patch_kernel(dest: Path, camel: str, enabled: bool, fixed_four: bool = False) -> None:
+def patch_kernel(dest: Path, camel: str, enabled: bool, fixed_four: bool = False,
+                 key_scale_l2: bool = False) -> None:
     path = dest / 'op_kernel/arch35/quant_lightning_indexer_kernel_arch35.h'
     code = path.read_text()
     tiling = f'QLIPlan{camel}TilingData'
@@ -136,6 +137,17 @@ def patch_kernel(dest: Path, camel: str, enabled: bool, fixed_four: bool = False
     __gm__ uint8_t *readyCounts, __gm__ uint8_t *sparseIndices, __gm__ uint8_t *workspace,
     const {tiling} *__restrict tiling, TPipe *tPipe)'''
     code = replace(code, native_def, plan_def)
+    if key_scale_l2:
+        # Both AIVs read the same K-scale pages. Keep their default L2 hint
+        # while preserving the native hint for the much larger Key tensor.
+        code = replace(
+            code,
+            '''        if (constInfo.setL2DisableFlag) {
+            kScaleGm.SetL2CacheHint(CacheMode::CACHE_MODE_DISABLE);
+        }
+''',
+            '',
+        )
     if fixed_four:
         # Set the tile in the device source as well. Native Ordered derives
         # S1Base from tSize and does not consume the fused host's S1Base field.

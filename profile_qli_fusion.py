@@ -20,7 +20,8 @@ from fusion.metrics import KERNEL_PATTERNS,read_csvs,SPLIT_ROLES,TIMING_ARITHMET
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
 from scripts.prepare_qli_fusion import (FACTORIAL_NAMES,FACTORIALS,FINAL_SORT4,NAMES,
                                         NATIVE_FUSED,NATIVE_GROUP,NATIVE_GROUP4,NATIVE_INDEXER,
-                                        NATIVE_ORDERED,NATIVE_PAIR4,NATIVE_PAIR_AUTO,NATIVE_SHELL,ORDERED4,PEER4,
+                                        NATIVE_ORDERED,NATIVE_PAIR4,NATIVE_PAIR_AUTO,NATIVE_PAIR_SCALE,
+                                        NATIVE_SHELL,ORDERED4,PEER4,
                                         TOPK_CONTROL4,source_id)
 
 ROOT=Path(__file__).resolve().parent
@@ -34,8 +35,10 @@ MTP3_NATIVE_OPERATORS = {
     'native_shell': NATIVE_SHELL, 'native_fused': NATIVE_FUSED, 'native_group': NATIVE_GROUP,
     'native_group4': NATIVE_GROUP4, 'native_pair4': NATIVE_PAIR4,
     'native_pair_auto': NATIVE_PAIR_AUTO,
+    'native_pair_scale_l2': NATIVE_PAIR_SCALE,
 }
-FOUR_ROW_PAIR_ROLES = {'native_pair4', 'native_pair_auto'}
+AUTO_PAIR_ROLES = {'native_pair_auto', 'native_pair_scale_l2'}
+FOUR_ROW_PAIR_ROLES = {'native_pair4'} | AUTO_PAIR_ROLES
 MTP3_PLAN_CANDIDATES = {
     'ac': BASE, 'map': 'joint_mtp3_map_512', 'load': 'joint_mtp3_load_512',
     'full': 'joint_mtp3_full_512', 'full_load': 'joint_mtp3_full_load_512',
@@ -757,8 +760,8 @@ def main():
     implementations=set(args.implementations)
     if args.prove_pair and (not args.gate_only or not implementations & FOUR_ROW_PAIR_ROLES):
         p.error('--prove-pair requires --gate-only and a hardware pair implementation')
-    if args.prove_pair and 'native_pair_auto' in implementations and args.requests<=16:
-        p.error('--prove-pair requires a four-row tile; native_pair_auto needs at least 17 requests')
+    if args.prove_pair and implementations & AUTO_PAIR_ROLES and args.requests<=16:
+        p.error('--prove-pair needs at least 17 requests with automatic tiling')
     if not implementations or len(implementations)!=len(args.implementations):
         p.error('implementations must be nonempty and unique')
     effective_split_roles=SPLIT_ROLES - ({'split4','final4'} if args.indexer_only else set())
