@@ -105,8 +105,8 @@ def run(report_path: Path | None):
         260: (True, True, False, False, True),
     }
     for mask, values in expected.items():
-        full, mapped, load, bounded, spread = values
-        assert mtp3_config(mask) == {"full": full, "map": mapped, "load": load,
+        is_full, mapped, load, bounded, spread = values
+        assert mtp3_config(mask) == {"full": is_full, "map": mapped, "load": load,
                                      "bounded_bitmap": bounded, "wide_core_spread": spread}
 
     records = []
