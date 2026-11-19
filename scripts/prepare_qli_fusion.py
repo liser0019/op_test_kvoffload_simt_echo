@@ -239,7 +239,7 @@ def install_native_plan_variant(repo,name,camel,enabled):
     paired=name==NATIVE_PAIR4
     grouped=name==NATIVE_GROUP or fixed_four
     native_plan_overlay.patch_entry(dest,enabled)
-    native_plan_overlay.patch_kernel(dest,camel,enabled)
+    native_plan_overlay.patch_kernel(dest,camel,enabled,fixed_four=fixed_four)
     native_plan_overlay.patch_vector(dest,enabled,grouped=grouped,paired=paired)
     overlay(dest,3 if enabled else 0,camel,None,
             final_sort=False,vector_reuse=False,hot_ub_map=False)

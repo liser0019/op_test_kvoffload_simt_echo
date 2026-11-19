@@ -94,7 +94,7 @@ def patch_entry(dest: Path, enabled: bool) -> None:
     path.write_text(code)
 
 
-def patch_kernel(dest: Path, camel: str, enabled: bool) -> None:
+def patch_kernel(dest: Path, camel: str, enabled: bool, fixed_four: bool = False) -> None:
     path = dest / 'op_kernel/arch35/quant_lightning_indexer_kernel_arch35.h'
     code = path.read_text()
     tiling = f'QLIPlan{camel}TilingData'
@@ -136,6 +136,23 @@ def patch_kernel(dest: Path, camel: str, enabled: bool) -> None:
     __gm__ uint8_t *readyCounts, __gm__ uint8_t *sparseIndices, __gm__ uint8_t *workspace,
     const {tiling} *__restrict tiling, TPipe *tPipe)'''
     code = replace(code, native_def, plan_def)
+    if fixed_four:
+        # Set the tile in the device source as well. Native Ordered derives
+        # S1Base from tSize and does not consume the fused host's S1Base field.
+        code = replace(
+            code,
+            '''    constInfo.mBaseSize = S1_BASE_SIZE * constInfo.gSize;
+    constInfo.s2BaseSize = S2_BASE_SIZE;
+    constInfo.s1BaseSize = S1_BASE_SIZE;
+
+    if (constInfo.tSize <= 64) {
+        constInfo.mBaseSize /= 2;
+        constInfo.s1BaseSize /= 2;
+    }''',
+            '''    constInfo.s1BaseSize = tilingData->fusedS1BaseSize;
+    constInfo.mBaseSize = constInfo.s1BaseSize * constInfo.gSize;
+    constInfo.s2BaseSize = S2_BASE_SIZE;''',
+        )
     code = replace(
         code,
         '    InitBuffers();\n}',
