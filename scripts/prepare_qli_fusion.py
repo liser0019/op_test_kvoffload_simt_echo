@@ -69,7 +69,7 @@ NATIVE_PLAN_VARIANTS=(
     (NATIVE_PAIR_SCALE,'NativeScale',True),
     (NATIVE_PAIR_BALANCE,'NativeBalanced',True),
     (NATIVE_PAIR_REUSE,'NativeL2Reuse',True),
-    (NATIVE_PAIR_BALANCE_REUSE,'NativeBalancedReuse',True),
+    (NATIVE_PAIR_BALANCE_REUSE,'NativeBalanceReuse',True),
 )
 
 def source_id():
