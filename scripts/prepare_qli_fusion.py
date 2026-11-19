@@ -251,13 +251,20 @@ def install_native_plan_variant(repo,name,camel,enabled):
     balance_four_owner=name in (NATIVE_PAIR_BALANCE,NATIVE_PAIR_BALANCE_REUSE)
     paired=name==NATIVE_PAIR4 or pair_two_rows
     grouped=name==NATIVE_GROUP or fixed_four or pair_two_rows
+    reuse_quad=name in NATIVE_REUSE_QUAD
     native_plan_overlay.patch_entry(dest,enabled)
     native_plan_overlay.patch_kernel(dest,camel,enabled,fixed_four=fixed_four,
                                     key_scale_l2=name in (NATIVE_PAIR_SCALE,NATIVE_PAIR_BALANCE,NATIVE_PAIR_REUSE,NATIVE_PAIR_BALANCE_REUSE))
+    if reuse_quad:
+        # This overlay consumes the native per-row PublishGroup anchors before
+        # the selected grouped publication policy rewrites them.
+        overlay(dest,3 if enabled else 0,camel,None,
+                final_sort=False,vector_reuse=True,hot_ub_map=False)
     native_plan_overlay.patch_vector(dest,enabled,grouped=grouped,paired=paired,
                                     pair_two_rows=pair_two_rows,balance_four_owner=balance_four_owner)
-    overlay(dest,3 if enabled else 0,camel,None,
-            final_sort=False,vector_reuse=name in NATIVE_REUSE_QUAD,hot_ub_map=False)
+    if not reuse_quad:
+        overlay(dest,3 if enabled else 0,camel,None,
+                final_sort=False,vector_reuse=False,hot_ub_map=False)
     native_plan_overlay.patch_tiling(dest,fixed_four=fixed_four)
     if grouped:
         native_plan_overlay.patch_group_hook(dest)
