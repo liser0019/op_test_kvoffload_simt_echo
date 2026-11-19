@@ -23,7 +23,7 @@ case "${1:-}" in
   --native-adaptive-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_group,quant_lightning_indexer_plan_native_pair4,quant_lightning_indexer_plan_native_adaptive ;;
   --native-scale-l2-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_adaptive,quant_lightning_indexer_plan_native_scale ;;
   --native-balanced-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_scale,quant_lightning_indexer_plan_native_balanced ;;
-  --native-reuse-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_scale,quant_lightning_indexer_plan_native_balanced,quant_lightning_indexer_plan_native_l2reuse,quant_lightning_indexer_plan_native_balreuse ;;
+  --native-reuse-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_scale,quant_lightning_indexer_plan_native_balanced,quant_lightning_indexer_plan_native_l2_reuse,quant_lightning_indexer_plan_native_balance_reuse ;;
   *) echo "用法：$usage" >&2; exit 2 ;;
 esac
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
