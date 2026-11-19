@@ -194,7 +194,7 @@ def make_plan_case(inputs,indices,mtp,scenario,seed):
         hit_goal=s.topk*90//100
         for request in range(s.batch):
             first=request*s.width
-            row_hits=[]
+            stable_rows=[]
             for p in range(s.width):
                 row=first+p
                 valid=np.unique(case['topk_indices'][row])
@@ -202,9 +202,43 @@ def make_plan_case(inputs,indices,mtp,scenario,seed):
                 valid=valid[(valid>=0)&(valid<stable)]
                 if len(valid)<hit_goal:
                     raise RuntimeError(f'row {row}: only {len(valid)} stable TopK tokens for 90% cache')
-                rng=np.random.default_rng(seed+310003+request*17+p)
-                row_hits.append(rng.choice(valid,hit_goal,replace=False))
-            hit_union=np.unique(np.concatenate(row_hits))
+                stable_rows.append(valid)
+            all_tokens=np.unique(np.concatenate(stable_rows))
+            coverage=np.zeros(int(all_tokens[-1])+1,dtype=np.uint8)
+            for p,valid in enumerate(stable_rows):
+                coverage[valid]|=np.uint8(1<<p)
+            masks=np.arange(1,1<<s.width,dtype=np.uint8)
+            tokens_by_mask={
+                int(mask):all_tokens[coverage[all_tokens]==mask]
+                for mask in masks
+            }
+            coefficients=np.asarray([
+                [int(mask)&(1<<row)!=0 for mask in masks]
+                for row in range(s.width)
+            ],dtype=np.int64)
+            available=np.asarray([len(tokens_by_mask[int(mask)]) for mask in masks],dtype=np.int64)
+            try:
+                from scipy.optimize import Bounds,LinearConstraint,milp
+            except ImportError as exc:
+                raise RuntimeError('90% fixture requires scipy.optimize.milp') from exc
+            solution=milp(
+                c=-coefficients.sum(axis=0,dtype=np.int64),
+                integrality=np.ones(len(masks),dtype=np.uint8),
+                bounds=Bounds(np.zeros(len(masks),dtype=np.int64),available),
+                constraints=LinearConstraint(coefficients,np.full(s.width,hit_goal),np.full(s.width,hit_goal)),
+                options={'time_limit':10},
+            )
+            if not solution.success or solution.x is None or np.any(np.abs(solution.x-np.rint(solution.x))>1e-6):
+                raise RuntimeError(f'90% exact-hit fixture infeasible: {solution.message}')
+            selected_counts=np.rint(solution.x).astype(np.int64)
+            rng=np.random.default_rng(seed+310003+request)
+            selected=[]
+            for index,mask in enumerate(masks):
+                count=int(selected_counts[index])
+                if count:
+                    pool=tokens_by_mask[int(mask)]
+                    selected.append(rng.choice(pool,count,replace=False))
+            hit_union=np.unique(np.concatenate(selected))
             if len(hit_union)>s.capacity:
                 raise RuntimeError('90% per-row hit sets exceed shared cache capacity')
             excluded=np.unique(case['topk_indices'][first:first+s.width])
@@ -813,8 +847,8 @@ def main():
     if (args.indexer_only and not implementations <= INDEXER_ONLY | {'split4','final4'}):
         p.error('--indexer-only accepts Indexer roles only')
     if implementations & MTP3_ROLES:
-        if not implementations <= MTP3_ROLES | {'ordered_native'}:
-            p.error('the native ordered matrix accepts ordered_native and MTP3 experiment roles')
+        if not implementations <= MTP3_ROLES | {'ordered_native', 'baseline'}:
+            p.error('the native ordered matrix accepts baseline, ordered_native and MTP3 experiment roles')
         if set(args.mtp)!={3}:
             p.error('the native ordered experiment uses MTP3')
     if not args.gate_only and not implementations.intersection(MTP3_ROLES) and not implementations.intersection(effective_split_roles) and implementations not in ({'baseline'},TOPK_ISOLATION) and not implementations.intersection(PEER_OPERATORS) and not implementations.intersection(FACTORIAL_ROLES) and not implementations.intersection(INDEXER_ONLY):
