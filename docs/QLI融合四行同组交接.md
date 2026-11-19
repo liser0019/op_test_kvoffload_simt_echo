@@ -94,3 +94,18 @@ batch 8/16 的自适应版与原自动融合版相比，P50 变化在 0.6% 以�
 四行 tiling 下，两侧 AIV 分别处理两条 query，会读取相同的 `keyScale` 页。自适应对照沿用上游的 `CACHE_MODE_DISABLE` 提示。本候选仅移除 `kScaleGm` 的该提示，使其沿用默认 L2 行为。大 Key Tensor 的缓存策略、TopK、交接和 Plan 保持原有实现。生成的 Host 与设备源码按算子名归一化后，只有设备入口的这段提示存在差异。
 
 使用 `--native-scale-l2-only` 构建。短门禁在 batch17 上使用 `native_pair_auto native_pair_scale_l2 --contexts 8 2048 8192 --scenarios cold_reset --regression-repeat 2 --gate-only --prove-pair`。性能比较使用 `MTP3_BATCHES='17 32'`，分别选择 `ordered_full` 或 `ordered_ac` 与上述两路融合实现进行同场采集。
+
+NPU5 正式复测完成，每路每工况 5 个样本。`native_pair_scale_l2` 的 P50 在 100K 的 4 个工况下降 0.87%～1.30%，在 256K 的 4 个工况下降 0.79%～1.13%，P95 同方向。此改动保留，作为后续四行融合候选的默认设置；更大 Key 数据的 L2 提示仍保持原策略。
+
+## msOpProf 硬件归因
+
+对 256K、batch32、冷启动的 `native_pair_scale_l2` 使用单次 kernel duration 采集。BasicInfo 的 kernel duration 为 661.334 μs，Block Dim 32、Mix Block Dim 64。额外采集 Occupancy、PipeUtilization、Memory、MemoryUB、L2Cache 与 ResourceConflictRatio。
+
+32 对 AIV 的中位指标如下。时间单位 μs，比例为 profiler 给出的 active-cycle 占比，不能直接换算成某个源码阶段的耗时。
+
+| AIV | duration | Vector busy | Scalar busy | MTE2 busy | MTE3 busy | Vector wait | L2 load conflict | GM read BW | GM write BW |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| vector0 | 622.342 | 77.06% | 81.41% | 22.37% | 44.10% | 91.79% | 28.05% | 3.002 GB/s | 1.499 GB/s |
+| vector1 | 659.182 | 77.71% | 81.69% | 14.91% | 41.83% | 58.79% | 26.48% | 3.145 GB/s | 1.860 GB/s |
+
+同一 Core 的 AIV duration 差中位为 36.62 μs，P95 为 38.62 μs。vector1 是原来所有请求组的 Plan owner，其额外尾部与 Plan 单路执行特征一致。vector0 的 Vector wait 反而更高，说明把部分 Plan 工作移到该侧有机会填充等待窗口。后续平衡 owner 候选据此生成，并保守地按逻辑 AI Core 交替分配，保证同一 Core 两侧作出相同选择。
