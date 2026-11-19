@@ -19,7 +19,8 @@ from joint_plan_cases import make_case,describe,initial_arrays,sort_topk
 from fusion.metrics import KERNEL_PATTERNS,read_csvs,SPLIT_ROLES,TIMING_ARITHMETIC
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
 from scripts.prepare_qli_fusion import (FACTORIAL_NAMES,FACTORIALS,FINAL_SORT4,NAMES,
-                                        NATIVE_INDEXER,NATIVE_ORDERED,ORDERED4,PEER4,
+                                        NATIVE_FUSED,NATIVE_GROUP,NATIVE_INDEXER,NATIVE_ORDERED,
+                                        NATIVE_SHELL,ORDERED4,PEER4,
                                         TOPK_CONTROL4,source_id)
 
 ROOT=Path(__file__).resolve().parent
@@ -30,8 +31,7 @@ PEER_OPERATORS = {'peer': 'quant_lightning_indexer_ordered_fused', 'peer4': PEER
 NATIVE_ABI = {'baseline', 'ordered_native', 'final4'}
 FACTORIAL_ROLES = frozenset(FACTORIAL_NAMES)
 MTP3_NATIVE_OPERATORS = {
-    role: 'quant_lightning_indexer_plan_' + role
-    for role in ('native_shell', 'native_fused', 'native_group', 'native_map')
+    'native_shell': NATIVE_SHELL, 'native_fused': NATIVE_FUSED, 'native_group': NATIVE_GROUP,
 }
 MTP3_PLAN_CANDIDATES = {
     'ac': BASE, 'map': 'joint_mtp3_map_512', 'load': 'joint_mtp3_load_512',
@@ -523,6 +523,7 @@ def main_run(args,report):
                     'qli_input_sha256':qli_hash,
                     'qli_s1_base_by_implementation':{n:s1_record(n)['s1_base'] for n in names},
                     'qli_s1_base_evidence':{n:s1_record(n) for n in names},
+                    'native_ordered_provenance':manifest.get('native_ordered_plan') if set(names) & MTP3_ROLES else None,
                     'factorial_ub_bytes':{n:manifest.get('factorial_ub_bytes',{}).get(n) for n in names if n in FACTORIAL_ROLES},
                     'input':describe(case),'logical_input_sha256':hashlib.sha256(b''.join(case[k].tobytes() for k in common.INPUTS)).hexdigest(),
                     'statistics':stats,'execution_orders':orders,'csv_paths':[str(p) for p in csvs],'kernel_inventory':inventory}

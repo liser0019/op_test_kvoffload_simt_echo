@@ -19,7 +19,6 @@ TOKENS={'split':'quant_lightning_indexer_plan_split','a':'quant_lightning_indexe
         'native_shell':'quant_lightning_indexer_plan_native_shell',
         'native_fused':'quant_lightning_indexer_plan_native_fused',
         'native_group':'quant_lightning_indexer_plan_native_group',
-        'native_map':'quant_lightning_indexer_plan_native_map',
         'final4':'quant_lightning_indexer_plan_final4',
         'topk_control4':'quant_lightning_indexer_plan_topk_control4',
         'baseline':'quant_lightning_indexer',
