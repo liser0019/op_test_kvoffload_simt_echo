@@ -466,8 +466,10 @@ def overlay(folder,mode,suffix,s1_base,*,final_sort=False,vector_reuse=False,hot
             SetFlag<HardEvent::MTE2_V>(drain);WaitFlag<HardEvent::MTE2_V>(drain);
             pipe_->ReleaseEventID<HardEvent::MTE2_V>(drain);
 '''+anchor,count=2)
-        elif 'DrainArenaWrites();qli_fused_plan::RunGroup(' not in s:
-            raise RuntimeError('shared arena has no MTE2-to-Plan drain')
+        else:
+            hook_code=(kernel/'quant_lightning_indexer_fused_hook.h').read_text()
+            if 'DrainArenaWrites();qli_fused_plan::RunGroup(' not in hook_code:
+                raise RuntimeError('shared arena has no MTE2-to-Plan drain')
         # The upstream class stores no pipe_ member; pass the same TPipe pointer
         # already received by InitBuffers, rather than introducing a global.
         s=s.replace('    int64_t planRows_ = 0;','    int64_t planRows_ = 0;\n    TPipe* pipe_=nullptr;')
