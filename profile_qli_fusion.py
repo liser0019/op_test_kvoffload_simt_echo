@@ -20,7 +20,8 @@ from fusion.metrics import KERNEL_PATTERNS,read_csvs,SPLIT_ROLES,TIMING_ARITHMET
 from harness_io import add_storage_arguments,preflight_args,write_json,record_failure,diagnostic_log,diagnostic_details
 from scripts.prepare_qli_fusion import (FACTORIAL_NAMES,FACTORIALS,FINAL_SORT4,NAMES,
                                         NATIVE_FUSED,NATIVE_GROUP,NATIVE_GROUP4,NATIVE_INDEXER,
-                                        NATIVE_ORDERED,NATIVE_PAIR4,NATIVE_PAIR_AUTO,NATIVE_PAIR_BALANCE,NATIVE_PAIR_SCALE,
+                                        NATIVE_ORDERED,NATIVE_PAIR4,NATIVE_PAIR_AUTO,NATIVE_PAIR_BALANCE,
+                                        NATIVE_PAIR_BALANCE_REUSE,NATIVE_PAIR_REUSE,NATIVE_PAIR_SCALE,
                                         NATIVE_SHELL,ORDERED4,PEER4,
                                         TOPK_CONTROL4,source_id)
 
@@ -37,8 +38,11 @@ MTP3_NATIVE_OPERATORS = {
     'native_pair_auto': NATIVE_PAIR_AUTO,
     'native_pair_scale_l2': NATIVE_PAIR_SCALE,
     'native_pair_balanced': NATIVE_PAIR_BALANCE,
+    'native_pair_l2_reuse': NATIVE_PAIR_REUSE,
+    'native_pair_balanced_reuse': NATIVE_PAIR_BALANCE_REUSE,
 }
-AUTO_PAIR_ROLES = {'native_pair_auto', 'native_pair_scale_l2', 'native_pair_balanced'}
+AUTO_PAIR_ROLES = {'native_pair_auto', 'native_pair_scale_l2', 'native_pair_balanced',
+                   'native_pair_l2_reuse', 'native_pair_balanced_reuse'}
 FOUR_ROW_PAIR_ROLES = {'native_pair4'} | AUTO_PAIR_ROLES
 MTP3_PLAN_CANDIDATES = {
     'ac': BASE, 'map': 'joint_mtp3_map_512', 'load': 'joint_mtp3_load_512',
