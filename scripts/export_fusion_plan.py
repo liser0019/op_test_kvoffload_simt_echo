@@ -59,6 +59,20 @@ def selected_source():
 def port(text):
     original=(ROOT/'csrc/joint_variants/layout_hot_impl.h').read_text()
     controller = original[original.index('template <bool AllowJoint>\n__aicore__ inline void SortedDirectBody'):]
+    controller = re.sub(
+        r'^#if (JOINT_MTP3_LOOKUP_SHARDS|JOINT_MTP3_BITMAP_TEAM) // Omit from frozen fusion export\.\n'
+        r'.*?^#endif // \1\n', '', controller, flags=re.M | re.S)
+    start = controller.index("  const int64_t start=AscendC::GetBlockIdx(),stride=AscendC::GetBlockNum();")
+    end = controller.index("  AscendC::TPipe pipe;", start)
+    controller = controller[:start] + (
+        "  const int64_t start=AscendC::GetBlockIdx(),stride=AscendC::GetBlockNum();if(start>=rows)return;\n"
+    ) + controller[end:]
+    # The exporter selects frozen AC. Its optional fused map has a separate ABI.
+    begin = controller.index('#if JOINT_MTP3_MAP')
+    keep = controller.index('#else // frozen rankpipe launch ABI\n', begin)
+    end = controller.index('#endif // JOINT_MTP3_MAP\n', keep)
+    controller = (controller[:begin] + controller[keep:end].split('\n', 1)[1] +
+                  controller[end + len('#endif // JOINT_MTP3_MAP\n'):])
     text = text[:text.index('template <bool AllowJoint>\n__aicore__ inline void SortedDirectBody')]
     # Remove uncalled historical joint/hash entry points; retain the actual private
     # calculation and protocol fallback. No algorithm selection is changed there.

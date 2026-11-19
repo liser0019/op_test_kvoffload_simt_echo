@@ -11,7 +11,7 @@ OVERLAPS = ("shared", "partial", "independent", "disjoint", "overlap40")
 POISON = -777777
 
 
-def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False,mtp8=False,mtp8_capacity8k=False,layout16=0,layout_hot_bits=0):
+def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=False, sorted_union=False, union_next=False, hot_packet=False,mtp8=False,mtp8_capacity8k=False,layout16=0,layout_hot_bits=0,mtp3_full=False,mtp3_475=False):
     def hash_size(n):
         return max(32, 1 << (2 * n - 1).bit_length())
     h, j = hash_size(topk), hash_size(capacity) if joint else 0
@@ -35,6 +35,21 @@ def layout(topk, capacity, rows, joint, max_token=None, bitmap=False, turbo=Fals
             work=24576
             if layout16==2:work=max(work,capacity+capacity//2+3*capacity//32+(capacity//32 if layout_hot_bits&2 else 0))
             scratch=max(row,128+capacity//2+capacity+work)
+            if mtp3_full and topk==2048 and capacity==8192:
+                if layout16!=1:raise ValueError("MTP3 full requires rankpipe layout16=1")
+                scratch+=8192
+            if mtp3_475:
+                if not mtp3_full or topk!=2048 or capacity!=8192:
+                    raise ValueError("MTP3 475K requires the fixed four-row full-packet layout")
+                # Both 475K roles use one fixed budget. The 128KiB merge packet
+                # is unchanged; the bitmap role can use only its 6912B extension.
+                scratch+=1728
+                words=(max_token+31)//32
+                aligned_words=(words+7)&~7
+                slot_lookup_offset=max(2*aligned_words,capacity)
+                index_words=slot_lookup_offset+(capacity+1)//2
+                if 128+capacity//2+capacity+index_words>scratch:
+                    raise ValueError("MTP3 475K bitmap index exceeds dynamic UB budget")
     aligned = (scratch * 4 + 31) & ~31
     ub = aligned <= (eight_limit_kib if mtp8 else 112) * 1024
     return {"hash_capacity": h, "joint_hash_capacity": j, "scratch_elements": scratch,

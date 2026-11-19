@@ -18,8 +18,45 @@ from checks.check_joint_plan import run_gate
 from harness_io import preflight_args, write_json, record_failure, diagnostic_log, capture_error
 
 
+def lookup_pipeline_kernels(name):
+    prefix = "joint_mtp3_lookup"
+    if not name.startswith(prefix):
+        return (common.KERNELS[name],)
+    suffix = name.removeprefix("joint_")
+    return tuple(f"sparse_kv_plan_{part}_{suffix}" for part in ("prepare", "lookup", "commit"))
+
+
+def read_lookup_pipeline(paths, names, repeat, expected_order):
+    """Group the three device intervals belonging to each Plan invocation."""
+    from fusion.metrics import read_csvs
+
+    plan_kernels = {}
+    launches = {}
+    for name in names:
+        kernels = lookup_pipeline_kernels(name)
+        launches[name] = tuple(f"{name}:{i}" for i in range(len(kernels)))
+        plan_kernels.update(zip(launches[name], kernels))
+    samples, _ = read_csvs(paths, expected_order, repeat, split_roles=frozenset(),
+                           launches=launches, plan_kernels=plan_kernels)
+    results = []
+    for sample in samples:
+        components = sample["components"]
+        launch = sample["implementation"]
+        expected = lookup_pipeline_kernels(launch)
+        if len(components) != len(expected):
+            raise RuntimeError(f"{launch}: incorrect number of device kernels")
+        blocks = "/".join(str(c["block_num"] or "?") for c in components)
+        results.append({"implementation": launch, "duration_us": sample["span_us"],
+                        "busy_us": sample["busy_us"], "block_num": blocks,
+                        "timestamp_origin_us": sample["timestamp_origin_us"],
+                        "components": components, "csv": components[0]["csv"]})
+    return results
+
+
 def read_kernels(paths, names, repeat, expected_order):
     """精确kernel名、μs单位、样本数和交错执行顺序；恢复TensorMove一律排除。"""
+    if any(len(lookup_pipeline_kernels(name)) > 1 for name in names):
+        return read_lookup_pipeline(paths, names, repeat, expected_order)
     records = []
     def norm(text):
         return re.sub(r"[\s_]", "", text).casefold()
@@ -196,6 +233,13 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
             "block_nums": sorted({r["block_num"] for r in records if r["implementation"] == name and r.get("block_num") is not None}),
             "joint_enabled": bundles[name]["joint_enabled"], "layout": bundles[name]["layout"],
             "correctness": final[name], "implementation": common.description(name) if name in common.VARIANTS else {"name":name}}
+        invocation_records = [r for r in records if r["implementation"] == name]
+        if "components" in invocation_records[0]:
+            stats[name]["kernel_busy"] = summary([r["busy_us"] for r in invocation_records])
+            stats[name]["stages"] = {
+                kernel: summary([r["components"][i]["duration_us"] for r in invocation_records])
+                for i, kernel in enumerate(lookup_pipeline_kernels(name))
+            }
     result = {"status": "passed", "workload": describe(case), "stats": stats,
               "execution_orders": orders, "audit": audits, "target_samples": records,
               "raw_csv": [str(p) for p in paths], "capture_start_wait": wait_record,
@@ -219,6 +263,8 @@ def _capture(torch, torch_npu, case, names, args, destination, bundles):
 
 def mtp_comparison(runs):
     result = []
+    if not any(r["workload"]["mtp"] == 0 for r in runs):
+        return result
     for run in runs:
         workload = run["workload"]
         if workload["mtp"] == 0:
@@ -397,8 +443,9 @@ def main():
     args = parser.parse_args()
     if any(n in common.MERGE_NAMES for n in args.implementations) and not args.sorted_topk:
         parser.error("joint_merge必须显式指定--sorted-topk，以相同升序输入比较")
-    if args.warmup < 0 or args.repeat <= 0 or args.regression_repeat <= 0 or 0 not in args.mtp:
-        parser.error("warmup>=0、repeat>0且mtp列表必须含0")
+    mtp3_only = bool(args.implementations) and all(n == "joint_rankpipe_ac_512" or n.startswith("joint_mtp3_") for n in args.implementations)
+    if args.warmup < 0 or args.repeat <= 0 or args.regression_repeat <= 0 or (0 not in args.mtp and not mtp3_only):
+        parser.error("warmup>=0、repeat>0且mtp列表必须含0；固定MTP3候选集合可只采MTP3")
     for key in ("mtp", "implementations", "scenarios", "overlaps"):
         if len(getattr(args, key)) != len(set(getattr(args, key))):
             parser.error(key + "不得重复")

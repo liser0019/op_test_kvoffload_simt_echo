@@ -12,13 +12,13 @@ import tempfile
 import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,mtp7_config,fused_tune_bits,layout_hot_bits,stage_exec_bits,layout16_mode,rankpipe_bits
+from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,mtp7_config,mtp3_config,fused_tune_bits,layout_hot_bits,stage_exec_bits,layout16_mode,rankpipe_bits
 from joint_plan_cases import make_case, initial_arrays, validate, layout, INPUTS, OUTPUTS, validate_abcdf
 from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
-    hot=mask if 159<=mask<=251 else None
+    hot=mask if 159<=mask<=257 else None
     execution=mask-143 if 143<=mask<=158 else None
     refine=11 if hot is not None or execution is not None else mask-127 if 127<=mask<=142 else None
     bounds = mask==126
@@ -51,16 +51,52 @@ def build(directory, mask, model_threads=64):
         (directory / 'sparse_kv_plan_launch.h').write_bytes((common / 'sparse_kv_plan_launch.h').read_bytes())
         (directory / 'variant_config.h').write_bytes((ROOT / 'csrc/plan_variants/13_abcdf/variant_config.h').read_bytes())
     library = directory / 'kernel.so'
+    defines = ['-DJOINT_OPT_MASK=' + str(mask)]
+    if cold: defines += ['-DJOINT_COLD_FINISH=1', '-DJOINT_COLD_CPU_MODEL=1']
+    if integrated: defines += ['-DJOINT_INTEGRATED=1']
+    if bounds: defines += ['-DJOINT_PHASE0_BOUNDS=1']
+    if refine is not None: defines += ['-DJOINT_REFINE=1', '-DJOINT_REFINE_BITS=' + str(refine)]
+    if execution is not None: defines += ['-DJOINT_EXEC=1', '-DJOINT_EXEC_BITS=' + str(execution)]
+    if hot is not None:
+        hot_bits = 10 if 193 <= hot <= 257 else hot - 159 if hot <= 190 else 0
+        defines += ['-DJOINT_HOT=1', '-DJOINT_HOT_BITS=' + str(hot_bits),
+                    '-DJOINT_HOT_PART_ONLY=' + str(int(hot == 191)),
+                    '-DJOINT_HOT_MISS_ONLY=' + str(int(hot == 192))]
+    if hot is not None and 193 <= hot <= 257:
+        defines += ['-DJOINT_LAYOUT_HOT_BITS=' + str(layout_hot_bits(hot)),
+                    '-DJOINT_LAYOUT16=' + str(1 if hot >= 228 else 1 + (hot - 216) // 6 if hot >= 216 else hot - 213 if hot in (214, 215) else 0),
+                    '-DJOINT_MTP7_CAPACITY8K=' + str(int(hot in (212, 213))),
+                    '-DJOINT_MTP7_MID_UNIQUE=' + str(int(hot == 203)),
+                    '-DJOINT_MTP7_FUSED_COUNT=' + str(int(hot == 204 or 205 <= hot <= 251)),
+                    '-DJOINT_MTP7_FUSED_TUNE_BITS=' + str(fused_tune_bits(hot) if hot <= 243 else 0),
+                    '-DJOINT_MTP7_PREFIX=' + str(int(hot in (200, 202))),
+                    '-DJOINT_MTP7_MAP16=' + str(int(hot in (201, 202, 214, 215) or hot >= 216)),
+                    '-DJOINT_MTP8=1']
+        config = mtp7_config(hot)
+        defines += ['-DJOINT_MTP7_OPT=' + str(config['opt']),
+                    '-DJOINT_MTP7_REUSE=' + str(int(config['reuse'])),
+                    '-DJOINT_MTP7_TILE=' + str(int(config['tile']))]
+    if hot >= 228:
+        defines += ['-DJOINT_STAGE_EXEC=1', '-DJOINT_STAGE_EXEC_BITS=' + str(stage_exec_bits(hot))]
+    if hot >= 244:
+        defines += ['-DJOINT_RANKPIPE=1', '-DJOINT_RANKPIPE_BITS=' + str(rankpipe_bits(hot))]
+    mtp3 = mtp3_config(hot) if hot is not None else None
+    if mtp3 is not None:
+        defines += ['-DJOINT_MTP3_FULL=' + str(int(mtp3['full'])),
+                    '-DJOINT_MTP3_MAP=' + str(int(mtp3['map'])),
+                    '-DJOINT_MTP3_LOAD=' + str(int(mtp3['load'])),
+                    '-DJOINT_MTP3_DIR475=' + str(int(mtp3.get('dir475', False))),
+                    '-DJOINT_MTP3_BITMAP475=' + str(int(mtp3.get('bitmap475', False)))]
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
-                    '-DJOINT_OPT_MASK=' + str(mask), *(['-DJOINT_COLD_FINISH=1','-DJOINT_COLD_CPU_MODEL=1'] if cold else []), *(['-DJOINT_INTEGRATED=1'] if integrated else []), *(['-DJOINT_PHASE0_BOUNDS=1'] if bounds else []), *(['-DJOINT_REFINE=1','-DJOINT_REFINE_BITS='+str(refine)] if refine is not None else []), *(['-DJOINT_EXEC=1','-DJOINT_EXEC_BITS='+str(execution)] if execution is not None else []), *(['-DJOINT_HOT=1','-DJOINT_HOT_BITS='+str(10 if 193<=hot<=251 else hot-159 if hot<=190 else 0),'-DJOINT_HOT_PART_ONLY='+str(int(hot==191)),'-DJOINT_HOT_MISS_ONLY='+str(int(hot==192))] if hot is not None else []), *([*(['-DJOINT_STAGE_EXEC=1','-DJOINT_STAGE_EXEC_BITS='+str(stage_exec_bits(hot))] if hot>=228 else []),*(['-DJOINT_RANKPIPE=1','-DJOINT_RANKPIPE_BITS='+str(rankpipe_bits(hot))] if hot>=244 else []),'-DJOINT_LAYOUT_HOT_BITS='+str(layout_hot_bits(hot)),'-DJOINT_LAYOUT16='+str(1 if hot>=228 else 1+(hot-216)//6 if hot>=216 else hot-213 if hot in (214,215) else 0),'-DJOINT_MTP7_CAPACITY8K='+str(int(hot in (212,213))),'-DJOINT_MTP7_MID_UNIQUE='+str(int(hot==203)),'-DJOINT_MTP7_FUSED_COUNT='+str(int(hot==204 or hot>=205)),'-DJOINT_MTP7_FUSED_TUNE_BITS='+str(fused_tune_bits(hot)),'-DJOINT_MTP7_PREFIX='+str(int(hot in (200,202))),'-DJOINT_MTP7_MAP16='+str(int(hot in (201,202,214,215) or hot>=216)),'-DJOINT_MTP8=1','-DJOINT_MTP7_OPT='+str(mtp7_config(hot)['opt']),'-DJOINT_MTP7_REUSE='+str(int(mtp7_config(hot)['reuse'])),'-DJOINT_MTP7_TILE='+str(int(mtp7_config(hot)['tile']))] if hot is not None and 193<=hot<=251 else []), '-I' + str(directory),
+                    *defines, '-I' + str(directory),
                     '-I' + str(ROOT / 'checks/simt_variants'),
                     str(ROOT / 'checks/joint_variant_cpu_driver.cpp'), '-o', str(library)], check=True)
     return library
 
 
-def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False, single_sorted=False,hot_packet=False,mtp8=False,capacity8k=False,layout16=0,layout_hot_bits=0):
-    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next or single_sorted, case['max_token'], bitmap, turbo, sorted_union, union_next,hot_packet=hot_packet,mtp8=mtp8,mtp8_capacity8k=capacity8k,layout16=layout16,layout_hot_bits=layout_hot_bits)
+def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=False, joint_entry=True, abcdf=False, merge=False, sorted_union=False, union_next=False, preserve_tail=False, single_sorted=False,hot_packet=False,mtp8=False,capacity8k=False,layout16=0,layout_hot_bits=0,mtp3_full=False,mtp3_475=False,return_aux=False):
+    info = layout(case['topk'], case['capacity'], case['rows'], enabled or union_next or single_sorted, case['max_token'], bitmap, turbo, sorted_union, union_next,hot_packet=hot_packet,mtp8=mtp8,mtp8_capacity8k=capacity8k,layout16=layout16,layout_hot_bits=layout_hot_bits,mtp3_full=mtp3_full,mtp3_475=mtp3_475)
     scratch = max(info['scratch_elements'], 112 * 1024 // 4 + 1) if force_gm else info['scratch_elements']
     max_queries = (scratch - 2 * info['joint_hash_capacity'] - case['capacity']
                    if turbo and enabled else None)
@@ -99,7 +135,10 @@ def execute(library, case, enabled, force_gm, before=None, bitmap=False, turbo=F
         validate_abcdf(case, expected, arrays)
     else:
         validate(case, expected, arrays, enabled, max_queries, merge=merge, float_keys=sorted_union, preserve_tail=preserve_tail, single_sorted=union_next or single_sorted,max_group_rows=8 if mtp8 else 4)
-    return {key: arrays[key].copy() for key in expected}
+    result = {key: arrays[key].copy() for key in expected}
+    if return_aux:
+        result['__workspace'] = arrays['workspace'].copy()
+    return result
 
 
 def main():

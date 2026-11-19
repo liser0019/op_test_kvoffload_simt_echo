@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 import numpy as np
 import peer_plan
-from joint_variants import layout_hot_bits,layout16_mode,is_capacity8k,supports_eight_rows,supports_single_sorted,INTEGRATED_NAMES
+from joint_variants import layout_hot_bits,layout16_mode,is_capacity8k,supports_eight_rows,supports_single_sorted,INTEGRATED_NAMES,mtp3_config,MTP3_NAMES
 from harness_io import add_storage_arguments
 from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initial_arrays, validate, validate_abcdf, require_sorted_topk
 
@@ -84,6 +84,12 @@ def update_inputs(torch, bundle, case):
     bundle["inputs"]["active_rows"].fill_(case.get("active_rows", case["rows"]))
 
 
+def fixed_group_rows(name):
+    if name in MTP3_NAMES:
+        return 4
+    return 8 if supports_eight_rows(name) else 4
+
+
 def prepare(torch, case, name, inputs=None):
     if name not in IMPLEMENTATIONS:
         raise ValueError("Unknown implementation: " + name)
@@ -94,10 +100,24 @@ def prepare(torch, case, name, inputs=None):
     union_next = name.startswith("joint_union_")
     controller_enabled = enabled or supports_single_sorted(name)
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
+    mtp3 = mtp3_config(VARIANTS.get(name, 0)) or {}
     info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
-                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")),mtp8=supports_eight_rows(name),mtp8_capacity8k=is_capacity8k(name),layout16=layout16_mode(name),layout_hot_bits=layout_hot_bits(VARIANTS.get(name,0)))
+                  name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next,
+                  hot_packet=bool((hot_config(name) or {}).get("packet")), mtp8=supports_eight_rows(name),
+                  mtp8_capacity8k=is_capacity8k(name), layout16=layout16_mode(name),
+                  layout_hot_bits=layout_hot_bits(VARIANTS.get(name, 0)),
+                  mtp3_full=bool(mtp3.get("full")), mtp3_475=bool(mtp3.get("dir475") or mtp3.get("bitmap475")))
     if name == peer_plan.NAME:
         info = peer_plan.layout(case["topk"], case["capacity"], case["rows"], case["q_len"])
+    if mtp3.get("lookup_shards"):
+        # Keep synchronized with mtp3_lookup_config.h. Query maps already have
+        # workspace; the three-stage variants append one work region per group.
+        extra_words = 8 + 8192 + 1032 + 8192 // 2
+        info["workspace_elements"] += case["requests"] * extra_words
+        info["lookup_shards"] = mtp3["lookup_shards"]
+    if mtp3.get("bitmap_team"):
+        info["workspace_elements"] += case["requests"] * (2048 + (8200 if mtp3["bitmap_team"] == 1 else 0))
+        info["bitmap_team"] = mtp3["bitmap_team"]
     inputs = upload_inputs(torch, case) if inputs is None else inputs
     if name in INDEPENDENT:
         host = {key: case[key].copy() for key in ABCDF_STATE}
@@ -106,7 +126,7 @@ def prepare(torch, case, name, inputs=None):
     else:
         max_queries = (info["scratch_elements"] - 2 * info["joint_hash_capacity"] - case["capacity"]
                        if is_turbo and enabled else None)
-        if name in SORTED_NAMES: max_queries=(min(case["capacity"],8*case["topk"]) if layout_hot_bits(VARIANTS.get(name,0)) else (8 if supports_eight_rows(name) else 4)*case["topk"]) if enabled else None
+        if name in SORTED_NAMES: max_queries=(min(case["capacity"],fixed_group_rows(name)*case["topk"]) if layout_hot_bits(VARIANTS.get(name,0)) else fixed_group_rows(name)*case["topk"]) if enabled else None
         if name == peer_plan.NAME: max_queries = case["q_len"] * case["topk"]
         host = initial_arrays(case, enabled, max_queries)
     host["workspace"] = np.full(info["workspace_elements"], np.iinfo(np.int32).max, np.int32)
@@ -227,11 +247,11 @@ def _check_uncached(case, bundle, before=None):
                         max_group_rows=case["q_len"], require_power_two_groups=False)
     layout_info = bundle.get("layout", {})
     if bundle["name"] in SORTED_NAMES:
-        max_queries=(8 if supports_eight_rows(bundle["name"]) else 4)*case["topk"] if bundle["joint_enabled"] else None
+        max_queries=fixed_group_rows(bundle["name"])*case["topk"] if bundle["joint_enabled"] else None
     else:
         max_queries = (layout_info["scratch_elements"] - 2 * layout_info["joint_hash_capacity"] - case["capacity"]
                        if VARIANTS.get(bundle["name"]) in TURBO_MASKS and bundle["joint_enabled"] else None)
-    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=supports_single_sorted(bundle["name"]),max_group_rows=8 if supports_eight_rows(bundle["name"]) else 4)
+    return validate(case, before, snapshot(bundle), bundle["joint_enabled"], max_queries, merge=bundle["name"] in MERGE_NAMES, float_keys=bundle["name"] in SORTED_NAMES, preserve_tail=(bundle["name"].startswith("joint_union_") and bool((VARIANTS[bundle["name"]]-74)&8)), single_sorted=supports_single_sorted(bundle["name"]),max_group_rows=fixed_group_rows(bundle["name"]))
 
 
 def _check_readback(case,bundle,values):

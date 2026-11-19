@@ -10,6 +10,35 @@
 #ifndef JOINT_MTP7_TILE
 #define JOINT_MTP7_TILE 0
 #endif
+#ifndef JOINT_MTP3_FULL
+#define JOINT_MTP3_FULL 0
+#endif
+#ifndef JOINT_MTP3_MAP
+#define JOINT_MTP3_MAP 0
+#endif
+#ifndef JOINT_MTP3_LOAD
+#define JOINT_MTP3_LOAD 0
+#endif
+#ifndef JOINT_MTP3_DIR475
+#define JOINT_MTP3_DIR475 0
+#endif
+#ifndef JOINT_MTP3_BITMAP475
+#define JOINT_MTP3_BITMAP475 0
+#endif
+#ifndef JOINT_MTP3_LOOKUP_SHARDS
+#define JOINT_MTP3_LOOKUP_SHARDS 0
+#endif
+#ifndef JOINT_MTP3_BITMAP_TEAM
+#define JOINT_MTP3_BITMAP_TEAM 0
+#endif
+#ifndef JOINT_MTP3_BITMAP_UBMAP
+#define JOINT_MTP3_BITMAP_UBMAP 0
+#endif
+#if JOINT_MTP3_DIR475 || JOINT_MTP3_BITMAP475
+static_assert(!(JOINT_MTP3_DIR475 && JOINT_MTP3_BITMAP475), "475K lookup modes are exclusive");
+static_assert(JOINT_MTP3_FULL, "475K retains the 128KiB merge packet");
+constexpr uint32_t MTP3_475_MAX_TOKEN = 475U * 1024U;
+#endif
 static_assert(JOINT_MTP7_OPT>=0 && JOINT_MTP7_OPT<=2,"MTP7 candidate selector");
 #if JOINT_LAYOUT16
 constexpr uint64_t EIGHT_UB_WORDS=204U*1024U/4U;
@@ -112,6 +141,12 @@ __simt_callee__ __aicore__ inline uint32_t SortedLower(P p, uint32_t n, int32_t 
   return lo;
 }
 
+#if JOINT_MTP3_LOOKUP_SHARDS
+#include "mtp3_lookup.h"
+#endif
+#if JOINT_MTP3_BITMAP_TEAM
+#include "mtp3_bitmap_team.h"
+#endif
 #if JOINT_RANKPIPE
 #include "rankpipe_cold.h"
 #include "rankpipe_plan.h"
@@ -150,7 +185,11 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
       uint64_t words=16ULL*static_cast<uint32_t>(ctx[3]);
       if(HW_C && a.scratchElements<=EIGHT_UB_WORDS)
 #if JOINT_MTP7_MAP16
+#if JOINT_MTP3_FULL
+        words=(rows==4U&&topk==2048U&&capacity==8192U)?32768U:24576U;
+#else
         words=24576U;
+#endif
 #else
         words=a.scratchElements-EIGHT_CTX-((mapRows*topk+capacity+7U)&~7U);
 #endif
@@ -355,7 +394,13 @@ __simt_callee__ __aicore__ inline void SortedStage(const JointPlanArgs& a,
     if(t==0U){ctx[1]=count;if(n)ctx[2]=static_cast<int32_t>(-scores[2U*(n-1U)]);if(count>capacity)ctx[0]=0;
       ctx[29]=1;ctx[6]=0;for(uint32_t r=0;r<rows;++r)if(ctx[48+r]<ctx[56+r])ctx[6]=1;}
     asc_syncthreads();
+#if JOINT_MTP3_BITMAP_TEAM
+  } else if constexpr(Phase==5 || Phase==6 || Phase==9 || Phase==11 || Phase==12) {
+#elif JOINT_MTP3_LOOKUP_SHARDS
+  } else if constexpr(Phase==5 || Phase==6 || Phase==9 || Phase==10) {
+#else
   } else if constexpr(Phase==5 || Phase==6 || Phase==9) {
+#endif
     LayoutHotFinish<Phase>(a,first,end,ctx+EIGHT_CTX,ctx,scan,mapWorkspace);
   }
 
@@ -463,8 +508,21 @@ __simd_vf__ inline void RefineUniqueMapVf(__ubuf__ int32_t* records,
     const uint32_t count=n-base<64U?n-base:64U;
     Reg::Adds(even,lane,base,full);Reg::ShiftLefts(even,even,int16_t{1},full);
     Reg::Adds(odd,even,uint32_t{1},full);
+#if JOINT_MTP3_LOAD
+    const bool pairAligned=(reinterpret_cast<uintptr_t>(records+2U*base)&31U)==0U;
+    if(count==64U&&pairAligned){
+      Reg::LoadAlign<uint32_t,Reg::LoadDist::DIST_DINTLV_B32>(
+          reinterpret_cast<Reg::RegTensor<uint32_t>&>(score),payload,
+          reinterpret_cast<__ubuf__ uint32_t*>(records)+2U*base);
+    }else{
+      Reg::Duplicate(score,0.0f);Reg::Duplicate(payload,uint32_t{0});
+      Reg::Gather<float,float,uint32_t>(score,reinterpret_cast<__ubuf__ float*>(records),even,valid);
+      Reg::Gather<uint32_t,uint32_t,uint32_t>(payload,reinterpret_cast<__ubuf__ uint32_t*>(records),odd,valid);
+    }
+#else
     Reg::Duplicate(score,0.0f);
     Reg::Gather<float,float,uint32_t>(score,reinterpret_cast<__ubuf__ float*>(records),even,valid);
+#endif
     Reg::Gather<float,uint32_t>(shiftScore,score,previousIndex);
     Reg::Select(previous,lastScore,shiftScore,first);
     Reg::Compare<float,CMPMODE::NE>(head,score,previous,valid);
@@ -489,8 +547,10 @@ __simd_vf__ inline void RefineUniqueMapVf(__ubuf__ int32_t* records,
 #endif
     Reg::Select(index,index,safeIndex,writeHead); // even masked indices are unique
     Reg::Scatter<int32_t,uint32_t>(data,token,index,writeHead);
+#if !JOINT_MTP3_LOAD
     Reg::Duplicate(payload,uint32_t{0});
     Reg::Gather<uint32_t,uint32_t,uint32_t>(payload,reinterpret_cast<__ubuf__ uint32_t*>(records),odd,valid);
+#endif
     Reg::Adds(safeIndex,lane,q,full);Reg::Select(payload,payload,safeIndex,valid);
 #if JOINT_MTP7_MAP16
     if (true) {
@@ -798,6 +858,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void EightRankMergeVf
 #else
 #include "layout_hot_simd.h"
 #endif
+#elif JOINT_RANKPIPE && JOINT_STAGE_EXEC
+// Rankpipe uses the stage-exec compact VF without instantiating MTP7 fused kernels.
+#include "stage_exec_simd.h"
 #endif
 
 #if JOINT_RANKPIPE
@@ -809,7 +872,11 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
     GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
     GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
     GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
-    GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
+    GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling
+#if JOINT_MTP3_LOOKUP_SHARDS
+    , int lookupPhase = 0
+#endif
+    ) {
   JointDirectTilingData d;
   const auto* gm=reinterpret_cast<const __gm__ JointDirectTilingData*>(tiling);
   d.hashCapacity=gm->hashCapacity;
@@ -825,10 +892,40 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
   d.scratchElements=gm->scratchElements;
   const int32_t requested=*reinterpret_cast<__gm__ int32_t*>(activeRows);
   const int64_t rows=requested<=0?0:requested<d.maxRows?requested:d.maxRows;
-  const int64_t start=AscendC::GetBlockIdx(),stride=AscendC::GetBlockNum();if(start>=rows)return;
+  const int64_t start=AscendC::GetBlockIdx(),stride=AscendC::GetBlockNum();
+#if JOINT_MTP3_BITMAP_TEAM // Omit from frozen fusion export.
+  const auto* rowToReq = reinterpret_cast<const __gm__ int32_t*>(tokenToReq);
+  const auto* modes = reinterpret_cast<const __gm__ int32_t*>(rowModes);
+  const auto* last = reinterpret_cast<const __gm__ int64_t*>(lastReqIds);
+  const auto* requests = reinterpret_cast<const __gm__ int64_t*>(reqIds);
+  const bool team = AllowJoint && d.jointHashCapacity != 0U &&
+                    BitmapTeamEligible(rowToReq, rows, d.maxRequests, stride);
+  auto* shared = reinterpret_cast<__gm__ int32_t*>(compactWorkspace) +
+                 d.maxRows * (bitmap_team::kTopK / 2);
+  if (!team && start >= rows) return;
+#else
+  if(start>=rows)return;
+#endif // JOINT_MTP3_BITMAP_TEAM
   AscendC::TPipe pipe;AscendC::TBuf<AscendC::TPosition::VECCALC> storage;pipe.InitBuffer(storage,d.localMemoryBytes);
   auto local=storage.Get<int32_t>();auto* scan=reinterpret_cast<__ubuf__ int32_t*>(local.GetPhyAddr());
   auto* ctx=scan+PLAN_SCAN_STORAGE_ELEMENTS;
+#if JOINT_MTP3_BITMAP_TEAM // Omit from frozen fusion export.
+  if (team && start >= d.maxRequests) {
+    const int64_t group = start - d.maxRequests;
+    if constexpr (JOINT_MTP3_BITMAP_TEAM == 1) AscendC::SyncAll<true>();
+    const int64_t first = group * 4;
+    if (group < d.maxRequests && BitmapTeamHot(first, rowToReq, modes, last, requests)) {
+      BitmapTeamHelper(pipe, local, scan, shared + group*bitmap_team::kRequestWords,
+          first, static_cast<uint32_t>(d.maxToken),
+          reinterpret_cast<const __gm__ int32_t*>(topkIndices),
+          reinterpret_cast<const __gm__ int32_t*>(visibleSeqLens),
+          reinterpret_cast<const __gm__ int32_t*>(stablePrefixLens),
+          reinterpret_cast<const __gm__ int32_t*>(slotToToken));
+    }
+    AscendC::SyncAll<true>();
+    return;
+  }
+#endif // JOINT_MTP3_BITMAP_TEAM
 #define SORTED_CALL(PHASE) asc_vf_call<SortedStageVf<PHASE>>(dim3((PHASE)==4?PLAN_THREADS:SORTED_THREADS), scan, reinterpret_cast<__gm__ int64_t*>(reqIds), reinterpret_cast<__gm__ int64_t*>(lastReqIds), \
       reinterpret_cast<__gm__ int32_t*>(topkIndices),reinterpret_cast<__gm__ int32_t*>(stablePrefixLens), \
       reinterpret_cast<__gm__ int32_t*>(visibleSeqLens),reinterpret_cast<__gm__ int32_t*>(tokenToReq), \
@@ -845,6 +942,17 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
     int64_t end=first+1;const int32_t req=reinterpret_cast<__gm__ int32_t*>(tokenToReq)[first];
     while(end<rows&&reinterpret_cast<__gm__ int32_t*>(tokenToReq)[end]==req)++end;
     if(group%stride==start){
+#if JOINT_MTP3_LOOKUP_SHARDS // Omit from frozen fusion export.
+      const bool aligned = !(first % mtp3_lookup::kRowsPerRequest) &&
+                           end - first == mtp3_lookup::kRowsPerRequest;
+      const bool prepared = lookupPhase == mtp3_lookup::kCommit && aligned;
+      auto* lookupWorkspace = reinterpret_cast<__gm__ int32_t*>(compactWorkspace);
+      if (prepared) {
+        asc_vf_call<Mtp3LookupTransferVf<false>>(dim3(SORTED_THREADS), ctx, lookupWorkspace,
+            d.maxRequests, first, static_cast<uint32_t>(d.maxToken), false);
+        SortedVectorToScalar(pipe);
+      } else if (lookupPhase != mtp3_lookup::kPrepare || aligned) {
+#endif // JOINT_MTP3_LOOKUP_SHARDS
       SORTED_CALL(0);SortedVectorToScalar(pipe);
       while(ctx[0]==1&&(!HW_A||ctx[6])){
         SORTED_CALL(1);SortedVectorToScalar(pipe);if(ctx[28]==0)break;
@@ -1064,15 +1172,87 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
 #endif
         SortedVectorToScalar(pipe);
       }
+#if JOINT_MTP3_LOOKUP_SHARDS // Omit from frozen fusion export.
+      }
+      if (lookupPhase == mtp3_lookup::kPrepare) {
+        if (aligned) {
+          const int32_t req = reinterpret_cast<__gm__ int32_t*>(tokenToReq)[first];
+          const bool hot = ctx[0] == 1 && req >= 0 && req < d.maxRequests &&
+              reinterpret_cast<__gm__ int32_t*>(rowModes)[first] == ROW_JOINT &&
+              reinterpret_cast<__gm__ int64_t*>(lastReqIds)[first] ==
+                  reinterpret_cast<__gm__ int64_t*>(reqIds)[req];
+          asc_vf_call<Mtp3LookupTransferVf<true>>(dim3(SORTED_THREADS), ctx, lookupWorkspace,
+              d.maxRequests, first, static_cast<uint32_t>(d.maxToken), hot);
+          SortedVectorToScalar(pipe);
+        }
+        ++group;
+        first = end;
+        continue;
+      }
+#endif // JOINT_MTP3_LOOKUP_SHARDS
+#if JOINT_MTP3_BITMAP_TEAM // Omit from frozen fusion export.
+      bool teamHot = false;
+      if (team) {
+        using namespace bitmap_team;
+        auto* exchange = shared + group*kRequestWords;
+        teamHot = ctx[0] == 1 && BitmapTeamHot(first, rowToReq, modes, last, requests);
+        if constexpr (JOINT_MTP3_BITMAP_TEAM == 1) {
+          const uint32_t count = static_cast<uint32_t>(ctx[1]);
+          if (teamHot && count != 0U) {
+            BitmapTeamWrite(pipe, exchange + kHeader, local[kUniqueOffset], (count + 7U) & ~7U);
+          }
+          // Publish an entire 32-byte header. Only the first field is read.
+          constexpr uint32_t headerOffset = PLAN_SCAN_STORAGE_ELEMENTS + 96U;
+          ctx[96] = teamHot ? static_cast<int32_t>(count) : -1;
+          for (uint32_t i = 1; i < kHeader; ++i) ctx[96 + i] = 0;
+          BitmapTeamFence<AscendC::HardEvent::S_MTE3>(pipe);
+          BitmapTeamWrite(pipe, exchange, local[headerOffset], kHeader);
+          AscendC::SyncAll<true>();
+        }
+        if (teamHot) {
+          SORTED_CALL(11);
+          SortedVectorToScalar(pipe);
+        }
+        AscendC::SyncAll<true>();
+        if (teamHot && ctx[0] == 1) {
+          const uint32_t span = ((static_cast<uint32_t>(d.maxToken) + 31U) / 32U + 7U) & ~7U;
+          const uint32_t slotOffset = 2U*span > 2U*kCapacity ? 2U*span : 2U*kCapacity;
+          BitmapTeamRead(pipe, local[kOwnerOffset + slotOffset + kResultWords],
+                         exchange + kResultOffset, kResultWords);
+        }
+      }
+#endif // JOINT_MTP3_BITMAP_TEAM
       if(ctx[0]==1){
         if constexpr(JOINT_LAYOUT16==1 && (JOINT_LAYOUT_HOT_BITS&2U)){
+#if JOINT_MTP3_BITMAP_TEAM // Omit from frozen fusion export.
+          if (teamHot) {
+            SORTED_CALL(12); SortedVectorToScalar(pipe);
+          } else
+#endif // JOINT_MTP3_BITMAP_TEAM
+#if JOINT_MTP3_LOOKUP_SHARDS // Omit from frozen fusion export.
+          if (prepared) {
+            SORTED_CALL(10); SortedVectorToScalar(pipe);
+          } else {
+#endif // JOINT_MTP3_LOOKUP_SHARDS
           SORTED_CALL(6);SortedVectorToScalar(pipe);
+#if JOINT_MTP3_LOOKUP_SHARDS // Omit from frozen fusion export.
+          }
+#endif // JOINT_MTP3_LOOKUP_SHARDS
           if(ctx[0]==1){
+#if JOINT_MTP3_MAP || JOINT_MTP3_BITMAP_UBMAP // map stays in UB
+            const bool hotUbMap=d.capacity==8192U && d.topk==2048U && (end-first)==4;
+#if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 2)
+            asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);
+#else
+            asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]),hotUbMap);
+#endif
+#else // frozen rankpipe launch ABI
 #if JOINT_RANKPIPE && (JOINT_RANKPIPE_BITS & 2)
             asc_vf_call<RankPipeCompactVf>(dim3(SORTED_THREADS),ctx+EIGHT_CTX,ctx,scan,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
 #else
             asc_vf_call<LayoutHotCompactVf>(ctx+EIGHT_CTX,ctx,static_cast<uint32_t>(d.capacity),static_cast<uint32_t>(ctx[1]));
 #endif
+#endif // JOINT_MTP3_MAP
             SortedVectorToScalar(pipe);
             if(ctx[0]==1){SORTED_CALL(9);SortedVectorToScalar(pipe);}
           }
