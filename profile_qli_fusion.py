@@ -394,8 +394,12 @@ def main_run(args,report):
             current={'implementation':None,'phase':None,'call':0}
             def invoke(n,phase):
                 b=bundles.get(n);current.update(implementation=n,phase=phase,call=calls[n]+1)
+                # In the pair-only gate, GM election cannot win from a count
+                # of 16. A correct Plan result with untouched counts proves
+                # the local handoff ran for every group in this fixture.
+                ready_initial=16 if args.prove_pair and n=='native_pair4' else 0
                 if b is not None:
-                    common.restore(torch,b);ready.zero_();torch.npu.synchronize()
+                    common.restore(torch,b);ready.fill_(ready_initial);torch.npu.synchronize()
                 if n not in plan_only:
                     topk_outputs[n].fill_(-777)
                 torch.npu.synchronize()
@@ -430,10 +434,10 @@ def main_run(args,report):
                 for k,before in readonly.items():
                     if not torch.equal(inputs.qli[k].view(torch.uint8),before.view(torch.uint8)):raise RuntimeError('read-only QLI input modified: '+k)
                 if not torch.equal(inputs.plan_metadata['host_block_table'],host_table_before):raise RuntimeError('read-only Plan host_block_table modified')
-                if not torch.equal(ready,torch.zeros_like(ready)):
+                if not torch.all(ready==ready_initial):
                     counts = ready.cpu().numpy()
-                    raise RuntimeError(f'{n}: publication counter not returned to zero: '
-                                       f'{[(int(i), int(counts[i])) for i in np.flatnonzero(counts)]}')
+                    raise RuntimeError(f'{n}: expected publication counter {ready_initial}: '
+                                       f'{[(int(i), int(counts[i])) for i in np.flatnonzero(counts!=ready_initial)]}')
                 for guard in (ds[:16],ds[-16:]):
                     if not torch.all(guard==common.GUARD_VALUE):raise RuntimeError('split QLI workspace guard changed')
                 for guard in (topk_guards[n][:16],topk_guards[n][-16:]):
@@ -449,6 +453,8 @@ def main_run(args,report):
                         raise RuntimeError(f'{n}: expected {shape.batch} joint groups and zero fallback')
                     if (n in FACTORIAL_ROLES or n in MTP3_ROLES) and (result_info['joint_groups']!=shape.batch or result_info['overflow_groups']):
                         raise RuntimeError(f'{n}: expected {shape.batch} joint groups and zero fallback')
+                if ready_initial:
+                    result_info['local_pair_groups_verified']=result_info['joint_groups']
                 return event_us,host_us,result_info
             begin=time.monotonic()
             try:
@@ -738,6 +744,7 @@ def main():
     p.add_argument('--warmup',type=int,default=2);p.add_argument('--repeat',type=int,default=5);p.add_argument('--regression-repeat',type=int,default=1)
     p.add_argument('--seed',type=int,default=2026);p.add_argument('--kernel-map',type=Path)
     p.add_argument('--gate-only',action='store_true',help='只验证融合A/B/C，可测短序列尾部-1；不运行独立Plan或生成性能数字')
+    p.add_argument('--prove-pair',action='store_true',help='只在门禁中污染 native_pair4 的 GM 计数，验证完整四行组确实使用同组 AIV 交接')
     args=p.parse_args()
     if args.gate_only:
         args.implementations=[n for n in args.implementations if n not in INDEXER_ONLY | SPLIT_ROLES | set(PEER_OPERATORS)]
@@ -746,6 +753,8 @@ def main():
             p.error('use a short profiling run for independent MTP3 Plan candidates')
     if args.requests<1 or args.repeat<1 or args.regression_repeat<1 or args.warmup<0 or any(x<(8 if args.gate_only else 2048) for x in args.contexts):p.error('invalid sizes/counts')
     implementations=set(args.implementations)
+    if args.prove_pair and (not args.gate_only or 'native_pair4' not in implementations):
+        p.error('--prove-pair requires --gate-only and native_pair4')
     if not implementations or len(implementations)!=len(args.implementations):
         p.error('implementations must be nonempty and unique')
     effective_split_roles=SPLIT_ROLES - ({'split4','final4'} if args.indexer_only else set())
