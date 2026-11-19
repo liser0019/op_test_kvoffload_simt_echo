@@ -20,15 +20,18 @@ IMPLEMENTATIONS = (
     ("joint_mtp3_map_512", 253),
     ("joint_mtp3_load_512", 254),
     ("joint_mtp3_full_load_512", 255),
+    ("joint_mtp3_bounded_512", 256),
+    ("joint_mtp3_full_bounded_512", 257),
 )
 
 
 def target_case(kind: str):
-    case = make_case(1, 2048, 8192, 262144, 3, "full_cache_75pct", "disjoint",
+    max_token = 102400 if kind == "bounded100k" else 153600 if kind == "bounded150k" else 262144
+    case = make_case(1, 2048, 8192, max_token, 3, "full_cache_75pct", "disjoint",
                      history_pool_tokens=8192)
     token_to_req = np.zeros(4, np.int32)
-    visible = np.full(4, 262144, np.int32)
-    stable = np.full(4, 262144, np.int32)
+    visible = np.full(4, max_token - 16, np.int32)
+    stable = np.full(4, max_token - 16, np.int32)
     query = np.empty((4, 2048), np.int32)
     for row in range(4):
         query[row] = row * 2048 + np.random.default_rng(9100 + row).permutation(2048)
@@ -76,16 +79,20 @@ def run(report_path: Path | None):
     assert MASKS["mtp3_map_512"] == 253
     assert MASKS["mtp3_load_512"] == 254
     assert MASKS["mtp3_full_load_512"] == 255
+    assert MASKS["mtp3_bounded_512"] == 256
+    assert MASKS["mtp3_full_bounded_512"] == 257
     normal = layout(2048, 8192, 4, True, 262144, layout16=1, layout_hot_bits=15, mtp8=True)
     full = layout(2048, 8192, 4, True, 262144, layout16=1, layout_hot_bits=15,
                   mtp8=True, mtp3_full=True)
     assert normal["dynamic_ub_bytes"] == 148256, normal
     assert full["dynamic_ub_bytes"] == 181024, full
     assert full["scratch_elements"] - normal["scratch_elements"] == 8192
-    assert mtp3_config(252) == {"full": True, "map": False, "load": False}
-    assert mtp3_config(253) == {"full": False, "map": True, "load": False}
-    assert mtp3_config(254) == {"full": False, "map": False, "load": True}
-    assert mtp3_config(255) == {"full": True, "map": False, "load": True}
+    assert mtp3_config(252) == {"full": True, "map": False, "load": False, "bounded_bitmap": False}
+    assert mtp3_config(253) == {"full": False, "map": True, "load": False, "bounded_bitmap": False}
+    assert mtp3_config(254) == {"full": False, "map": False, "load": True, "bounded_bitmap": False}
+    assert mtp3_config(255) == {"full": True, "map": False, "load": True, "bounded_bitmap": False}
+    assert mtp3_config(256) == {"full": False, "map": False, "load": False, "bounded_bitmap": True}
+    assert mtp3_config(257) == {"full": True, "map": False, "load": False, "bounded_bitmap": True}
 
     records = []
     with tempfile.TemporaryDirectory(prefix="mtp3_cpu_gate_") as tmp:
@@ -102,6 +109,8 @@ def run(report_path: Path | None):
                                    ("empty", "full_cache_75pct"),
                                    ("all_hits", "full_cache_75pct"),
                                    ("repeated_resident", "full_cache_75pct"),
+                                   ("bounded100k", "full_cache_75pct"),
+                                   ("bounded150k", "full_cache_75pct"),
                                    ("disjoint", "cold_reset")):
                 case = target_case(kind)
                 case["scenario"] = scenario

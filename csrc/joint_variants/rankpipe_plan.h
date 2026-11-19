@@ -20,9 +20,6 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
 #else
   auto* flags=map;
 #endif
-  // A's index and slot UID table use the dead merge packet region, at most96KiB.
-  const bool directRank=(JOINT_RANKPIPE_BITS&1U) && a.maxToken<=262144;
-  auto* slotLookup=directRank?reinterpret_cast<__ubuf__ uint16_t*>(owner+16384U):part;
   const int64_t qb=first*topk,cb=first*c;
   const uint32_t rows=end-first;
   const int32_t req=a.tokenToReq[first];const int64_t reqid=a.reqIds[req];
@@ -40,6 +37,9 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   int32_t stable=a.stablePrefixLens[first];
   for(int64_t r=first+1;r<end;++r)if(a.stablePrefixLens[r]<stable)stable=a.stablePrefixLens[r];
   if(stable<0)stable=0;if(stable>a.maxToken)stable=a.maxToken;
+  // A's index and slot UID table use the dead merge packet region, at most96KiB.
+  const bool directRank=(JOINT_RANKPIPE_BITS&1U) && a.maxToken<=262144;
+  auto* slotLookup=directRank?reinterpret_cast<__ubuf__ uint16_t*>(owner+16384U):part;
 #if JOINT_LAYOUT16 == 1
 #if JOINT_MTP3_MAP
   if(!hotUbMap)
@@ -50,7 +50,12 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   if(directRank){
     auto* masks=reinterpret_cast<__ubuf__ uint32_t*>(owner);
     auto* firstUid=reinterpret_cast<__ubuf__ uint32_t*>(owner+8192U);
-    const uint32_t words=(static_cast<uint32_t>(a.maxToken)+31U)/32U;
+    // Tokens at or above the stable prefix are invalidated before lookup. In a
+    // short-context request they need no bitmap word, so bound the mandatory
+    // clear by the actual stable prefix while retaining maxToken as the gate.
+    const uint32_t bitmapExtent=JOINT_RANKPIPE_BOUNDED_BITMAP?static_cast<uint32_t>(stable)
+                                                           :static_cast<uint32_t>(a.maxToken);
+    const uint32_t words=(bitmapExtent+31U)/32U;
     for(uint32_t w=t;w<words;w+=SORTED_THREADS)masks[w]=0U;
     asc_syncthreads(); // zero bitmap before the single-writer heads publish words
     for(uint32_t uid=t;uid<u;uid+=SORTED_THREADS){

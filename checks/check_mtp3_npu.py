@@ -36,7 +36,7 @@ def main():
     per_implementation = {}
     workspace_no_spill = {}
     try:
-        for kind in ("disjoint", "overlap40", "short", "empty"):
+        for kind in ("disjoint", "overlap40", "short", "empty", "bounded100k", "bounded150k"):
             case = target_case(kind)
             case["scenario"] = "full_cache_75pct"
             for name in names:

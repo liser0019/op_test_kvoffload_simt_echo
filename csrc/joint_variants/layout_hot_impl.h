@@ -19,6 +19,9 @@
 #ifndef JOINT_MTP3_LOAD
 #define JOINT_MTP3_LOAD 0
 #endif
+#ifndef JOINT_RANKPIPE_BOUNDED_BITMAP
+#define JOINT_RANKPIPE_BOUNDED_BITMAP 0
+#endif
 static_assert(JOINT_MTP7_OPT>=0 && JOINT_MTP7_OPT<=2,"MTP7 candidate selector");
 #if JOINT_LAYOUT16
 constexpr uint64_t EIGHT_UB_WORDS=204U*1024U/4U;

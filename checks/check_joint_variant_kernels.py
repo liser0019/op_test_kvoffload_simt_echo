@@ -18,7 +18,7 @@ from joint_plan_common import TENSOR_ORDER
 
 
 def build(directory, mask, model_threads=64):
-    hot=mask if 159<=mask<=255 else None
+    hot=mask if 159<=mask<=257 else None
     execution=mask-143 if 143<=mask<=158 else None
     refine=11 if hot is not None or execution is not None else mask-127 if 127<=mask<=142 else None
     bounds = mask==126
@@ -58,11 +58,11 @@ def build(directory, mask, model_threads=64):
     if refine is not None: defines += ['-DJOINT_REFINE=1', '-DJOINT_REFINE_BITS=' + str(refine)]
     if execution is not None: defines += ['-DJOINT_EXEC=1', '-DJOINT_EXEC_BITS=' + str(execution)]
     if hot is not None:
-        hot_bits = 10 if 193 <= hot <= 255 else hot - 159 if hot <= 190 else 0
+        hot_bits = 10 if 193 <= hot <= 257 else hot - 159 if hot <= 190 else 0
         defines += ['-DJOINT_HOT=1', '-DJOINT_HOT_BITS=' + str(hot_bits),
                     '-DJOINT_HOT_PART_ONLY=' + str(int(hot == 191)),
                     '-DJOINT_HOT_MISS_ONLY=' + str(int(hot == 192))]
-    if hot is not None and 193 <= hot <= 255:
+    if hot is not None and 193 <= hot <= 257:
         defines += ['-DJOINT_LAYOUT_HOT_BITS=' + str(layout_hot_bits(hot)),
                     '-DJOINT_LAYOUT16=' + str(1 if hot >= 228 else 1 + (hot - 216) // 6 if hot >= 216 else hot - 213 if hot in (214, 215) else 0),
                     '-DJOINT_MTP7_CAPACITY8K=' + str(int(hot in (212, 213))),
@@ -76,15 +76,16 @@ def build(directory, mask, model_threads=64):
         defines += ['-DJOINT_MTP7_OPT=' + str(config['opt']),
                     '-DJOINT_MTP7_REUSE=' + str(int(config['reuse'])),
                     '-DJOINT_MTP7_TILE=' + str(int(config['tile']))]
-    if hot >= 228:
+    if hot is not None and hot >= 228:
         defines += ['-DJOINT_STAGE_EXEC=1', '-DJOINT_STAGE_EXEC_BITS=' + str(stage_exec_bits(hot))]
-    if hot >= 244:
+    if hot is not None and hot >= 244:
         defines += ['-DJOINT_RANKPIPE=1', '-DJOINT_RANKPIPE_BITS=' + str(rankpipe_bits(hot))]
     mtp3 = mtp3_config(hot) if hot is not None else None
     if mtp3 is not None:
         defines += ['-DJOINT_MTP3_FULL=' + str(int(mtp3['full'])),
                     '-DJOINT_MTP3_MAP=' + str(int(mtp3['map'])),
-                    '-DJOINT_MTP3_LOAD=' + str(int(mtp3['load']))]
+                    '-DJOINT_MTP3_LOAD=' + str(int(mtp3['load'])),
+                    '-DJOINT_RANKPIPE_BOUNDED_BITMAP=' + str(int(mtp3['bounded_bitmap']))]
     subprocess.run(['g++', '-std=c++20', '-O1', '-pthread', '-shared', '-fPIC',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-fvisibility=hidden',
                     *defines, '-I' + str(directory),

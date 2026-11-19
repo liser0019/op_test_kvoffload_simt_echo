@@ -242,7 +242,7 @@
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
     "build_joint_plan.sh": "0de9b74853201d25244dd6759ad2db974399d7ef22e06ddf230e3e18c9cf30cc",
-    "joint_plan/CMakeLists.txt": "909da6c19bce470bc1a5e10b6443be6f9768eb0b2a0663f158b34dbe04a2d3e7",
+    "joint_plan/CMakeLists.txt": "f5a088444146b78e3b117d9d65b7caaeff0e5ddd8cf00ea9433db5d23f3af9e2",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -271,13 +271,13 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "5b58829a0137451c1f7c9c2a77c090eb59281dcf04c9854aedd6e62cf8719242",
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "joint_variants.py": "9de9e4c65e8994216a5b321a054abb4dd1a3452e129e723b68f295f191f07a72",
-    "checks/generate_joint_variants.py": "fb1dd83ef712f6b7499fbf06b18732c12306a82bdf8aa56054acf186d26da168",
-    "checks/check_joint_variant_kernels.py": "d789ba41c4bc81afd1a15f5913014b476b6ba4f70ab916beaa07b39d04ac7661",
+    "joint_variants.py": "978f8395acde5116b8ccc26de9af80fe7f31f3333c4feaf77f5aff993e8e83cd",
+    "checks/generate_joint_variants.py": "24f18acda05c7fb29efc370dfb5534ac37df75ed8298a0af5d3d8dab6c8cb5de",
+    "checks/check_joint_variant_kernels.py": "4343daf08a54decc835cafc29be31abd155222bc453dee9dd7144305b9bfc6c8",
     "checks/joint_variant_cpu_driver.cpp": "44d202ca33e11c93b3b859118c2656c0a6c55776fe1729ca0d070a1185bada24",
     "checks/simt_variants/cpu_runtime.h": "e7d893c63524557c2ce3d0280a369214e834d41e56b6eca48277a54754b62356",
     "csrc/joint_variants/sparse_kv_joint_plan.h": "c49bb5a237e4d97d90744a2faa73b8e942037ac7bb36756fd9e80ad91748d1c9",
-    "csrc/joint_variants/plugin.cpp": "5458ff03e1133500fa8ab50d2ec008ebb8f5badf53e05f6815737beb3e8bde30",
+    "csrc/joint_variants/plugin.cpp": "720c25f909ea8e7f6a438a4759c98e685f1f4a825ba1527687ebaf01f1675873",
     "csrc/joint_variants/options.h": "4b66a8f8d25d1d71cebca1ae98bf74b70c928358c01a1626ea62f5ffee13bb18",
     "csrc/joint_variants/kernel.cpp": "bb1b280f9bc65f22a8a04cc7409d462c6af6b8d8bbf584ed711f790c258e6b70",
     "csrc/joint_variants/bitmap_plan.h": "f667fe4216b90bc24eb4ce7113025e1d9ebc5a739860cdeaf170f0e12e1d3eb2",
@@ -457,7 +457,7 @@
     "scripts/test_capacity16k.sh": "fb0a8fa385bcebcbadd923511ae8efd343552142b5a15477950d7144dc060b80",
     "checks/check_capacity16_layout.py": "1e9121714861d3e6b68b67062885931a2450a9bcd238b194821c7e77bffc1331",
     "docs/MTP7_16K两种布局对照.md": "7223329f179a896c0d1cdb342199312ec34ca7138e0b12a1db852f69bc40a35c",
-    "csrc/joint_variants/layout_hot_impl.h": "aef12f0449036083faa1e6e8c93ee5a37dd47de3fbf4a2869e97f5f0436a26a3",
+    "csrc/joint_variants/layout_hot_impl.h": "aed017c65b41e974ba8da8442b01ec0abcd8d387698d0374106f1abf7d6e4f42",
     "csrc/joint_variants/layout_hot_fused.h": "6c75639883ee0a71150b20f6ed3ad687732db195cb810a4a96480a71acbd772f",
     "csrc/joint_variants/layout_hot_plan.h": "88afdf1e814aa4eac89a1d3424b879dc751e662426a0b7da030eb31c286fdef3",
     "csrc/joint_variants/layout_hot_simd.h": "e9909d7e6fb5ffe9231c31cae1822d235e1d06025b4eac5e6d0f144192f8e635",
@@ -484,7 +484,7 @@
     "checks/check_stage_exec_edges.py": "b662435d1adacfe931e7e148100f1c2dc7edb0f65271c40613171efc6a38f324",
     "scripts/test_stage_exec_sweep.sh": "d8dbeddfe32f5e34de1fb555bb8420d8fb4468b610d6ccebdb8a40dc059835b2",
     "checks/stage_exec_suite.py": "7fb29941a268a8471356214d1b59692b5273e43c9aee29cabf7af067beb06e26",
-    "csrc/joint_variants/rankpipe_plan.h": "94f9d8c1d22df1fd67f0b51d9708c2c03ae9d9ad3bb30befa39c64211cfcfc77",
+    "csrc/joint_variants/rankpipe_plan.h": "70d5c97bcb3e5d6645d152432faa74e40ee4560ea2dc6a76a5b1a175d9829ce9",
     "checks/check_rankpipe_edges.py": "c056928e3e8fb497f256228557f077017b193e0adb0f36e3b7151e90f4d5533b",
     "design/rankpipe/stage.dag.json": "3221cbe700365fe46ad830222a904ba0ba686d0556aca265b82d925fe6d426a5",
     "csrc/joint_variants/rankpipe_cold.h": "dbcdc0469c75d49141f812b0a5bad1b02a566e7834ba94245f2f49b046b87073",
@@ -506,8 +506,8 @@
     "checks/check_ab8k_context.py": "3a12e591f933adc263172937eaef4a843cd8b8d1d072aa338f6aeb0c91d3246b",
     "profile_ab8k_context.py": "7f739cd2f94c94f8c46aea2e8694bd5e01d17c97e8d69c345a7574b5b16e26af",
     "scripts/test_ab8k_context.sh": "9edd9c879d1bc4d0e94622cbdc88d2faafe3d2df9d73d4a7d3674bb770ae7768",
-    "checks/check_mtp3_candidates.py": "ec15d721da7414944d42d2589e38dc7ee7ee020b205beb18193d0880e4ad929b",
-    "checks/check_mtp3_npu.py": "0d7c2347ab82dbeb5a9c72851b78698b4d8ef660251417c0becb866a92c6835f",
+    "checks/check_mtp3_candidates.py": "4c70e488766b0f6271ead823f2400cdc2dbd35ad7a9304b6b5d2d9318108191b",
+    "checks/check_mtp3_npu.py": "2762f97291b07a1b84c8f4f72a4de80d6f6d630f6a017d24d936e5add57967a3",
     "scripts/test_mtp3_candidates.sh": "0340dd7288485b5fbb20bca257f34ef430fc9bd87dfc93daae67fb1ce97f4d3a"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
@@ -781,7 +781,9 @@
     "joint_mtp3_full_512": 252,
     "joint_mtp3_map_512": 253,
     "joint_mtp3_load_512": 254,
-    "joint_mtp3_full_load_512": 255
+    "joint_mtp3_full_load_512": 255,
+    "joint_mtp3_bounded_512": 256,
+    "joint_mtp3_full_bounded_512": 257
   },
   "joint_optimizations": {
     "a": "non-joint VF compile-time isolation (protocol retained)",
@@ -3151,7 +3153,9 @@
       "joint_mtp3_full_512": 252,
       "joint_mtp3_map_512": 253,
       "joint_mtp3_load_512": 254,
-      "joint_mtp3_full_load_512": 255
+      "joint_mtp3_full_load_512": 255,
+      "joint_mtp3_bounded_512": 256,
+      "joint_mtp3_full_bounded_512": 257
     },
     "fixed_shape": {
       "rows": 4,
@@ -3162,6 +3166,14 @@
     },
     "build": "bash build_joint_plan.sh --soc=ascend950 --mtp3-only",
     "full_dynamic_ub_bytes": 181024,
-    "map_load_dynamic_ub_bytes": 148256
+    "map_load_dynamic_ub_bytes": 148256,
+    "short_context": {
+      "max_token": [
+        102400,
+        153600
+      ],
+      "bounded_bitmap": "clear only the common stable-prefix word span instead of all max_token words",
+      "full_merge": "64KiB input/output packets permit one complete four-source merge for TopK2048"
+    }
   }
 }
