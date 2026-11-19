@@ -87,7 +87,24 @@ for batch in BATCHES:
             evidence_path = Path(evidence)
             assert evidence_path.is_file(), evidence_path
             artifact_index[str(evidence_path.relative_to(ROOT))] = digest(evidence_path)
-        pair = case["official_vs_ordered_bt_plan_p50"]
+        pair_p50 = case["official_vs_ordered_bt_plan_p50"]
+        official_p95 = stats["baseline"]["span_us"]["p95_us"]
+        ordered_p95 = target["indexer_span_us"]["p95_us"]
+        plan_p95 = target["plan_us"]["p95_us"]
+        gap_p95 = target["between_kernel_gap_us"]["p95_us"]
+        chain_p95 = target["span_us"]["p95_us"]
+        pair_p95 = {
+            "official_indexer_us": official_p95,
+            "ordered_indexer_us": ordered_p95,
+            "plan_us": plan_p95,
+            "between_kernel_gap_us": gap_p95,
+            "chain_span_us": chain_p95,
+            "ordering_cost_us": ordered_p95 - official_p95,
+            "plan_chain_cost_us": chain_p95 - ordered_p95,
+            "total_delta_us": chain_p95 - official_p95,
+            "chain_over_official": chain_p95 / official_p95,
+            "overhead_pct": (chain_p95 / official_p95 - 1) * 100,
+        }
         rows.append({
             "batch": batch,
             "context": case["context"],
@@ -97,10 +114,8 @@ for batch in BATCHES:
             "gap": target["between_kernel_gap_us"],
             "chain_busy": target["busy_us"],
             "chain_span": target["span_us"],
-            "ordering_cost_us": pair["ordering_cost_us"],
-            "plan_chain_cost_us": pair["plan_chain_cost_us"],
-            "total_delta_us": pair["total_delta_us"],
-            "chain_over_official": pair["chain_over_official"],
+            "official_vs_ordered_bt_plan_p50": pair_p50,
+            "official_vs_ordered_bt_plan_p95": pair_p95,
             "descriptors": checks["total_transfer_descriptors"],
             "actual_hit_fraction": 0.9,
         })
@@ -128,22 +143,30 @@ lines = [
     "# 官方 Indexer 与 Ordered Indexer＋Plan 对比", "",
     "固定 MTP3、TopK2048、capacity8192、满缓存90%。每行初始命中1843，miss205。",
     "所有时间为设备数据，单位μs。链路 span 包含两条目标 kernel 的逐样本间隙。", "",
-    "| Batch | Context | 官方 Indexer P50/P95 | Ordered Indexer P50 | Plan P50 | Gap P50 | 链路 P50/P95 | 总增量 | 链路/官方 | 保序增量 | Plan+Gap |",
-    "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| Batch | Context | 官方 Indexer P50/P95 | Ordered Indexer P50 | Plan P50 | Gap P50 | 链路 P50/P95 | ΔTotal P50 | Ratio P50 | ΔOrdered P50 | Plan+Gap P50 | ΔTotal P95 | Ratio P95 |",
+    "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
 ]
 for row in rows:
     lines.append(
         f"| {row['batch']} | {row['context']} | {fmt(row['official_indexer'])} | "
         f"{row['ordered_indexer']['p50_us']:.3f} | {row['plan']['p50_us']:.3f} | "
         f"{row['gap']['p50_us']:.3f} | {fmt(row['chain_span'])} | "
-        f"{row['total_delta_us']:+.3f} | {row['chain_over_official']:.3f} | "
-        f"{row['ordering_cost_us']:+.3f} | {row['plan_chain_cost_us']:+.3f} |"
+        f"{row['official_vs_ordered_bt_plan_p50']['total_delta_us']:+.3f} | "
+        f"{row['official_vs_ordered_bt_plan_p50']['chain_over_official']:.3f} | "
+        f"{row['official_vs_ordered_bt_plan_p50']['ordering_cost_us']:+.3f} | "
+        f"{row['official_vs_ordered_bt_plan_p50']['plan_chain_cost_us']:+.3f} | "
+        f"{row['official_vs_ordered_bt_plan_p95']['total_delta_us']:+.3f} | "
+        f"{row['official_vs_ordered_bt_plan_p95']['chain_over_official']:.3f} |"
     )
 
 for context in CONTEXTS:
-    ratios = [row["chain_over_official"] for row in rows if row["context"] == context]
-    geo = math.exp(sum(math.log(x) for x in ratios) / len(ratios))
-    lines += ["", f"Context {context} 的链路/官方耗时比几何平均为 {geo:.3f}，范围 {min(ratios):.3f}～{max(ratios):.3f}。"]
+    ratios_p50 = [row["official_vs_ordered_bt_plan_p50"]["chain_over_official"]
+                  for row in rows if row["context"] == context]
+    ratios_p95 = [row["official_vs_ordered_bt_plan_p95"]["chain_over_official"]
+                  for row in rows if row["context"] == context]
+    geo_p50 = math.exp(sum(math.log(x) for x in ratios_p50) / len(ratios_p50))
+    geo_p95 = math.exp(sum(math.log(x) for x in ratios_p95) / len(ratios_p95))
+    lines += ["", f"Context {context} 的链路/官方耗时比：P50 几何平均 {geo_p50:.3f}，范围 {min(ratios_p50):.3f}～{max(ratios_p50):.3f}；P95 几何平均 {geo_p95:.3f}，范围 {min(ratios_p95):.3f}～{max(ratios_p95):.3f}。"]
 
 (ROOT / "report.md").write_text("\n".join(lines) + "\n")
 print(ROOT / "report.md")
