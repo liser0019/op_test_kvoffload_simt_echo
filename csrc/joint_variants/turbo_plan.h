@@ -635,8 +635,19 @@ __simt_callee__ __aicore__ inline void RunJointScheduleTurbo(
     }
     return;
   }
+  int64_t activeStart=rowStart,activeStride=rowStride;
+#if JOINT_GROUP_CORE_SPREAD
+  // Adjacent AIV blocks are the two vector engines of one logical AI Core.
+  // For 14-16 request groups, one AIV on every core spreads the same group
+  // count over more hardware cores instead of occupying only the first half.
+  const int64_t groups=numReqs/4;
+  if(groups>0 && groups<=rowStride/2){
+    if((rowStart&1)!=0)return;
+    activeStart=rowStart/2;activeStride=rowStride/2;
+  }
+#endif
   int64_t group = 0;
-  int64_t nextTarget = rowStart;
+  int64_t nextTarget = activeStart;
   for (int64_t row = 0; row + (nextTarget - group) < numReqs;) {
     const int32_t req = tokenToReq[row];
     int64_t end = row + 1;
@@ -648,7 +659,7 @@ __simt_callee__ __aicore__ inline void RunJointScheduleTurbo(
         ProcessRequestRun(args, row, end, compactWorkspace + static_cast<uint64_t>(row) * scratchElements,
                           scanWorkspace, rowModes);
       }
-      nextTarget += rowStride;
+      nextTarget += activeStride;
     }
     ++group;
     row = end;

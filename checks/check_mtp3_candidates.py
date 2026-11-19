@@ -22,6 +22,9 @@ IMPLEMENTATIONS = (
     ("joint_mtp3_full_load_512", 255),
     ("joint_mtp3_bounded_512", 256),
     ("joint_mtp3_full_bounded_512", 257),
+    ("joint_mtp3_full_even_512", 258),
+    ("joint_mtp3_full_map_512", 259),
+    ("joint_mtp3_full_even_map_512", 260),
 )
 
 
@@ -81,18 +84,30 @@ def run(report_path: Path | None):
     assert MASKS["mtp3_full_load_512"] == 255
     assert MASKS["mtp3_bounded_512"] == 256
     assert MASKS["mtp3_full_bounded_512"] == 257
+    assert MASKS["mtp3_full_even_512"] == 258
+    assert MASKS["mtp3_full_map_512"] == 259
+    assert MASKS["mtp3_full_even_map_512"] == 260
     normal = layout(2048, 8192, 4, True, 262144, layout16=1, layout_hot_bits=15, mtp8=True)
     full = layout(2048, 8192, 4, True, 262144, layout16=1, layout_hot_bits=15,
                   mtp8=True, mtp3_full=True)
     assert normal["dynamic_ub_bytes"] == 148256, normal
     assert full["dynamic_ub_bytes"] == 181024, full
     assert full["scratch_elements"] - normal["scratch_elements"] == 8192
-    assert mtp3_config(252) == {"full": True, "map": False, "load": False, "bounded_bitmap": False}
-    assert mtp3_config(253) == {"full": False, "map": True, "load": False, "bounded_bitmap": False}
-    assert mtp3_config(254) == {"full": False, "map": False, "load": True, "bounded_bitmap": False}
-    assert mtp3_config(255) == {"full": True, "map": False, "load": True, "bounded_bitmap": False}
-    assert mtp3_config(256) == {"full": False, "map": False, "load": False, "bounded_bitmap": True}
-    assert mtp3_config(257) == {"full": True, "map": False, "load": False, "bounded_bitmap": True}
+    expected = {
+        252: (True, False, False, False, False),
+        253: (False, True, False, False, False),
+        254: (False, False, True, False, False),
+        255: (True, False, True, False, False),
+        256: (False, False, False, True, False),
+        257: (True, False, False, True, False),
+        258: (True, False, False, False, True),
+        259: (True, True, False, False, False),
+        260: (True, True, False, False, True),
+    }
+    for mask, values in expected.items():
+        full, mapped, load, bounded, spread = values
+        assert mtp3_config(mask) == {"full": full, "map": mapped, "load": load,
+                                     "bounded_bitmap": bounded, "wide_core_spread": spread}
 
     records = []
     with tempfile.TemporaryDirectory(prefix="mtp3_cpu_gate_") as tmp:

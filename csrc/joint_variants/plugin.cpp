@@ -73,7 +73,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 257, "joint variant mask must be 1..257");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 260, "joint variant mask must be 1..260");
     TORCH_CHECK(JointVariantLaunch(variantMask) != nullptr, "joint variant not compiled in this build");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
@@ -142,7 +142,8 @@ class Prepared : public torch::CustomClassHolder {
         d.scratchElements=128U+49152U+(variantMask==215?1536U:0U);
         if(variantMask>=228){
           d.scratchElements=LayoutHotScratch(c,d.workspaceRowElements,1,15);
-          if(variantMask==252 || variantMask==255 || variantMask==257)d.scratchElements+=8192U;
+          if(variantMask==252 || variantMask==255 || variantMask==257 || variantMask==258 ||
+             variantMask==259 || variantMask==260)d.scratchElements+=8192U;
         }else if(variantMask>=216){const int bits[6]={1,3,5,7,13,15};
           d.scratchElements=LayoutHotScratch(c,d.workspaceRowElements,1+(variantMask-216)/6,bits[(variantMask-216)%6]);}
       }
