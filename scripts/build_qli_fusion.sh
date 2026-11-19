@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Dedicated upstream checkout/package: never patch an existing user's source tree.
 set -euo pipefail
-usage="$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only | --native-affinity-only | --native-adaptive-only | --native-scale-l2-only]"
+usage="$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only | --native-affinity-only | --native-adaptive-only | --native-scale-l2-only | --native-balanced-only]"
 if [[ $# -gt 1 ]]; then
   echo "用法：$usage" >&2
   exit 2
@@ -22,6 +22,7 @@ case "${1:-}" in
   --native-affinity-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_group,quant_lightning_indexer_plan_native_group4,quant_lightning_indexer_plan_native_pair4 ;;
   --native-adaptive-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_group,quant_lightning_indexer_plan_native_pair4,quant_lightning_indexer_plan_native_adaptive ;;
   --native-scale-l2-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_adaptive,quant_lightning_indexer_plan_native_scale ;;
+  --native-balanced-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_scale,quant_lightning_indexer_plan_native_balanced ;;
   *) echo "用法：$usage" >&2; exit 2 ;;
 esac
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)

@@ -23,6 +23,7 @@ TOKENS={'split':'quant_lightning_indexer_plan_split','a':'quant_lightning_indexe
         'native_pair4':'quant_lightning_indexer_plan_native_pair4',
         'native_pair_auto':'quant_lightning_indexer_plan_native_adaptive',
         'native_pair_scale_l2':'quant_lightning_indexer_plan_native_scale',
+        'native_pair_balanced':'quant_lightning_indexer_plan_native_balanced',
         'final4':'quant_lightning_indexer_plan_final4',
         'topk_control4':'quant_lightning_indexer_plan_topk_control4',
         'baseline':'quant_lightning_indexer',

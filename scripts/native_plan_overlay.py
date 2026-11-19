@@ -258,7 +258,7 @@ def patch_kernel(dest: Path, camel: str, enabled: bool, fixed_four: bool = False
 
 
 def patch_vector(dest: Path, enabled: bool, grouped: bool = False, paired: bool = False,
-                 pair_two_rows: bool = False) -> None:
+                 pair_two_rows: bool = False, balance_four_owner: bool = False) -> None:
     path = dest / 'op_kernel/arch35/quant_lightning_indexer_service_vector_arch35.h'
     code = path.read_text()
     code = replace(
@@ -436,13 +436,14 @@ __aicore__ inline void QLIVector<QLIT>::ProcessInvalidRow(int64_t row, int64_t o
     }
 }
 } // namespace QLIKernel'''
-        paired_publish = '''        // The paired AIVs process the same complete S1 tile, two rows each.
+        four_owner = '((firstRow >> 2) & 1LL) != 0LL' if balance_four_owner else '(blockId_ & 1U) != 0U'
+        paired_publish = f'''        // The paired AIVs process the same complete S1 tile, two rows each.
         if (!constInfo_.isLDOpen && s1BaseSize_ == 4 && qliCurS1ProcNum == 4 &&
             planHook_->TryPublishPair(firstRow - (blockId_ % 2U) * 2,
-                                      (blockId_ & 1U) != 0U, planRows_, planStorage_,
-                                      reinterpret_cast<__ubuf__ int32_t *>(indicesOutLocal_.GetPhyAddr()), lastRow)) {
+                                      {four_owner}, planRows_, planStorage_,
+                                      reinterpret_cast<__ubuf__ int32_t *>(indicesOutLocal_.GetPhyAddr()), lastRow)) {{
             return;
-        }
+        }}
 '''
         if pair_two_rows:
             paired_publish += '''        // With a complete two-row tile, both AIVs arrive with one row.
