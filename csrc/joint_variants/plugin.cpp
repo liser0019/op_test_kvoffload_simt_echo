@@ -95,8 +95,9 @@ class Prepared : public torch::CustomClassHolder {
           "joint tensor dtype/device/contiguity");
     const int64_t rows = p[1].size(0), requests = p[0].numel();
     if (variantMask >= 252) {
-      TORCH_CHECK(rows == 4 && t == 2048 && c == 8192 && attrs[2] == 262144 && attrs[4] == 1,
-                  "MTP3 candidates require joint rows=4, topk=2048, capacity=8192, maxToken=262144");
+      TORCH_CHECK(requests > 0 && rows % 4 == 0 && rows / 4 == requests &&
+                  t == 2048 && c == 8192 && attrs[2] == 262144 && attrs[4] == 1,
+                  "MTP3 candidates require 4 rows per request, topk=2048, capacity=8192, maxToken=262144");
     }
     TORCH_CHECK(rows <= std::numeric_limits<int32_t>::max() / (c / block), "resident page index exceeds int32");
     Shape(p[1], {rows, t});

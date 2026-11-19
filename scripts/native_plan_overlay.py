@@ -2,7 +2,10 @@
 """Minimal Plan fusion overlay for the standalone ordered Indexer device tree."""
 from pathlib import Path
 
-from export_fusion_plan import replace
+if __package__:
+    from .export_fusion_plan import replace
+else:
+    from export_fusion_plan import replace
 
 
 def rename_sources(root, replacements):
