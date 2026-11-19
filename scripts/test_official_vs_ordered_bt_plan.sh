@@ -24,7 +24,14 @@ REGRESSION_REPEAT=${REGRESSION_REPEAT:-2}
 
 mkdir -p "$OUTPUT"
 printf '%s\n' "$DEVICE" > "$OUTPUT/device.txt"
-git -C "$ROOT" rev-parse HEAD > "$OUTPUT/harness-commit.txt"
+if [[ -n "${HARNESS_COMMIT:-}" ]]; then
+  printf '%s\n' "$HARNESS_COMMIT" > "$OUTPUT/harness-commit.txt"
+elif git -C "$ROOT" rev-parse HEAD > "$OUTPUT/harness-commit.txt" 2>/dev/null; then
+  :
+else
+  echo "源码 archive 场景必须设置 HARNESS_COMMIT" >&2
+  exit 2
+fi
 cat "$PLAN_IDENTITY" > "$OUTPUT/plan-identity.json"
 sha256sum "$PLAN_LIBRARY" > "$OUTPUT/plan-library.sha256"
 
