@@ -657,6 +657,27 @@ def patch_pair_hook(dest: Path, pair_two_rows: bool = False) -> None:
     path.write_text(replace(code, marker, '\n' + method + marker))
 
 
+def patch_arena_drain(dest: Path) -> None:
+    """Order pending Vector DMA before Plan overwrites the shared QLI arena."""
+    path = dest / 'op_kernel/quant_lightning_indexer_fused_hook.h'
+    code = path.read_text()
+    helper = '''    __aicore__ inline void DrainArenaWrites()
+    {
+        auto drain = pipe_->AllocEventID<AscendC::HardEvent::MTE2_V>();
+        AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(drain);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(drain);
+        pipe_->ReleaseEventID<AscendC::HardEvent::MTE2_V>(drain);
+    }
+
+'''
+    marker = '\nprivate:\n    qli_fused_plan::Buffers buffers_{};'
+    if code.count('qli_fused_plan::RunGroup(') < 1:
+        raise RuntimeError('arena drain has no Plan call site')
+    code = replace(code, marker, '\n' + helper + marker)
+    code = code.replace('qli_fused_plan::RunGroup(', 'DrainArenaWrites();qli_fused_plan::RunGroup(')
+    path.write_text(code)
+
+
 def patch_tiling(dest: Path, fixed_four: bool = False) -> None:
     path = dest / 'op_host' / f'{dest.name}_tiling.cpp'
     code = path.read_text()

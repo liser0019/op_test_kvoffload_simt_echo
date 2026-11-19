@@ -255,21 +255,17 @@ def install_native_plan_variant(repo,name,camel,enabled):
     native_plan_overlay.patch_entry(dest,enabled)
     native_plan_overlay.patch_kernel(dest,camel,enabled,fixed_four=fixed_four,
                                     key_scale_l2=name in (NATIVE_PAIR_SCALE,NATIVE_PAIR_BALANCE,NATIVE_PAIR_REUSE,NATIVE_PAIR_BALANCE_REUSE))
-    if reuse_quad:
-        # This overlay consumes the native per-row PublishGroup anchors before
-        # the selected grouped publication policy rewrites them.
-        overlay(dest,3 if enabled else 0,camel,None,
-                final_sort=False,vector_reuse=True,hot_ub_map=False)
     native_plan_overlay.patch_vector(dest,enabled,grouped=grouped,paired=paired,
                                     pair_two_rows=pair_two_rows,balance_four_owner=balance_four_owner)
-    if not reuse_quad:
-        overlay(dest,3 if enabled else 0,camel,None,
-                final_sort=False,vector_reuse=False,hot_ub_map=False)
     native_plan_overlay.patch_tiling(dest,fixed_four=fixed_four)
     if grouped:
         native_plan_overlay.patch_group_hook(dest)
     if paired:
         native_plan_overlay.patch_pair_hook(dest,pair_two_rows=pair_two_rows)
+    if reuse_quad:
+        native_plan_overlay.patch_arena_drain(dest)
+    overlay(dest,3 if enabled else 0,camel,None,
+            final_sort=False,vector_reuse=reuse_quad,hot_ub_map=False)
     if not enabled:
         native_plan_overlay.patch_shell_workspace(dest)
 
@@ -461,10 +457,13 @@ def overlay(folder,mode,suffix,s1_base,*,final_sort=False,vector_reuse=False,hot
         # Explicitly drain pending Vector-owned DMA before borrowing the arena;
         # this does not release or overwrite Cube's separate resMm region.
         anchor='            planHook_->PublishGroup(row, row + 1, planRows_, planStorage_,'
-        s=replace(s,anchor,'''            auto drain=pipe_->AllocEventID<HardEvent::MTE2_V>();
+        if anchor in s:
+            s=replace(s,anchor,'''            auto drain=pipe_->AllocEventID<HardEvent::MTE2_V>();
             SetFlag<HardEvent::MTE2_V>(drain);WaitFlag<HardEvent::MTE2_V>(drain);
             pipe_->ReleaseEventID<HardEvent::MTE2_V>(drain);
 '''+anchor,count=2)
+        elif 'DrainArenaWrites();qli_fused_plan::RunGroup(' not in s:
+            raise RuntimeError('shared arena has no MTE2-to-Plan drain')
         # The upstream class stores no pipe_ member; pass the same TPipe pointer
         # already received by InitBuffers, rather than introducing a global.
         s=s.replace('    int64_t planRows_ = 0;','    int64_t planRows_ = 0;\n    TPipe* pipe_=nullptr;')
