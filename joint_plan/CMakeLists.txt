@@ -240,7 +240,7 @@ foreach(_name IN LISTS JOINT_VARIANT_NAMES)
     if(JOINT_RANKPIPE_ONLY AND NOT _name MATCHES "^(stage_exec_abcd_512|rankpipe_(base|a|b|c|ab|ac|bc|abc)_512)$")
         continue()
     endif()
-    if(JOINT_MTP3_ONLY AND NOT _name MATCHES "^(rankpipe_ac_512|mtp3_(full|map|load|full_load|bounded|full_bounded|full_even|full_map|full_even_map)_512)$")
+    if(JOINT_MTP3_ONLY AND NOT _name MATCHES "^(rankpipe_ac_512|mtp3_.*)$")
         continue()
     endif()
     if(JOINT_STAGE_EXEC_ONLY AND NOT _name MATCHES "^(layout_stage_abcd_512|stage_exec_(base|a|b|c|d|ab|ac|ad|bc|bd|cd|abc|abd|acd|bcd|abcd)_512)$")
@@ -363,6 +363,9 @@ set_source_files_properties("${PEER_PLAN_OBJECT}" PROPERTIES GENERATED TRUE EXTE
 add_library(mtp_joint_plan_ops SHARED "${PEER_PLAN_OBJECT}" "${PEER_PLAN_DIR}/plugin.cpp" ${PAGED_OPT_OBJECTS} ${PAGED_OPT_PLUGINS} "${ABCDF_PAGES_DIR}/plugin.cpp" "${ABCDF_PAGES_OBJECT}" "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
     "${JOINT_OBJECT}" "${ABCDF_DIR}/plugin.cpp" "${ABCDF_OBJECT}"
     "${JOINT_VARIANT_DIR}/plugin.cpp" ${JOINT_VARIANT_OBJECTS})
+if(JOINT_MTP3_ONLY)
+    target_compile_definitions(mtp_joint_plan_ops PRIVATE JOINT_CORE_PROBE=1)
+endif()
 target_include_directories(mtp_joint_plan_ops PRIVATE "${JOINT_GENERATED}")
 separate_arguments(TORCH_FLAGS_LIST NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 target_compile_options(mtp_joint_plan_ops PRIVATE ${TORCH_FLAGS_LIST})

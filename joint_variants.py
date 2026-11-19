@@ -105,23 +105,24 @@ RANKPIPE_MASKS={"rankpipe_"+("".join(c for i,c in enumerate(RANKPIPE_OPTIONS) if
 MASKS.update(RANKPIPE_MASKS)
 RANKPIPE_NAMES=tuple("joint_"+n for n in RANKPIPE_MASKS)
 RANKPIPE_REFS=("abcdf_pages","joint_stage_exec_abcd_512",RANKPIPE_NAMES[0])
-# 固定 MTP3/4x2048/8192 的独立候选；252..260 不参与 MTP7 选择器。
+# 固定 MTP3/4x2048/8192 的独立候选；不参与 MTP7 选择器。
 MTP3_MASKS={"mtp3_full_512":252,"mtp3_map_512":253,"mtp3_load_512":254,
             "mtp3_full_load_512":255,"mtp3_bounded_512":256,
             "mtp3_full_bounded_512":257,"mtp3_full_even_512":258,
-            "mtp3_full_map_512":259,"mtp3_full_even_map_512":260}
+            "mtp3_full_map_512":259,"mtp3_full_even_map_512":260,
+            "mtp3_full_map_grid14_512":264,"mtp3_full_map_grid16_512":265}
 MASKS.update(MTP3_MASKS)
 MTP3_NAMES=tuple("joint_"+n for n in MTP3_MASKS)
 def mtp3_config(mask):
-    if not 252<=mask<=260:return None
-    return {"full":mask in (252,255,257,258,259,260),
-            "map":mask in (253,259,260),"load":mask in (254,255),
+    if not ((252<=mask<=260) or (264<=mask<=265)):return None
+    return {"full":mask in (252,255,257,258,259,260,264,265),
+            "map":mask in (253,259,260,264,265),"load":mask in (254,255),
             "bounded_bitmap":mask in (256,257),
             "wide_core_spread":mask in (258,260)}
-def rankpipe_bits(mask):return 5 if 252<=mask<=260 else mask-244 if 244<=mask<=251 else 0
-def stage_exec_bits(mask): return 15 if 228<=mask<=260 else 0
+def rankpipe_bits(mask):return 5 if (252<=mask<=260 or 264<=mask<=265) else mask-244 if 244<=mask<=251 else 0
+def stage_exec_bits(mask): return 15 if 228<=mask<=265 else 0
 def layout_hot_bits(mask):
-    return 15 if 228<=mask<=260 else sum({"a":1,"b":2,"c":4,"d":8}[x] for x in LAYOUT_HOT_COMBOS[(mask-216)%6]) if 216<=mask<=227 else 0
+    return 15 if 228<=mask<=265 else sum({"a":1,"b":2,"c":4,"d":8}[x] for x in LAYOUT_HOT_COMBOS[(mask-216)%6]) if 216<=mask<=227 else 0
 def layout16_mode(name):
     if name in (*STAGE_EXEC_NAMES,*RANKPIPE_NAMES,*MTP3_NAMES):return 1
     if name in LAYOUT_HOT_NAMES:return 1+(LAYOUT_HOT_MASKS[name[6:]]-216)//6
@@ -130,7 +131,7 @@ def is_capacity8k(name): return name in CAPACITY8K_NAMES
 def fused_tune_bits(mask): return 3 if mask in (213,214,215) or 216<=mask<=251 else mask-204 if 205<=mask<=211 else 0
 MTP7_FUSED_TUNE_NAMES=tuple("joint_"+n for n in MTP7_FUSED_TUNE_MASKS)
 def mtp7_config(mask):
-    if 252<=mask<=260:return {'opt':1,'reuse':False,'tile':False}
+    if 252<=mask<=265:return {'opt':1,'reuse':False,'tile':False}
     if not 193<=mask<=251:return None
     return {'opt':0 if mask==193 else 1 if mask in (194,196,200,201,202,203,204) or 205<=mask<=251 else 2,
             'reuse':mask in (196,197,199,200,201,202,203,204) or 205<=mask<=251,'tile':mask in (198,199)}
@@ -167,7 +168,7 @@ DEFAULT_IMPLEMENTATIONS = ("abcdf", "joint_abc", "joint_bitmap", "joint_turbo")
 
 def algorithm_mask(mask):
     """Public ID122 reuses exact old ACE (A+C+256) compute configuration59."""
-    return 72 if 127<=mask<=260 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
+    return 72 if 127<=mask<=265 else {122:59,123:90,124:72,125:72,126:72}.get(mask,mask)
 
 
 def is_joint(name):
@@ -176,7 +177,7 @@ def is_joint(name):
 
 def description(name):
     mask = VARIANTS.get(name, 0)
-    if 252<=mask<=260:
+    if (252<=mask<=260) or (264<=mask<=265):
         cfg=mtp3_config(mask)
         return {"mask":mask,"parent":"joint_rankpipe_ac_512","threads":512,"private_fallback_threads":1024,
           "structure":"fixed MTP3 4x2048 rankpipe candidate","rankpipe_bits":5,"stage_exec_bits":15,
@@ -184,6 +185,7 @@ def description(name):
           "mtp3_full":cfg["full"],"mtp3_hot_ub_map":cfg["map"],"mtp3_aligned_pair_load":cfg["load"],
           "mtp3_bounded_bitmap":cfg["bounded_bitmap"],
           "mtp3_wide_core_spread":cfg["wide_core_spread"],
+          "launch_grid":"requests" if mask==264 else "round_up_to_8" if mask==265 else "device_max_64",
           "merge_packet_bytes_per_side":65536 if cfg["full"] else 49152,
           "merge_workspace_delta_bytes":32768 if cfg["full"] else 0,
           "dynamic_ub_bytes":181024 if cfg["full"] else 148256,

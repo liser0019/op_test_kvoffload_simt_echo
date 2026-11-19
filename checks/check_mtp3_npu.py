@@ -36,7 +36,7 @@ def main():
     per_implementation = {}
     workspace_no_spill = {}
     try:
-        for kind in ("disjoint", "overlap40", "short", "empty", "bounded100k", "bounded150k"):
+        for kind in ("disjoint", "overlap40", "short", "empty", "bounded100k", "bounded150k", "fallback360k"):
             case = target_case(kind)
             case["scenario"] = "full_cache_75pct"
             for name in names:
@@ -62,7 +62,7 @@ def main():
         report["workspace_no_spill"] = workspace_no_spill
         report["gate"] = {
             "status": "passed",
-            "validation_scope": "fixed MTP3 target shape: 4 rows x TopK2048, capacity8192, maxToken262144",
+            "validation_scope": "fixed MTP3 target shape: 4 rows x TopK2048, capacity8192, maxToken<=524288 (360K uses binary fallback)",
             "implementations": list(names),
             "input_write_regression": {
                 "status": "passed",

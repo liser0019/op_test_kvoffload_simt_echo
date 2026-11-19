@@ -853,3 +853,28 @@ extern "C" void launch_joint_plan(bool jointEntry, GM_ADDR reqIds, GM_ADDR topkI
   else
     sparse_kv_plan_private_kernel<<<blockDim, dynamicUb, stream>>>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling);
 }
+
+#ifdef JOINT_CORE_PROBE
+// Diagnostic-only entry compiled once into the mask252 translation unit. It
+// records how the AIV-only launch maps grid blocks to physical vector cores.
+constexpr uint32_t CORE_PROBE_STRIDE = 128U;  // 512 B per block avoids cross-core cache-line aliasing
+extern "C" __global__ __aicore__ void sparse_kv_plan_core_probe_kernel(GM_ADDR output) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+  AscendC::InitSocState();
+  auto* out=reinterpret_cast<__gm__ int32_t*>(output);
+  const uint32_t block=static_cast<uint32_t>(AscendC::GetBlockIdx());
+  auto* record=out+block*CORE_PROBE_STRIDE;
+  record[0U]=static_cast<int32_t>(block);
+  record[1U]=static_cast<int32_t>(get_coreid());
+  record[2U]=static_cast<int32_t>(AscendC::GetSubBlockIdx());
+  record[3U]=static_cast<int32_t>(AscendC::GetSubBlockNum());
+  record[4U]=static_cast<int32_t>(AscendC::GetBlockNum());
+  record[5U]=static_cast<int32_t>(AscendC::GetTaskRatio());
+  record[6U]=static_cast<int32_t>(AscendC::GetSystemCycle() & 0x7fffffff);
+  record[7U]=0x5042524fU;
+}
+
+extern "C" void launch_core_probe(GM_ADDR output, uint32_t blockDim, void* stream) {
+  sparse_kv_plan_core_probe_kernel<<<blockDim, 0, stream>>>(output);
+}
+#endif

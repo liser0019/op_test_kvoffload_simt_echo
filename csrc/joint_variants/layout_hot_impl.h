@@ -862,7 +862,19 @@ __aicore__ inline void SortedDirectBody(GM_ADDR reqIds, GM_ADDR topkIndices, GM_
   d.scratchElements=gm->scratchElements;
   const int32_t requested=*reinterpret_cast<__gm__ int32_t*>(activeRows);
   const int64_t rows=requested<=0?0:requested<d.maxRows?requested:d.maxRows;
-  const int64_t start=AscendC::GetBlockIdx(),stride=AscendC::GetBlockNum();if(start>=rows)return;
+  int64_t start=AscendC::GetBlockIdx(),stride=AscendC::GetBlockNum();
+#if JOINT_GROUP_CORE_SPREAD
+  // MTP3 candidates use four rows per request. When the request count is no
+  // larger than half of the launched AIV blocks, adjacent AIV ids may be the
+  // two vector subblocks of one logical AI Core. Use only even AIV ids so each
+  // request group occupies one AIV on a distinct logical core.
+  const int64_t groups=rows/4;
+  if(groups>0 && groups<=stride/2){
+    if((start&1)!=0)return;
+    start=start/2;stride=stride/2;
+  }
+#endif
+  if(start>=rows)return;
   AscendC::TPipe pipe;AscendC::TBuf<AscendC::TPosition::VECCALC> storage;pipe.InitBuffer(storage,d.localMemoryBytes);
   auto local=storage.Get<int32_t>();auto* scan=reinterpret_cast<__ubuf__ int32_t*>(local.GetPhyAddr());
   auto* ctx=scan+PLAN_SCAN_STORAGE_ELEMENTS;

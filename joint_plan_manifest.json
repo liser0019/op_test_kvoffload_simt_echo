@@ -242,7 +242,7 @@
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
     "build_joint_plan.sh": "0de9b74853201d25244dd6759ad2db974399d7ef22e06ddf230e3e18c9cf30cc",
-    "joint_plan/CMakeLists.txt": "e9063fb704c42229cf886d4be8694d57a6a61116abd6e63ab34c7feae960fea1",
+    "joint_plan/CMakeLists.txt": "77d9394f9a0a3f81b23d6cbd89758b0032393ddd6df72af020b216fd744a274c",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -271,15 +271,15 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "5b58829a0137451c1f7c9c2a77c090eb59281dcf04c9854aedd6e62cf8719242",
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "joint_variants.py": "eff797657742264138d7274cffbb03a771111c1cf6dab9f60c82c733334b86e5",
-    "checks/generate_joint_variants.py": "85a1f633a9ad8fadf5c4b348b8bbc8f00e3f03c47aa3b410d0455a9811c9e8e4",
-    "checks/check_joint_variant_kernels.py": "13ffc10d4262a005640bec81b6dee65771add8ae312033206b1cd60901bde585",
+    "joint_variants.py": "fd2e2f1ab6b64825c2d415ef1fc443ddbeb81bea4b414a576b96ff218b33a653",
+    "checks/generate_joint_variants.py": "5a14932cc294d24f5d26def4d23f932103a127d2b8f5050ed6c058941261162f",
+    "checks/check_joint_variant_kernels.py": "91b0d2db6adb8cf818a1f48383730b41da14fea949e25eea9d3275b1e8c02f52",
     "checks/joint_variant_cpu_driver.cpp": "44d202ca33e11c93b3b859118c2656c0a6c55776fe1729ca0d070a1185bada24",
     "checks/simt_variants/cpu_runtime.h": "e7d893c63524557c2ce3d0280a369214e834d41e56b6eca48277a54754b62356",
     "csrc/joint_variants/sparse_kv_joint_plan.h": "c49bb5a237e4d97d90744a2faa73b8e942037ac7bb36756fd9e80ad91748d1c9",
-    "csrc/joint_variants/plugin.cpp": "7dc4541b1bf2bc1534b1cef1a3e78dc632cdca801f22c2c1a952f12317702ad1",
+    "csrc/joint_variants/plugin.cpp": "4c502d6d16d0f33ded63fe69a620809e5c8e126e3742843fcc3a76f314126d42",
     "csrc/joint_variants/options.h": "4b66a8f8d25d1d71cebca1ae98bf74b70c928358c01a1626ea62f5ffee13bb18",
-    "csrc/joint_variants/kernel.cpp": "bb1b280f9bc65f22a8a04cc7409d462c6af6b8d8bbf584ed711f790c258e6b70",
+    "csrc/joint_variants/kernel.cpp": "84aa8108f2319f809623f9357fc1955eba12a6763d8c11ceb5d03cb0f498bc59",
     "csrc/joint_variants/bitmap_plan.h": "f667fe4216b90bc24eb4ce7113025e1d9ebc5a739860cdeaf170f0e12e1d3eb2",
     "checks/run_bitmap_single_vf_probe.py": "ac44c6b9cfcbe022c568908759dd733326a2693aaa5110ce570a25629bce08d7",
     "checks/check_bitmap_launch_structure.py": "9bd0e0aa1ff1c3bb52871945b56e503d4165864f76b9ad88de710dd7fe2b8182",
@@ -457,7 +457,7 @@
     "scripts/test_capacity16k.sh": "fb0a8fa385bcebcbadd923511ae8efd343552142b5a15477950d7144dc060b80",
     "checks/check_capacity16_layout.py": "1e9121714861d3e6b68b67062885931a2450a9bcd238b194821c7e77bffc1331",
     "docs/MTP7_16K两种布局对照.md": "7223329f179a896c0d1cdb342199312ec34ca7138e0b12a1db852f69bc40a35c",
-    "csrc/joint_variants/layout_hot_impl.h": "21e19d62500a9f1384a5a3afe35bc7a7691247aee71b6b90aeb53bcfa4d062f1",
+    "csrc/joint_variants/layout_hot_impl.h": "08e3676a8e1ed2e3dde7425f547e145917d33bcae696134410ed122a6ee0c472",
     "csrc/joint_variants/layout_hot_fused.h": "6c75639883ee0a71150b20f6ed3ad687732db195cb810a4a96480a71acbd772f",
     "csrc/joint_variants/layout_hot_plan.h": "88afdf1e814aa4eac89a1d3424b879dc751e662426a0b7da030eb31c286fdef3",
     "csrc/joint_variants/layout_hot_simd.h": "e9909d7e6fb5ffe9231c31cae1822d235e1d06025b4eac5e6d0f144192f8e635",
@@ -506,8 +506,8 @@
     "checks/check_ab8k_context.py": "3a12e591f933adc263172937eaef4a843cd8b8d1d072aa338f6aeb0c91d3246b",
     "profile_ab8k_context.py": "7f739cd2f94c94f8c46aea2e8694bd5e01d17c97e8d69c345a7574b5b16e26af",
     "scripts/test_ab8k_context.sh": "9edd9c879d1bc4d0e94622cbdc88d2faafe3d2df9d73d4a7d3674bb770ae7768",
-    "checks/check_mtp3_candidates.py": "b3ecc76cd31993116ed7500d26afdba006bbd6a8dab6df1f8ecac0a7c6e69372",
-    "checks/check_mtp3_npu.py": "2762f97291b07a1b84c8f4f72a4de80d6f6d630f6a017d24d936e5add57967a3",
+    "checks/check_mtp3_candidates.py": "276f0d98f99e42e33d789d4981278f723eaf5e8dc4959505bb0da5ebaf2f771b",
+    "checks/check_mtp3_npu.py": "1e45e84cbf3bc64e48443b86216795a4ef960a146e1df67106c1495c7e4f5f02",
     "scripts/test_mtp3_candidates.sh": "0340dd7288485b5fbb20bca257f34ef430fc9bd87dfc93daae67fb1ce97f4d3a"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
@@ -786,7 +786,9 @@
     "joint_mtp3_full_bounded_512": 257,
     "joint_mtp3_full_even_512": 258,
     "joint_mtp3_full_map_512": 259,
-    "joint_mtp3_full_even_map_512": 260
+    "joint_mtp3_full_even_map_512": 260,
+    "joint_mtp3_full_map_grid14_512": 264,
+    "joint_mtp3_full_map_grid16_512": 265
   },
   "joint_optimizations": {
     "a": "non-joint VF compile-time isolation (protocol retained)",
@@ -3161,14 +3163,19 @@
       "joint_mtp3_full_bounded_512": 257,
       "joint_mtp3_full_even_512": 258,
       "joint_mtp3_full_map_512": 259,
-      "joint_mtp3_full_even_map_512": 260
+      "joint_mtp3_full_even_map_512": 260,
+      "joint_mtp3_full_map_grid14_512": 264,
+      "joint_mtp3_full_map_grid16_512": 265
     },
     "fixed_shape": {
-      "rows": 4,
+      "rows_per_request": 4,
+      "requests_target": 14,
       "topk": 2048,
       "capacity": 8192,
-      "max_token": 262144,
-      "threads": 512
+      "threads": 512,
+      "max_token_supported": 524288,
+      "exact_bitmap_range": "max_token<=262144",
+      "fallback_range": "262144<max_token<=524288 uses directory+binary search"
     },
     "build": "bash build_joint_plan.sh --soc=ascend950 --mtp3-only",
     "full_dynamic_ub_bytes": 181024,
@@ -3182,9 +3189,34 @@
       "full_merge": "64KiB input/output packets permit one complete four-source merge for TopK2048"
     },
     "low_batch_core_spread": {
-      "condition": "request_groups <= launched_AIV/2",
-      "mapping": "use every even AIV block once, one AIV per logical AI Core",
-      "purpose": "avoid confining 14-16 groups to the first half of logical AI Cores"
+      "measured_mapping": "AIV-only block ids 0..13 map to distinct physical vector cores 18..31; subblock_num=1; task_ratio=1",
+      "finding": "the original 64-block launch already used 14 distinct AIV cores for 14 groups",
+      "candidate": "masks 258/260 use even AIV block ids as a controlled alternative; 264/265 instead reduce the launch grid",
+      "evidence": "/workspace/plan14_overnight_20261119/results/r1c_core_probe.json"
+    },
+    "selected_default": "joint_mtp3_full_map_grid14_512",
+    "selected_default_mask": 264,
+    "launch_grid": {
+      "joint_mtp3_full_map_grid14_512": "exactly one block per request group",
+      "joint_mtp3_full_map_grid16_512": "round request group count up to a multiple of 8",
+      "legacy_candidates": "device AIV maximum, capped at 64"
+    },
+    "validation": {
+      "status": "CANN/NPU passed on device 5",
+      "gate_reports": [
+        "results/r1_npu_gate.json",
+        "results/r1c_npu_gate.json",
+        "results/r2_npu_gate.json",
+        "results/r3_npu_gate.json",
+        "results/r4_npu_gate.json",
+        "results/r5_mtp01_gate.json"
+      ],
+      "final_default_hot_p50_us": {
+        "100K": 47.037,
+        "150K": 47.015
+      },
+      "final_default_hot_n": 30,
+      "source_library_sha256_at_confirmation": null
     }
   }
 }

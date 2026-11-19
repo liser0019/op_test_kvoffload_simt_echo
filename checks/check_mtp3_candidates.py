@@ -25,11 +25,13 @@ IMPLEMENTATIONS = (
     ("joint_mtp3_full_even_512", 258),
     ("joint_mtp3_full_map_512", 259),
     ("joint_mtp3_full_even_map_512", 260),
+    ("joint_mtp3_full_map_grid14_512", 264),
+    ("joint_mtp3_full_map_grid16_512", 265),
 )
 
 
 def target_case(kind: str):
-    max_token = 102400 if kind == "bounded100k" else 153600 if kind == "bounded150k" else 262144
+    max_token = {"bounded100k": 102400, "bounded150k": 153600, "fallback360k": 360000}.get(kind, 262144)
     case = make_case(1, 2048, 8192, max_token, 3, "full_cache_75pct", "disjoint",
                      history_pool_tokens=8192)
     token_to_req = np.zeros(4, np.int32)
@@ -87,6 +89,8 @@ def run(report_path: Path | None):
     assert MASKS["mtp3_full_even_512"] == 258
     assert MASKS["mtp3_full_map_512"] == 259
     assert MASKS["mtp3_full_even_map_512"] == 260
+    assert MASKS["mtp3_full_map_grid14_512"] == 264
+    assert MASKS["mtp3_full_map_grid16_512"] == 265
     normal = layout(2048, 8192, 4, True, 262144, layout16=1, layout_hot_bits=15, mtp8=True)
     full = layout(2048, 8192, 4, True, 262144, layout16=1, layout_hot_bits=15,
                   mtp8=True, mtp3_full=True)
@@ -103,6 +107,8 @@ def run(report_path: Path | None):
         258: (True, False, False, False, True),
         259: (True, True, False, False, False),
         260: (True, True, False, False, True),
+        264: (True, True, False, False, False),
+        265: (True, True, False, False, False),
     }
     for mask, values in expected.items():
         is_full, mapped, load, bounded, spread = values
@@ -126,6 +132,7 @@ def run(report_path: Path | None):
                                    ("repeated_resident", "full_cache_75pct"),
                                    ("bounded100k", "full_cache_75pct"),
                                    ("bounded150k", "full_cache_75pct"),
+                                   ("fallback360k", "full_cache_75pct"),
                                    ("disjoint", "cold_reset")):
                 case = target_case(kind)
                 case["scenario"] = scenario

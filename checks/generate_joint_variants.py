@@ -52,8 +52,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
         if 127<=mask<=142:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS {mask-127}\n"
         if 143<=mask<=158:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_EXEC 1\n#define JOINT_EXEC_BITS {mask-143}\n"
         if mask>=159:
-            bits=10 if 193<=mask<=260 else mask-159 if mask<=190 else 0
-            if 193<=mask<=260:
+            bits=10 if 193<=mask<=265 else mask-159 if mask<=190 else 0
+            if 193<=mask<=265:
                 c=mtp7_config(mask)
                 text += f"#define JOINT_MTP8 1\n#define JOINT_MTP7_OPT {c['opt']}\n"
                 if 200<=mask<=202:text+=f"#define JOINT_MTP7_PREFIX {int(mask in (200,202))}\n#define JOINT_MTP7_MAP16 {int(mask in (201,202))}\n"
@@ -63,10 +63,11 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
             text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_HOT 1\n#define JOINT_HOT_BITS {bits}\n#define JOINT_HOT_PART_ONLY {int(mask==191)}\n#define JOINT_HOT_MISS_ONLY {int(mask==192)}\n"
         if 216<=mask<=227:text+=f"#define JOINT_LAYOUT16 {1+(mask-216)//6}\n#define JOINT_MTP7_MAP16 1\n#define JOINT_LAYOUT_HOT_BITS {layout_hot_bits(mask)}\n"
         if 228<=mask<=243:text+=f"#define JOINT_LAYOUT16 1\n#define JOINT_MTP7_MAP16 1\n#define JOINT_LAYOUT_HOT_BITS 15\n#define JOINT_STAGE_EXEC 1\n#define JOINT_STAGE_EXEC_BITS {stage_exec_bits(mask)}\n"
-        if 244<=mask<=260:text+=f"#define JOINT_LAYOUT16 1\n#define JOINT_MTP7_MAP16 1\n#define JOINT_LAYOUT_HOT_BITS 15\n#define JOINT_STAGE_EXEC 1\n#define JOINT_STAGE_EXEC_BITS 15\n#define JOINT_RANKPIPE 1\n#define JOINT_RANKPIPE_BITS {rankpipe_bits(mask)}\n"
-        if 252<=mask<=260:
+        if 244<=mask<=265:text+=f"#define JOINT_LAYOUT16 1\n#define JOINT_MTP7_MAP16 1\n#define JOINT_LAYOUT_HOT_BITS 15\n#define JOINT_STAGE_EXEC 1\n#define JOINT_STAGE_EXEC_BITS 15\n#define JOINT_RANKPIPE 1\n#define JOINT_RANKPIPE_BITS {rankpipe_bits(mask)}\n"
+        if (252<=mask<=260) or (264<=mask<=265):
             c=mtp3_config(mask)
             text+=f"#define JOINT_MTP3_FULL {int(c['full'])}\n#define JOINT_MTP3_MAP {int(c['map'])}\n#define JOINT_MTP3_LOAD {int(c['load'])}\n#define JOINT_RANKPIPE_BOUNDED_BITMAP {int(c['bounded_bitmap'])}\n#define JOINT_GROUP_CORE_SPREAD {int(c['wide_core_spread'])}\n"
+            if mask==252:text+="#define JOINT_CORE_PROBE 1\n"
         if mask in (214,215):text+=f"#define JOINT_LAYOUT16 {mask-213}\n#define JOINT_MTP7_MAP16 1\n"
         if mask in (212,213):text+="#define JOINT_MTP7_CAPACITY8K 1\n"
         text += "".join(f"#define {name} {new}\n" for name, new in replacements.items())
@@ -80,8 +81,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
     text += "inline decltype(&launch_joint_plan) JointVariantLaunch(int64_t mask) {\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {" + ", ".join(entries) + "};\n"
-    text += "  return mask > 0 && mask <= 260 ? launches[mask] : nullptr;\n}\n"
-    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 260)) ? 72 : mask; }\n'
+    text += "  return mask > 0 && mask <= 265 ? launches[mask] : nullptr;\n}\n"
+    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 265)) ? 72 : mask; }\n'
     text += signature + " {\n  auto launch = JointVariantLaunch(mask);\n"
     text += "  if (!launch) throw std::invalid_argument(\"joint mask not built\");\n"
     text += "  launch(" + args + ");\n}\n"

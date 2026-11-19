@@ -21,6 +21,10 @@
 #include "variant_dispatch.h"
 #include "../joint_plan/sparse_kv_plan_config.h"
 
+#ifdef JOINT_CORE_PROBE
+extern "C" void launch_core_probe(void* output, uint32_t blockDim, void* stream);
+#endif
+
 namespace {
 using Tensors = std::vector<at::Tensor>;
 using Attrs = std::vector<int64_t>;
@@ -73,7 +77,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 260, "joint variant mask must be 1..260");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 265, "joint variant mask must be 1..265");
     TORCH_CHECK(JointVariantLaunch(variantMask) != nullptr, "joint variant not compiled in this build");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
@@ -96,8 +100,8 @@ class Prepared : public torch::CustomClassHolder {
     const int64_t rows = p[1].size(0), requests = p[0].numel();
     if (variantMask >= 252) {
       TORCH_CHECK(requests > 0 && rows % 4 == 0 && rows / 4 == requests &&
-                  t == 2048 && c == 8192 && attrs[2] > 0 && attrs[2] <= 262144 && attrs[4] == 1,
-                  "MTP3 candidates require 4 rows per request, topk=2048, capacity=8192, maxToken<=262144");
+                  t == 2048 && c == 8192 && attrs[2] > 0 && attrs[2] <= 524288 && attrs[4] == 1,
+                  "MTP3 candidates require 4 rows per request, topk=2048, capacity=8192, maxToken<=524288");
     }
     TORCH_CHECK(rows <= std::numeric_limits<int32_t>::max() / (c / block), "resident page index exceeds int32");
     Shape(p[1], {rows, t});
@@ -143,7 +147,7 @@ class Prepared : public torch::CustomClassHolder {
         if(variantMask>=228){
           d.scratchElements=LayoutHotScratch(c,d.workspaceRowElements,1,15);
           if(variantMask==252 || variantMask==255 || variantMask==257 || variantMask==258 ||
-             variantMask==259 || variantMask==260)d.scratchElements+=8192U;
+             variantMask==259 || variantMask==260 || variantMask==264 || variantMask==265)d.scratchElements+=8192U;
         }else if(variantMask>=216){const int bits[6]={1,3,5,7,13,15};
           d.scratchElements=LayoutHotScratch(c,d.workspaceRowElements,1+(variantMask-216)/6,bits[(variantMask-216)%6]);}
       }
@@ -178,6 +182,12 @@ class Prepared : public torch::CustomClassHolder {
     data->tiling = cpu.to(device, false);  // Setup only, outside target capture.
     data->dynamicUb = d.localMemoryBytes;
     data->blocks = joint_plan_block_dim();
+    if (variantMask == 264) {
+      data->blocks = std::min<uint32_t>(data->blocks, static_cast<uint32_t>(requests));
+    } else if (variantMask == 265) {
+      const uint32_t rounded = static_cast<uint32_t>((requests + 7) / 8 * 8);
+      data->blocks = std::min<uint32_t>(data->blocks, rounded);
+    }
     TORCH_CHECK(data->blocks > 0, "joint cannot query AIV count");
     data->tensors = std::move(p); data->attrs = std::move(attrs); data->jointEntry = jointEntry;
     data->variantMask = variantMask;
@@ -220,7 +230,20 @@ class Prepared : public torch::CustomClassHolder {
   mutable std::mutex mutex_;
   std::shared_ptr<Resources> data_;
 };
+#ifdef JOINT_CORE_PROBE
+void ProbeCores(const at::Tensor& output) {
+  TORCH_CHECK(output.defined() && output.device().type() == c10::DeviceType::PrivateUse1 &&
+      output.scalar_type() == at::kInt && output.is_contiguous(), "probe output must be contiguous NPU int32");
+  TORCH_CHECK(output.numel() >= 64 * 128, "probe output too small");
+  const c10::OptionalDeviceGuard guard(output.device());
+  auto stream = c10_npu::getCurrentNPUStream().stream(false);
+  launch_core_probe(output.data_ptr(), 64, reinterpret_cast<void*>(stream));
+}
+#endif
 static auto registration = torch::class_<Prepared>("mtp_joint_plan", "PreparedVariant")
     .def(torch::init<Tensors, Attrs, bool, int64_t>()).def("run", &Prepared::Run)
     .def("info", &Prepared::Info).def("close", &Prepared::Close);
+#ifdef JOINT_CORE_PROBE
+TORCH_LIBRARY_FRAGMENT(mtp_joint_plan, m) { m.def("probe_cores(Tensor output) -> ()", &ProbeCores); }
+#endif
 }  // namespace
