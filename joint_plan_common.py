@@ -24,6 +24,7 @@ KERNELS.update({name: "sparse_kv_plan_" + name.split("_", 1)[0] + "_kernel_" + n
                 for name in VARIANTS})
 KERNELS[peer_plan.NAME] = peer_plan.KERNEL
 KERNELS.update({n: "sparse_kv_plan_kernel_plan_" + n for n in PAGED_NAMES})
+EXTERNAL_MTP3_BT_ODD = "joint_mtp3_bt_direct_odd_512"
 ABCDF_STATE = ("last_req_ids", "slot_to_token", "lru_slots")
 ABCDF_OUTPUT = ("current_slots", "miss_count", "miss_tokens", "miss_slots")
 TENSOR_ORDER = (*INPUTS, "active_rows", "last_req_ids", "slot_to_token", "lru_slots",
@@ -38,14 +39,18 @@ def add_runtime_arguments(parser):
     parser.set_defaults(temp_dir=Path(os.environ.get("TMPDIR", "/workspace/joint_plan_results/tmp")))
     parser.add_argument("--device", type=int, default=2)
     parser.add_argument("--library", type=Path, default=ROOT / "build_joint_plan/libmtp_joint_plan_ops.so")
+    parser.add_argument("--library-identity", type=Path,
+                        help="pinned source identity JSON for an external Plan library")
 
 
 def load_runtime(args, *, require_plan=True):
     if args.device < 0:
         raise ValueError("device必须非负")
-    if require_plan:
+    if require_plan and args.library_identity is None:
         from checks.joint_build_info import identity
         expected = identity()  # 源码身份先检查，过期源码不能以旧库继续跑。
+    elif require_plan:
+        expected = json.loads(Path(args.library_identity).read_text())
     import torch
     import torch_npu
     if not torch.npu.is_available():
@@ -96,6 +101,13 @@ def prepare(torch, case, name, inputs=None):
     is_turbo = VARIANTS.get(name) in TURBO_MASKS
     info = layout(case["topk"], case["capacity"], case["rows"], controller_enabled, case["max_token"],
                   name == "joint_bitmap", is_turbo, name in SORTED_NAMES, union_next=union_next, hot_packet=bool((hot_config(name) or {}).get("packet")),mtp8=supports_eight_rows(name),mtp8_capacity8k=is_capacity8k(name),layout16=layout16_mode(name),layout_hot_bits=layout_hot_bits(VARIANTS.get(name,0)),mtp3_full=bool((mtp3_config(VARIANTS.get(name,0)) or {}).get("full")))
+    if name == EXTERNAL_MTP3_BT_ODD:
+        if (case["topk"], case["capacity"], case["rows"]) != (2048, 8192, 4 * case["requests"]):
+            raise ValueError("bt_direct_odd Plan requires MTP3, TopK2048 and capacity8192")
+        info = {"hash_capacity": 4096, "joint_hash_capacity": 16384,
+                "scratch_elements": 46912,
+                "workspace_elements": case["rows"] * case["topk"] // 2 + case["requests"] * 2048,
+                "dynamic_ub_bytes": 187936, "scratch_path": "UB"}
     if name == peer_plan.NAME:
         info = peer_plan.layout(case["topk"], case["capacity"], case["rows"], case["q_len"])
     inputs = upload_inputs(torch, case) if inputs is None else inputs

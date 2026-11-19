@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Dedicated upstream checkout/package: never patch an existing user's source tree.
 set -euo pipefail
+usage="$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --indexer-pair-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only]"
 if [[ $# -gt 1 ]]; then
-  echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only]" >&2
+  echo "用法：$usage" >&2
   exit 2
 fi
 OPS=quant_lightning_indexer,quant_lightning_indexer_plan_split
@@ -13,12 +14,13 @@ case "${1:-}" in
   --topk-compare-only) OPS=quant_lightning_indexer_plan_split4,quant_lightning_indexer_plan_topk_control4 ;;
   --fast-split-only) OPS=quant_lightning_indexer,quant_lightning_indexer_plan_final4,quant_lightning_indexer_plan_split4 ;;
   --ordered-standalone-only) OPS=quant_lightning_indexer,quant_lightning_indexer_ordered,quant_lightning_indexer_plan_split4,quant_lightning_indexer_plan_final4 ;;
+  --indexer-pair-only) OPS=quant_lightning_indexer,quant_lightning_indexer_ordered ;;
   --peer-aligned-only) OPS=quant_lightning_indexer,quant_lightning_indexer_plan_final4,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_peer4 ;;
   --auto-rankpipe-only) OPS=quant_lightning_indexer,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_c ;;
   --factorial-only) OPS=quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_c,quant_lightning_indexer_plan_cfa,quant_lightning_indexer_plan_cfb,quant_lightning_indexer_plan_cfc,quant_lightning_indexer_plan_cfab,quant_lightning_indexer_plan_cfac,quant_lightning_indexer_plan_cfbc,quant_lightning_indexer_plan_cfabc ;;
   --factorial-compare-only) OPS=quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_c,quant_lightning_indexer_plan_cfa,quant_lightning_indexer_plan_cfb,quant_lightning_indexer_plan_cfc,quant_lightning_indexer_plan_cfab,quant_lightning_indexer_plan_cfac,quant_lightning_indexer_plan_cfbc,quant_lightning_indexer_plan_cfabc,quant_lightning_indexer,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_final4 ;;
   --native-plan-only) OPS=quant_lightning_indexer_ordered,quant_lightning_indexer_plan_native_shell,quant_lightning_indexer_plan_native_fused,quant_lightning_indexer_plan_native_group ;;
-  *) echo "用法：$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only]" >&2; exit 2 ;;
+  *) echo "用法：$usage" >&2; exit 2 ;;
 esac
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PYTHON=${PYTHON:-python3}

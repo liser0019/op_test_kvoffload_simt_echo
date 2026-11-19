@@ -36,6 +36,7 @@ MTP3_NATIVE_OPERATORS = {
 MTP3_PLAN_CANDIDATES = {
     'ac': BASE, 'map': 'joint_mtp3_map_512', 'load': 'joint_mtp3_load_512',
     'full': 'joint_mtp3_full_512', 'full_load': 'joint_mtp3_full_load_512',
+    'bt_direct_odd': 'joint_mtp3_bt_direct_odd_512',
 }
 MTP3_PLAN_ONLY = {'plan_' + k: v for k, v in MTP3_PLAN_CANDIDATES.items()}
 MTP3_CHAIN = {'ordered_' + k: v for k, v in MTP3_PLAN_CANDIDATES.items()}
@@ -175,7 +176,10 @@ def fingerprint_qli(torch,values):
 
 def make_plan_case(inputs,indices,mtp,scenario,seed):
     s=inputs.shape
-    case=make_case(s.batch,s.topk,s.capacity,max(262144,s.seq_len),mtp,scenario,'shared',seed=seed,block_size=128)
+    # Plan state is rebuilt from the actual ordered Indexer output below. The
+    # unrelated synthetic cache generator must not do the same expensive work.
+    case=make_case(s.batch,s.topk,s.capacity,max(262144,s.seq_len),mtp,'cold_reset','shared',seed=seed,block_size=128)
+    case['scenario']=scenario
     case['max_token']=s.seq_len;case['context']=s.seq_len-s.width
     case['overlap']='indexer_actual'
     case['topk_indices']=np.ascontiguousarray(indices.reshape(s.rows,s.topk),dtype=np.int32)
@@ -184,7 +188,41 @@ def make_plan_case(inputs,indices,mtp,scenario,seed):
     case['last_req_ids']=np.repeat(case['req_ids'],s.width)
     case['lru_slots']=np.tile(np.arange(s.capacity,dtype=np.int32),(s.rows,1))
     case['slot_to_token']=np.full((s.rows,s.capacity),-1,np.int32)
-    if scenario=='cold_reset':case['last_req_ids'][:]=-1
+    if scenario=='cold_reset':
+        case['last_req_ids'][:]=-1
+    elif scenario=='full_cache_90pct':
+        hit_goal=s.topk*90//100
+        for request in range(s.batch):
+            first=request*s.width
+            row_hits=[]
+            for p in range(s.width):
+                row=first+p
+                valid=np.unique(case['topk_indices'][row])
+                stable=int(min(case['stable_prefix_lens'][row],case['visible_seq_lens'][row],s.seq_len))
+                valid=valid[(valid>=0)&(valid<stable)]
+                if len(valid)<hit_goal:
+                    raise RuntimeError(f'row {row}: only {len(valid)} stable TopK tokens for 90% cache')
+                rng=np.random.default_rng(seed+310003+request*17+p)
+                row_hits.append(rng.choice(valid,hit_goal,replace=False))
+            hit_union=np.unique(np.concatenate(row_hits))
+            if len(hit_union)>s.capacity:
+                raise RuntimeError('90% per-row hit sets exceed shared cache capacity')
+            excluded=np.unique(case['topk_indices'][first:first+s.width])
+            stable_limit=int(min(case['stable_prefix_lens'][first:first+s.width]))
+            pool=np.setdiff1d(np.arange(stable_limit,dtype=np.int32),excluded,assume_unique=False)
+            needed=s.capacity-len(hit_union)
+            if len(pool)<needed:
+                raise RuntimeError('not enough stable non-query tokens for full 90% cache')
+            rng=np.random.default_rng(seed+410009+request)
+            resident=np.concatenate((hit_union,rng.choice(pool,needed,replace=False))).astype(np.int32)
+            rng.shuffle(resident)
+            case['slot_to_token'][first:first+s.width]=resident
+            request_lru=rng.permutation(s.capacity).astype(np.int32)
+            case['lru_slots'][first:first+s.width]=request_lru
+            for p,row in enumerate(range(first,first+s.width)):
+                actual=np.count_nonzero(np.isin(case['topk_indices'][row],resident))
+                if actual!=hit_goal:
+                    raise RuntimeError(f'row {row}: expected {hit_goal} hits, got {actual}')
     else:
         # 75% refers to the FIRST query, matching the historic experiment label.
         # Other rows use real Indexer choices; their measured hit rates are reported.
@@ -520,6 +558,9 @@ def main_run(args,report):
                         span=s['span_us']['p50_us']
                         s['span_p50_over_native_indexer']=span/baseline_span
                         s['span_p50_delta_vs_native_indexer_us']=span-baseline_span
+                        if 'indexer_span_us' in s:
+                            s['ordering_cost_vs_native_p50_us']=s['indexer_span_us']['p50_us']-baseline_span
+                            s['plan_chain_cost_after_ordered_p50_us']=span-s['indexer_span_us']['p50_us']
                     stats['baseline']['native_topk_comparison']=stats['baseline']['topk_set_comparison']
                 data={'tag':tag,'scenario':scenario,'context':context,'mtp':mtp,'capacity':capacity,'requests':args.requests,
                     'timing_arithmetic':TIMING_ARITHMETIC,
@@ -534,6 +575,21 @@ def main_run(args,report):
                     data['split_reference']=split_reference
                 if 'split' in stats:
                     data['qli_s1_base']=2
+                target='ordered_bt_direct_odd'
+                if target in stats:
+                    target_stats=stats[target]
+                    data['official_vs_ordered_bt_plan_p50']={
+                        'official_indexer_us':stats['baseline']['span_us']['p50_us'],
+                        'ordered_indexer_us':target_stats['indexer_span_us']['p50_us'],
+                        'plan_us':target_stats['plan_us']['p50_us'],
+                        'between_kernel_gap_us':target_stats['between_kernel_gap_us']['p50_us'],
+                        'chain_busy_us':target_stats['busy_us']['p50_us'],
+                        'chain_span_us':target_stats['span_us']['p50_us'],
+                        'ordering_cost_us':target_stats['ordering_cost_vs_native_p50_us'],
+                        'plan_chain_cost_us':target_stats['plan_chain_cost_after_ordered_p50_us'],
+                        'total_delta_us':target_stats['span_p50_delta_vs_native_indexer_us'],
+                        'chain_over_official':target_stats['span_p50_over_native_indexer'],
+                    }
                 if native_equivalence is not None:
                     data['final4_native_topk_comparison']=native_equivalence
                 if 'peer' in stats:
@@ -667,6 +723,13 @@ def main_run(args,report):
         for n in (name for name in names if name in split_roles):
             s=r['statistics'][n]
             lines+=['',f"{r['tag']} 的 {n} 分段 P50（μs）为 Indexer {s['indexer_span_us']['p50_us']:.3f}、Plan {s['plan_us']['p50_us']:.3f}、间隙 {s['between_kernel_gap_us']['p50_us']:.3f}。",'']
+        if 'official_vs_ordered_bt_plan_p50' in r:
+            pair=r['official_vs_ordered_bt_plan_p50']
+            lines+=['',f"{r['tag']} 官方 Indexer P50 {pair['official_indexer_us']:.3f} μs；"
+                    f"保序 Indexer＋Plan 链路 {pair['chain_span_us']:.3f} μs。"
+                    f"总增量 {pair['total_delta_us']:+.3f} μs，其中保序改造 "
+                    f"{pair['ordering_cost_us']:+.3f} μs，Plan＋间隙 "
+                    f"{pair['plan_chain_cost_us']:+.3f} μs；链路/官方 {pair['chain_over_official']:.3f}。"]
         if 'indexer_comparison' in r:
             indexer=r['indexer_comparison']
             lines.append(f"Indexer 对照 {r['tag']}：保序 S1Base=4 单跑 P50 "
@@ -727,7 +790,7 @@ def main():
     p.add_argument('--fusion-build',type=Path,default=Path(os.environ.get('QLI_FUSION_BUILD_DIR',ROOT/'build_qli_fusion')))
     p.add_argument('--output',type=Path,required=True);p.add_argument('--requests',type=int,default=32)
     p.add_argument('--mtp',nargs='+',type=int,choices=(0,1,3,7),default=[0,1,3,7]);p.add_argument('--contexts',nargs='+',type=int,default=[262144])
-    p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct'),default=['cold_reset','full_cache_75pct'])
+    p.add_argument('--scenarios',nargs='+',choices=('cold_reset','full_cache_75pct','full_cache_90pct'),default=['cold_reset','full_cache_75pct'])
     p.add_argument('--implementations',nargs='+',choices=('baseline','ordered_native','ordered4','topk_control4','split','split4','final4','a','b','c','c0','A','B','C','AB','AC','BC','ABC','peer','peer4',*sorted(MTP3_ROLES)),
                    default=['split','a','b','c'],
                    help='baseline: upstream Indexer gate; ordered_native: true independent ordered Indexer; ordered4: generated split4 Indexer only')
