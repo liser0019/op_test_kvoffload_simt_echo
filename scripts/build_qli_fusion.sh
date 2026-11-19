@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Dedicated upstream checkout/package: never patch an existing user's source tree.
 set -euo pipefail
-usage="$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --indexer-pair-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only]"
+usage="$0 [--indexer-compare-only | --peer-compare-only | --topk-compare-only | --fast-split-only | --ordered-standalone-only | --indexer-pair-only | --official-ordered-fused-only | --peer-aligned-only | --auto-rankpipe-only | --factorial-only | --factorial-compare-only | --native-plan-only]"
 if [[ $# -gt 1 ]]; then
   echo "用法：$usage" >&2
   exit 2
@@ -15,6 +15,7 @@ case "${1:-}" in
   --fast-split-only) OPS=quant_lightning_indexer,quant_lightning_indexer_plan_final4,quant_lightning_indexer_plan_split4 ;;
   --ordered-standalone-only) OPS=quant_lightning_indexer,quant_lightning_indexer_ordered,quant_lightning_indexer_plan_split4,quant_lightning_indexer_plan_final4 ;;
   --indexer-pair-only) OPS=quant_lightning_indexer,quant_lightning_indexer_ordered ;;
+  --official-ordered-fused-only) OPS=quant_lightning_indexer,quant_lightning_indexer_ordered,quant_lightning_indexer_ordered_fused ;;
   --peer-aligned-only) OPS=quant_lightning_indexer,quant_lightning_indexer_plan_final4,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_peer4 ;;
   --auto-rankpipe-only) OPS=quant_lightning_indexer,quant_lightning_indexer_ordered_fused,quant_lightning_indexer_plan_c ;;
   --factorial-only) OPS=quant_lightning_indexer_plan_split,quant_lightning_indexer_plan_c,quant_lightning_indexer_plan_cfa,quant_lightning_indexer_plan_cfb,quant_lightning_indexer_plan_cfc,quant_lightning_indexer_plan_cfab,quant_lightning_indexer_plan_cfac,quant_lightning_indexer_plan_cfbc,quant_lightning_indexer_plan_cfabc ;;
@@ -31,7 +32,7 @@ export PATH="$(dirname -- "$PYTHON"):$PATH"
 export MAX_JOBS=${JOBS:-3}
 "$PYTHON" -c 'import build, torch, torch_npu'
 WORK=${QLI_FUSION_BUILD_DIR:-"$ROOT/build_qli_fusion"}
-PIN=9ec2110969a9e8502bf6d579c027ac4ea9572016
+PIN=${QLI_UPSTREAM_COMMIT:-9ec2110969a9e8502bf6d579c027ac4ea9572016}
 if [[ -e "$WORK" ]]; then
   echo "构建目录已存在，为保留原产物请指定新的 QLI_FUSION_BUILD_DIR：$WORK" >&2;exit 2
 fi
@@ -47,7 +48,7 @@ if [[ -n "${QLI_THIRD_PARTY_CACHE:-}" ]]; then
   cp -a "$QLI_THIRD_PARTY_CACHE"/. "$WORK/upstream/third_party"/
 fi
 "$PYTHON" -B "$ROOT/scripts/export_fusion_plan.py" --check
-"$PYTHON" -B "$ROOT/scripts/prepare_qli_fusion.py" --upstream "$WORK/upstream"
+"$PYTHON" -B "$ROOT/scripts/prepare_qli_fusion.py" --upstream "$WORK/upstream" --upstream-commit "$PIN"
 cd "$WORK/upstream"
 bash build.sh --pkg --soc=ascend950 --ops="$OPS" --vendor_name=qlifusion -j"${JOBS:-3}"
 PACKAGES=(build_out/cann-ops-transformer-qlifusion*.run)

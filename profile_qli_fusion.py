@@ -108,7 +108,7 @@ def check_native_topk(indices, canonical, visible_seq_lens):
 
 
 def load_operators(manifest, vendor, implementations):
-    if manifest['source_id']!=source_id():raise RuntimeError('fusion source/manifest mismatch; rebuild required')
+    if manifest['source_id']!=source_id(manifest.get('upstream')):raise RuntimeError('fusion source/manifest mismatch; rebuild required')
     operators={};identities={}
     names = {'split' if mode == 0 else 'abc'[mode-1]: name for mode, name in NAMES.items()}
     names.update(FACTORIAL_NAMES)
@@ -847,8 +847,8 @@ def main():
     if (args.indexer_only and not implementations <= INDEXER_ONLY | {'split4','final4'}):
         p.error('--indexer-only accepts Indexer roles only')
     if implementations & MTP3_ROLES:
-        if not implementations <= MTP3_ROLES | {'ordered_native', 'baseline'}:
-            p.error('the native ordered matrix accepts baseline, ordered_native and MTP3 experiment roles')
+        if not implementations <= MTP3_ROLES | {'ordered_native', 'baseline', *PEER_OPERATORS}:
+            p.error('the native ordered matrix accepts baseline, ordered_native, peer and MTP3 experiment roles')
         if set(args.mtp)!={3}:
             p.error('the native ordered experiment uses MTP3')
     if not args.gate_only and not implementations.intersection(MTP3_ROLES) and not implementations.intersection(effective_split_roles) and implementations not in ({'baseline'},TOPK_ISOLATION) and not implementations.intersection(PEER_OPERATORS) and not implementations.intersection(FACTORIAL_ROLES) and not implementations.intersection(INDEXER_ONLY):

@@ -21,6 +21,7 @@ CONTEXTS=${CONTEXTS:-"102400 358400"}
 WARMUP=${WARMUP:-10}
 REPEAT=${REPEAT:-50}
 REGRESSION_REPEAT=${REGRESSION_REPEAT:-2}
+IMPLEMENTATIONS=${IMPLEMENTATIONS:-"baseline ordered_bt_direct_odd peer"}
 
 mkdir -p "$OUTPUT"
 printf '%s\n' "$DEVICE" > "$OUTPUT/device.txt"
@@ -36,6 +37,7 @@ cat "$PLAN_IDENTITY" > "$OUTPUT/plan-identity.json"
 sha256sum "$PLAN_LIBRARY" > "$OUTPUT/plan-library.sha256"
 
 read -r -a CONTEXT_ARGS <<< "$CONTEXTS"
+read -r -a IMPLEMENTATION_ARGS <<< "$IMPLEMENTATIONS"
 cd "$ROOT"
 for BATCH in $(seq "$BATCH_START" "$BATCH_END"); do
   DEST="$OUTPUT/batch$BATCH"
@@ -43,7 +45,7 @@ for BATCH in $(seq "$BATCH_START" "$BATCH_END"); do
     --device "$DEVICE" --fusion-build "$QLI_BUILD" --library "$PLAN_LIBRARY" \
     --library-identity "$PLAN_IDENTITY" --output "$DEST" --temp-dir "$OUTPUT/tmp" \
     --requests "$BATCH" --mtp 3 --contexts "${CONTEXT_ARGS[@]}" \
-    --scenarios full_cache_90pct --implementations baseline ordered_bt_direct_odd \
+    --scenarios full_cache_90pct --implementations "${IMPLEMENTATION_ARGS[@]}" \
     --warmup "$WARMUP" --repeat "$REPEAT" --regression-repeat "$REGRESSION_REPEAT" "$@"
 done
 

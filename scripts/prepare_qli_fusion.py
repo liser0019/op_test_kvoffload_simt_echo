@@ -17,7 +17,8 @@ else:
     from export_fusion_plan import ROOT,replace
     import native_plan_overlay
 
-COMMIT='9ec2110969a9e8502bf6d579c027ac4ea9572016'
+DEFAULT_COMMIT='9ec2110969a9e8502bf6d579c027ac4ea9572016'
+COMMIT=DEFAULT_COMMIT
 SOURCE='attention/quant_lightning_indexer_ordered_fused'
 NATIVE_INDEXER='quant_lightning_indexer'
 NATIVE_ORDERED='quant_lightning_indexer_ordered'
@@ -56,13 +57,14 @@ NATIVE_PLAN_VARIANTS=(
     (NATIVE_GROUP,'NativeGroup',True),
 )
 
-def source_id():
+def source_id(commit=None):
+    commit = COMMIT if commit is None else commit
     files=[ROOT/'scripts/export_fusion_plan.py',ROOT/'scripts/prepare_qli_fusion.py',
            ROOT/'scripts/native_plan_overlay.py',
            ROOT/'csrc/joint_plan/sparse_kv_plan_config.h',
            *sorted(NATIVE_BINDING.iterdir()),
            *sorted((ROOT/'csrc/qli_fusion').glob('*'))]
-    h=hashlib.sha256(COMMIT.encode())
+    h=hashlib.sha256(commit.encode())
     for f in files:
         if f.is_file():h.update(str(f.relative_to(ROOT)).encode()+b'\0'+f.read_bytes())
     return h.hexdigest()
@@ -452,7 +454,12 @@ def overlay(folder,mode,suffix,s1_base,*,final_sort=False,vector_reuse=False,hot
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--upstream',required=True,type=Path);a=p.parse_args()
+    global COMMIT
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--upstream',required=True,type=Path)
+    p.add_argument('--upstream-commit',default=DEFAULT_COMMIT)
+    a=p.parse_args()
+    COMMIT=a.upstream_commit
     repo=a.upstream.resolve()
     head=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()
     if head!=COMMIT:raise SystemExit(f'expected upstream {COMMIT}, got {head}')
