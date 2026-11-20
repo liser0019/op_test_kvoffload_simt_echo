@@ -21,7 +21,7 @@ Official 只包含原始 Indexer；其余两路都包含保序 Indexer、独立 
 
 - 9 个 Batch × 2 个 context × 3 路实现。
 - 每路每工况 10 次预热、20 个正式样本和 2 次回归检查，并逐步做完整 TopK/输入/状态/输出/保护区校验。
-- 每个 context 单独启动 CANN profiler、同步解析 trace 并导出 CSV；idiomatic kernel 只有约 50–600 μs，但 profiler 的准备、落盘与解析是秒级。
+- 每个 context 单独启动 CANN profiler、同步解析 trace 并导出 CSV；单次 kernel 只有约 50–600 μs，但 profiler 的准备、落盘与解析是秒级。
 - 正式运行前曾出现两次无效 smoke：一次 QLI torch extension 身份不对，一次 mask264 的外部 BT 实现没有进入设备库。两者都在数据采集前失败，已修复；不计入本轮样本。
 
 ## 环境与身份
