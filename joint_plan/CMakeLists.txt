@@ -120,6 +120,7 @@ option(JOINT_UNION_ONLY "Build AC512 reference + new ABCD/thread candidates" OFF
 option(JOINT_SWEEP_ONLY "Build hardware sweep and its validated reference" OFF)
 option(JOINT_SORTED_ONLY "Build sorted union and Merge BD references" OFF)
 option(JOINT_MERGE_ONLY "Build Merge candidates without old Joint experiments" OFF)
+option(JOINT_ORDERED_BITMAP_PLAN "Build ordered-query 512-thread bitmap Plan" OFF)
 option(JOINT_DEBUG_INFO "Device -g with -O3" OFF)
 option(JOINT_RESOURCE_USAGE "Compiler resource usage" OFF)
 if(JOINT_DEBUG_INFO)
@@ -136,7 +137,7 @@ set(JOINT_INFO "${CMAKE_CURRENT_BINARY_DIR}/source_info.cpp")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${JOINT_ROOT}/joint_plan_manifest.json" "${JOINT_ROOT}/checks/joint_build_info.py")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${JOINT_ROOT}/checks/joint_build_info.py"
-    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY};ac_threads_only=${JOINT_AC_THREADS_ONLY};cold_compare_only=${JOINT_COLD_COMPARE_ONLY};integrated_only=${JOINT_INTEGRATED_ONLY};refine_only=${JOINT_REFINE_ONLY};exec_only=${JOINT_EXEC_ONLY};hot_only=${JOINT_HOT_ONLY};mtp8_only=${JOINT_MTP8_ONLY};mtp7_fix_only=${JOINT_MTP7_FIX_ONLY};mtp7_pack_only=${JOINT_MTP7_PACK_ONLY};peer_only=${JOINT_PEER_ONLY};prefix_only=${JOINT_PREFIX_ONLY};merge_unique_only=${JOINT_MERGE_UNIQUE_ONLY};fused_tune_only=${JOINT_FUSED_TUNE_ONLY};capacity8k_only=${JOINT_CAPACITY8K_ONLY};capacity16k_only=${JOINT_CAPACITY16K_ONLY};ab8k_compare_only=${JOINT_AB8K_COMPARE_ONLY};rankpipe_only=${JOINT_RANKPIPE_ONLY};mtp3_only=${JOINT_MTP3_ONLY};stage_exec_only=${JOINT_STAGE_EXEC_ONLY};layout_hot_only=${JOINT_LAYOUT_HOT_ONLY}"
+    --output "${JOINT_INFO}" "--compiler=${BISHENG_CXX}" "--flags=${JOINT_FLAGS};merge_only=${JOINT_MERGE_ONLY};sorted_only=${JOINT_SORTED_ONLY};sweep_only=${JOINT_SWEEP_ONLY};union_only=${JOINT_UNION_ONLY};ac_threads_only=${JOINT_AC_THREADS_ONLY};cold_compare_only=${JOINT_COLD_COMPARE_ONLY};integrated_only=${JOINT_INTEGRATED_ONLY};refine_only=${JOINT_REFINE_ONLY};exec_only=${JOINT_EXEC_ONLY};hot_only=${JOINT_HOT_ONLY};mtp8_only=${JOINT_MTP8_ONLY};mtp7_fix_only=${JOINT_MTP7_FIX_ONLY};mtp7_pack_only=${JOINT_MTP7_PACK_ONLY};peer_only=${JOINT_PEER_ONLY};prefix_only=${JOINT_PREFIX_ONLY};merge_unique_only=${JOINT_MERGE_UNIQUE_ONLY};fused_tune_only=${JOINT_FUSED_TUNE_ONLY};capacity8k_only=${JOINT_CAPACITY8K_ONLY};capacity16k_only=${JOINT_CAPACITY16K_ONLY};ab8k_compare_only=${JOINT_AB8K_COMPARE_ONLY};rankpipe_only=${JOINT_RANKPIPE_ONLY};mtp3_only=${JOINT_MTP3_ONLY};stage_exec_only=${JOINT_STAGE_EXEC_ONLY};layout_hot_only=${JOINT_LAYOUT_HOT_ONLY};ordered_bitmap_plan=${JOINT_ORDERED_BITMAP_PLAN}"
     RESULT_VARIABLE _identity_result)
 if(NOT _identity_result EQUAL 0)
     message(FATAL_ERROR "Joint Plan source identity check failed")
@@ -360,9 +361,27 @@ add_custom_command(OUTPUT "${PEER_PLAN_OBJECT}"
     DEPENDS "${PEER_PLAN_DIR}/kernel.cpp" ${PEER_PLAN_HEADERS}
         "${JOINT_ROOT}/joint_plan_manifest.json" VERBATIM)
 set_source_files_properties("${PEER_PLAN_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+set(ORDERED_BITMAP_SOURCES)
+if(JOINT_ORDERED_BITMAP_PLAN)
+    # The attached Plan uses its own local config header. Keep this source in a
+    # separate translation unit so symbol names cannot collide with the
+    # preserved joint Plan experiments.
+    set(ORDERED_BITMAP_DIR "${JOINT_ROOT}/csrc/ordered_bitmap_512")
+    set(ORDERED_BITMAP_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/ordered_bitmap_512.o")
+    add_custom_command(OUTPUT "${ORDERED_BITMAP_OBJECT}"
+        COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
+            ${JOINT_FLAGS} ${JOINT_INCLUDES} -I${ORDERED_BITMAP_DIR}
+            -c "${ORDERED_BITMAP_DIR}/sparse_kv_plan.cpp" -o "${ORDERED_BITMAP_OBJECT}"
+        DEPENDS "${ORDERED_BITMAP_DIR}/sparse_kv_plan.cpp"
+            "${ORDERED_BITMAP_DIR}/sparse_kv_plan_config.h"
+            "${JOINT_ROOT}/joint_plan_manifest.json"
+        COMMENT "Compile ordered-query bitmap Plan (512 hot threads)" VERBATIM)
+    set_source_files_properties("${ORDERED_BITMAP_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+    set(ORDERED_BITMAP_SOURCES "${ORDERED_BITMAP_OBJECT}" "${ORDERED_BITMAP_DIR}/plugin.cpp")
+endif()
 add_library(mtp_joint_plan_ops SHARED "${PEER_PLAN_OBJECT}" "${PEER_PLAN_DIR}/plugin.cpp" ${PAGED_OPT_OBJECTS} ${PAGED_OPT_PLUGINS} "${ABCDF_PAGES_DIR}/plugin.cpp" "${ABCDF_PAGES_OBJECT}" "${JOINT_DIR}/plugin.cpp" "${JOINT_INFO}"
     "${JOINT_OBJECT}" "${ABCDF_DIR}/plugin.cpp" "${ABCDF_OBJECT}"
-    "${JOINT_VARIANT_DIR}/plugin.cpp" ${JOINT_VARIANT_OBJECTS})
+    "${JOINT_VARIANT_DIR}/plugin.cpp" ${JOINT_VARIANT_OBJECTS} ${ORDERED_BITMAP_SOURCES})
 target_include_directories(mtp_joint_plan_ops PRIVATE "${JOINT_GENERATED}")
 separate_arguments(TORCH_FLAGS_LIST NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 target_compile_options(mtp_joint_plan_ops PRIVATE ${TORCH_FLAGS_LIST})

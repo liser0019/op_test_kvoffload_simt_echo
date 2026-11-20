@@ -28,6 +28,7 @@ JOINT_CAPACITY8K_ONLY=OFF
 JOINT_FUSED_TUNE_ONLY=OFF
 JOINT_MERGE_UNIQUE_ONLY=OFF
 JOINT_PREFIX_ONLY=OFF
+JOINT_ORDERED_BITMAP_PLAN=OFF
 for arg in "$@"; do
   case "$arg" in
     --soc=ascend950) ;;
@@ -43,6 +44,7 @@ for arg in "$@"; do
     --ab8k-compare-only) JOINT_AB8K_COMPARE_ONLY=ON ;;
     --rankpipe-only) JOINT_RANKPIPE_ONLY=ON ;;
     --mtp3-only) JOINT_MTP3_ONLY=ON ;;
+    --ordered-bitmap-plan) JOINT_ORDERED_BITMAP_PLAN=ON ;;
     --stage-exec-only) JOINT_STAGE_EXEC_ONLY=ON ;;
     --layout-hot-only) JOINT_LAYOUT_HOT_ONLY=ON ;;
     --capacity16k-only) JOINT_CAPACITY16K_ONLY=ON ;;
@@ -58,7 +60,7 @@ for arg in "$@"; do
     --debug-info) JOINT_DEBUG=ON ;;
     --resource-usage) JOINT_RESOURCES=ON ;;
     --help|-h)
-      echo "用法: PYTHON=python3 JOBS=3 bash build_joint_plan.sh [--soc=ascend950] [--debug-info] [--resource-usage] [--merge-only] [--sorted-only] [--sweep-only] [--union-only] [--ac-threads-only] [--cold-compare-only] [--integrated-only] [--refine-only] [--exec-only] [--hot-only] [--mtp8-only] [--mtp7-fix-only] [--mtp7-pack-only] [--peer-only] [--prefix-only] [--merge-unique-only] [--fused-tune-only] [--capacity8k-only] [--capacity16k-only] [--layout-hot-only] [--stage-exec-only] [--rankpipe-only] [--ab8k-compare-only] [--mtp3-only]"
+      echo "用法: PYTHON=python3 JOBS=3 bash build_joint_plan.sh [--soc=ascend950] [--debug-info] [--resource-usage] [--merge-only] [--sorted-only] [--sweep-only] [--union-only] [--ac-threads-only] [--cold-compare-only] [--integrated-only] [--refine-only] [--exec-only] [--hot-only] [--mtp8-only] [--mtp7-fix-only] [--mtp7-pack-only] [--peer-only] [--prefix-only] [--merge-unique-only] [--fused-tune-only] [--capacity8k-only] [--capacity16k-only] [--layout-hot-only] [--stage-exec-only] [--rankpipe-only] [--ab8k-compare-only] [--mtp3-only] [--ordered-bitmap-plan]"
       exit 0 ;;
     *) echo "未知参数: $arg" >&2; exit 2 ;;
   esac
@@ -69,7 +71,7 @@ JOINT_PYTHON="$(command -v -- "${PYTHON:-python3}")"
 JOINT_ARGS=(-S "$JOINT_ROOT/joint_plan" -B "$JOINT_BUILD_DIR"
   -DCMAKE_BUILD_TYPE=Release -DNPU_ARCH=ascend950
   -DPython3_EXECUTABLE="$JOINT_PYTHON" -DJOINT_DEBUG_INFO="$JOINT_DEBUG"
-  -DJOINT_RESOURCE_USAGE="$JOINT_RESOURCES" -DJOINT_MERGE_ONLY="$JOINT_MERGE_ONLY" -DJOINT_SORTED_ONLY="$JOINT_SORTED_ONLY" -DJOINT_SWEEP_ONLY="$JOINT_SWEEP_ONLY" -DJOINT_UNION_ONLY="$JOINT_UNION_ONLY" -DJOINT_AC_THREADS_ONLY="$JOINT_AC_THREADS_ONLY" -DJOINT_COLD_COMPARE_ONLY="$JOINT_COLD_COMPARE_ONLY" -DJOINT_INTEGRATED_ONLY="$JOINT_INTEGRATED_ONLY" -DJOINT_REFINE_ONLY="$JOINT_REFINE_ONLY" -DJOINT_EXEC_ONLY="$JOINT_EXEC_ONLY" -DJOINT_HOT_ONLY="$JOINT_HOT_ONLY" -DJOINT_MTP8_ONLY="$JOINT_MTP8_ONLY" -DJOINT_MTP7_FIX_ONLY="$JOINT_MTP7_FIX_ONLY" -DJOINT_MTP7_PACK_ONLY="$JOINT_MTP7_PACK_ONLY" -DJOINT_PEER_ONLY="$JOINT_PEER_ONLY" -DJOINT_PREFIX_ONLY="$JOINT_PREFIX_ONLY" -DJOINT_MERGE_UNIQUE_ONLY="$JOINT_MERGE_UNIQUE_ONLY" -DJOINT_FUSED_TUNE_ONLY="$JOINT_FUSED_TUNE_ONLY" -DJOINT_AB8K_COMPARE_ONLY="$JOINT_AB8K_COMPARE_ONLY" -DJOINT_RANKPIPE_ONLY="$JOINT_RANKPIPE_ONLY" -DJOINT_MTP3_ONLY="$JOINT_MTP3_ONLY" -DJOINT_STAGE_EXEC_ONLY="$JOINT_STAGE_EXEC_ONLY" -DJOINT_LAYOUT_HOT_ONLY="$JOINT_LAYOUT_HOT_ONLY" -DJOINT_CAPACITY16K_ONLY="$JOINT_CAPACITY16K_ONLY" -DJOINT_CAPACITY8K_ONLY="$JOINT_CAPACITY8K_ONLY")
+  -DJOINT_RESOURCE_USAGE="$JOINT_RESOURCES" -DJOINT_MERGE_ONLY="$JOINT_MERGE_ONLY" -DJOINT_SORTED_ONLY="$JOINT_SORTED_ONLY" -DJOINT_SWEEP_ONLY="$JOINT_SWEEP_ONLY" -DJOINT_UNION_ONLY="$JOINT_UNION_ONLY" -DJOINT_AC_THREADS_ONLY="$JOINT_AC_THREADS_ONLY" -DJOINT_COLD_COMPARE_ONLY="$JOINT_COLD_COMPARE_ONLY" -DJOINT_INTEGRATED_ONLY="$JOINT_INTEGRATED_ONLY" -DJOINT_REFINE_ONLY="$JOINT_REFINE_ONLY" -DJOINT_EXEC_ONLY="$JOINT_EXEC_ONLY" -DJOINT_HOT_ONLY="$JOINT_HOT_ONLY" -DJOINT_MTP8_ONLY="$JOINT_MTP8_ONLY" -DJOINT_MTP7_FIX_ONLY="$JOINT_MTP7_FIX_ONLY" -DJOINT_MTP7_PACK_ONLY="$JOINT_MTP7_PACK_ONLY" -DJOINT_PEER_ONLY="$JOINT_PEER_ONLY" -DJOINT_PREFIX_ONLY="$JOINT_PREFIX_ONLY" -DJOINT_MERGE_UNIQUE_ONLY="$JOINT_MERGE_UNIQUE_ONLY" -DJOINT_FUSED_TUNE_ONLY="$JOINT_FUSED_TUNE_ONLY" -DJOINT_AB8K_COMPARE_ONLY="$JOINT_AB8K_COMPARE_ONLY" -DJOINT_RANKPIPE_ONLY="$JOINT_RANKPIPE_ONLY" -DJOINT_MTP3_ONLY="$JOINT_MTP3_ONLY" -DJOINT_STAGE_EXEC_ONLY="$JOINT_STAGE_EXEC_ONLY" -DJOINT_LAYOUT_HOT_ONLY="$JOINT_LAYOUT_HOT_ONLY" -DJOINT_CAPACITY16K_ONLY="$JOINT_CAPACITY16K_ONLY" -DJOINT_CAPACITY8K_ONLY="$JOINT_CAPACITY8K_ONLY" -DJOINT_ORDERED_BITMAP_PLAN="$JOINT_ORDERED_BITMAP_PLAN")
 for name in ASCEND_CANN_PACKAGE_HOME BISHENG_CXX ASCENDC_RUNTIME_LIBRARY; do
   if [[ -n "${!name:-}" ]]; then JOINT_ARGS+=("-D$name=${!name}"); fi
 done

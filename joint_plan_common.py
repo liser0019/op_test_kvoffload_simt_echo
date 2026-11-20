@@ -15,16 +15,19 @@ from joint_plan_cases import INPUTS, PERSISTENT, OUTPUTS, POISON, layout, initia
 
 ROOT = Path(__file__).resolve().parent
 from joint_variants import hot_config, VARIANTS, DEFAULT_IMPLEMENTATIONS, is_joint, description, TURBO_MASKS, MERGE_NAMES, SORTED_NAMES
+ORDERED_BITMAP_512 = "joint_ordered_bitmap_512"
+EXTERNAL_MTP3_BT_ODD = "joint_mtp3_bt_direct_odd_512"
+ORDERED_PLAN_NAMES = (peer_plan.NAME, EXTERNAL_MTP3_BT_ODD, ORDERED_BITMAP_512)
 PAGED_NAMES = ("abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab")
 INDEPENDENT = ("abcdf", *PAGED_NAMES)
-IMPLEMENTATIONS = (peer_plan.NAME, "abcdf", "abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab", "private", "joint", *VARIANTS)
+IMPLEMENTATIONS = (peer_plan.NAME, "abcdf", "abcdf_pages", "abcdf_pages_a", "abcdf_pages_b", "abcdf_pages_ab", "private", "joint", *VARIANTS, ORDERED_BITMAP_512)
 KERNELS = {"abcdf_pages": "sparse_kv_plan_kernel_plan_abcdf_pages", "abcdf": "sparse_kv_plan_kernel_plan_abcdf",
            "private": "sparse_kv_plan_private_kernel", "joint": "sparse_kv_plan_joint_kernel"}
 KERNELS.update({name: "sparse_kv_plan_" + name.split("_", 1)[0] + "_kernel_" + name.split("_", 1)[1]
                 for name in VARIANTS})
 KERNELS[peer_plan.NAME] = peer_plan.KERNEL
+KERNELS[ORDERED_BITMAP_512] = "sparse_kv_plan_joint_kernel_ordered_bitmap_512"
 KERNELS.update({n: "sparse_kv_plan_kernel_plan_" + n for n in PAGED_NAMES})
-EXTERNAL_MTP3_BT_ODD = "joint_mtp3_bt_direct_odd_512"
 ABCDF_STATE = ("last_req_ids", "slot_to_token", "lru_slots")
 ABCDF_OUTPUT = ("current_slots", "miss_count", "miss_tokens", "miss_slots")
 TENSOR_ORDER = (*INPUTS, "active_rows", "last_req_ids", "slot_to_token", "lru_slots",
@@ -32,6 +35,14 @@ TENSOR_ORDER = (*INPUTS, "active_rows", "last_req_ids", "slot_to_token", "lru_sl
                 "row_modes", "resident_rows", "resident_block_table")
 GUARD = 16
 GUARD_VALUE = 0x5A5A5A5A
+ORDERED_BITMAP_DESCRIPTION = {
+    "algorithm": "ordered_bitmap_512", "threads": 512,
+    "private_fallback_threads": 1024, "max_group_rows": 4,
+    "topk": 2048, "capacity": 8192, "max_token": 358400,
+    "dynamic_ub_bytes": 181024, "workspace_elements": "rows*topk/2",
+    "source_commit": "ba4c5dd9bb6aaa432abf4822607ce224bec51862",
+    "scope": "TopK2048/capacity8192/four rows per request",
+}
 
 
 def add_runtime_arguments(parser):
@@ -82,7 +93,7 @@ def upload_inputs(torch, case):
 
 
 def update_inputs(torch, bundle, case):
-    if bundle["name"] in MERGE_NAMES or bundle["name"] == peer_plan.NAME:
+    if bundle["name"] in MERGE_NAMES or bundle["name"] in ORDERED_PLAN_NAMES:
         require_sorted_topk(case)
     for key in INPUTS:
         bundle["inputs"][key].copy_(torch.from_numpy(np.ascontiguousarray(case[key])).to(bundle["inputs"][key].device))
@@ -92,7 +103,7 @@ def update_inputs(torch, bundle, case):
 def prepare(torch, case, name, inputs=None):
     if name not in IMPLEMENTATIONS:
         raise ValueError("Unknown implementation: " + name)
-    if name in MERGE_NAMES or name == peer_plan.NAME:
+    if name in MERGE_NAMES or name in ORDERED_PLAN_NAMES:
         require_sorted_topk(case)
     # Integrated entry groups actual tokenToReq runs even if a fixture calls it MTP0.
     enabled = name == peer_plan.NAME or (is_joint(name) and (case["mtp"] > 0 or name in INTEGRATED_NAMES))
@@ -108,6 +119,22 @@ def prepare(torch, case, name, inputs=None):
                 "scratch_elements": 46912,
                 "workspace_elements": case["rows"] * case["topk"] // 2 + case["requests"] * 2048,
                 "dynamic_ub_bytes": 187936, "scratch_path": "UB"}
+    if name == ORDERED_BITMAP_512:
+        if (case["topk"], case["capacity"], case["rows"]) != (
+                2048, 8192, 4 * case["requests"]) or not 0 < case["max_token"] <= 358400:
+            raise ValueError("ordered_bitmap_512 requires MTP3, TopK2048, capacity8192 and maxToken<=358400")
+        rows_per_request = case["rows"] // case["requests"]
+        if rows_per_request != 4:
+            raise ValueError("ordered_bitmap_512 requires four query rows per request")
+        merge_words = 32768
+        scratch_words = 128 + case["capacity"] // 2 + case["capacity"] + merge_words
+        info = {"hash_capacity": 4096, "joint_hash_capacity": 16384,
+                "scratch_elements": scratch_words,
+                "workspace_elements": case["rows"] * case["topk"] // 2,
+                "dynamic_ub_bytes": 288 + 4 * scratch_words,
+                "scratch_path": "UB", "four_rows_per_request": True,
+                "source_commit": "ba4c5dd9bb6aaa432abf4822607ce224bec51862",
+                "kernel": KERNELS[ORDERED_BITMAP_512]}
     if name == peer_plan.NAME:
         info = peer_plan.layout(case["topk"], case["capacity"], case["rows"], case["q_len"])
     inputs = upload_inputs(torch, case) if inputs is None else inputs
@@ -119,7 +146,7 @@ def prepare(torch, case, name, inputs=None):
         max_queries = (info["scratch_elements"] - 2 * info["joint_hash_capacity"] - case["capacity"]
                        if is_turbo and enabled else None)
         if name in SORTED_NAMES: max_queries=(min(case["capacity"],8*case["topk"]) if layout_hot_bits(VARIANTS.get(name,0)) else (8 if supports_eight_rows(name) else 4)*case["topk"]) if enabled else None
-        if name == peer_plan.NAME: max_queries = case["q_len"] * case["topk"]
+        if name in (peer_plan.NAME, ORDERED_BITMAP_512): max_queries = case["rows"] * case["topk"]
         host = initial_arrays(case, enabled, max_queries)
     host["workspace"] = np.full(info["workspace_elements"], np.iinfo(np.int32).max, np.int32)
     tensors, buffers, initial = {}, {}, {}
@@ -135,7 +162,9 @@ def prepare(torch, case, name, inputs=None):
     attrs = [case[key] for key in (("topk", "capacity", "max_token") if name in INDEPENDENT
                                    else ("topk", "capacity", "max_token", "block_size"))]
     context = None
-    if name not in INDEPENDENT and name != peer_plan.NAME:
+    if name == ORDERED_BITMAP_512:
+        context = torch.classes.mtp_joint_plan.PreparedOrderedBitmap512(ordered, attrs)
+    elif name not in INDEPENDENT and name != peer_plan.NAME:
         attrs.append(int(controller_enabled))
         if name in VARIANTS:
             context = torch.classes.mtp_joint_plan.PreparedVariant(ordered, attrs, is_joint(name), VARIANTS[name])
@@ -168,6 +197,8 @@ def prepare(torch, case, name, inputs=None):
     if name == peer_plan.NAME:
         native.update(info, interface="standalone peer Plan,18tensors/6attrs",
                       page_table_sha256=hashlib.sha256(table.tobytes()).hexdigest())
+    if name == ORDERED_BITMAP_512:
+        native.update(info, interface="ordered indexer + standalone ordered bitmap Plan,17tensors/4attrs")
     native["logical_joint_enabled"] = bool(enabled)
     native["single_sorted_requested"] = (supports_single_sorted(name) or name == peer_plan.NAME) and case["mtp"] == 0
     if name in PAGED_NAMES:
@@ -176,7 +207,8 @@ def prepare(torch, case, name, inputs=None):
     native["experiment"] = ({"family": "independent paged ABCDF", "optimization_mask":
         {"abcdf_pages": 0, "abcdf_pages_a": 1, "abcdf_pages_b": 2, "abcdf_pages_ab": 3}[name],
         "A": "warm scratch token forwarding", "B": "ping-pong register-total Scan"}
-        if name in PAGED_NAMES else peer_plan.description() if name == peer_plan.NAME else description(name))
+        if name in PAGED_NAMES else ORDERED_BITMAP_DESCRIPTION if name == ORDERED_BITMAP_512
+        else peer_plan.description() if name == peer_plan.NAME else description(name))
     return {"name": name, "torch": torch, "invocation_count": 0,
             "workload": {key: case.get(key) for key in ("scenario", "overlap", "mtp", "rows", "requests", "topk", "capacity", "max_token", "seed")}, "joint_enabled": enabled, "inputs": inputs, "state": tensors,
             "buffers": buffers, "initial": initial, "host_initial": host,
@@ -233,8 +265,8 @@ def _check_uncached(case, bundle, before=None):
         if bundle["name"] in PAGED_NAMES:
             result["protocol"] = "independent paged ABCDF, 15 tensors; upstream guarantees valid source pages"
         return result
-    if bundle["name"] == peer_plan.NAME:
-        return validate(case, before, snapshot(bundle), True, case["q_len"] * case["topk"],
+    if bundle["name"] in (peer_plan.NAME, ORDERED_BITMAP_512):
+        return validate(case, before, snapshot(bundle), True, case["rows"] * case["topk"],
                         merge=True, float_keys=True, single_sorted=True,
                         max_group_rows=case["q_len"], require_power_two_groups=False)
     layout_info = bundle.get("layout", {})

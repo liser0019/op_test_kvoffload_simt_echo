@@ -37,6 +37,7 @@ MTP3_PLAN_CANDIDATES = {
     'ac': BASE, 'map': 'joint_mtp3_map_512', 'load': 'joint_mtp3_load_512',
     'full': 'joint_mtp3_full_512', 'full_load': 'joint_mtp3_full_load_512',
     'bt_direct_odd': 'joint_mtp3_bt_direct_odd_512',
+    'bitmap512': common.ORDERED_BITMAP_512,
 }
 MTP3_PLAN_ONLY = {'plan_' + k: v for k, v in MTP3_PLAN_CANDIDATES.items()}
 MTP3_CHAIN = {'ordered_' + k: v for k, v in MTP3_PLAN_CANDIDATES.items()}
@@ -609,10 +610,10 @@ def main_run(args,report):
                     data['split_reference']=split_reference
                 if 'split' in stats:
                     data['qli_s1_base']=2
-                target='ordered_bt_direct_odd'
-                if target in stats:
+                target=next((n for n in ('ordered_bitmap512','ordered_bt_direct_odd') if n in stats),None)
+                if target is not None:
                     target_stats=stats[target]
-                    data['official_vs_ordered_bt_plan_p50']={
+                    data['official_vs_ordered_plan_p50']={
                         'official_indexer_us':stats['baseline']['span_us']['p50_us'],
                         'ordered_indexer_us':target_stats['indexer_span_us']['p50_us'],
                         'plan_us':target_stats['plan_us']['p50_us'],
@@ -709,7 +710,7 @@ def main_run(args,report):
                 'split4是固定S1Base=4的同事保序Indexer，接同一个独立Plan。两路使用同一份初始状态和严格TopK验证。']
     if set(names) & MTP3_ROLES:
         lines+=['ordered_ac 和其他 ordered_* 路径在同一 stream 上连续下发原生保序 Indexer 和独立 Plan。',
-                'plan_* 只执行独立 Plan，读取同一工况的原生 ordered 输出。native_* 来自原生 ordered 的融合接入。']
+                'ordered_bitmap512 对应本次接入的 ordered_bitmap_512 Plan；plan_* 只执行独立 Plan，读取同一工况的原生 ordered 输出。native_* 来自原生 ordered 的融合接入。']
     if args.indexer_only:
         lines+=['三路均以 --indexer-only 运行。ordered4 的融合 ABI 仍接收用于正确性检查的占位参数。',
                 'ordered_native 是 pinned 上游真正独立 QuantLightningIndexerOrdered；ordered4 是与 split4 同 kernel 的关闭 Plan hook 单跑；final4 是原始 Indexer tiling 加末尾位置排序的单跑。']
@@ -757,8 +758,8 @@ def main_run(args,report):
         for n in (name for name in names if name in split_roles):
             s=r['statistics'][n]
             lines+=['',f"{r['tag']} 的 {n} 分段 P50（μs）为 Indexer {s['indexer_span_us']['p50_us']:.3f}、Plan {s['plan_us']['p50_us']:.3f}、间隙 {s['between_kernel_gap_us']['p50_us']:.3f}。",'']
-        if 'official_vs_ordered_bt_plan_p50' in r:
-            pair=r['official_vs_ordered_bt_plan_p50']
+        if 'official_vs_ordered_plan_p50' in r:
+            pair=r['official_vs_ordered_plan_p50']
             lines+=['',f"{r['tag']} 官方 Indexer P50 {pair['official_indexer_us']:.3f} μs；"
                     f"保序 Indexer＋Plan 链路 {pair['chain_span_us']:.3f} μs。"
                     f"总增量 {pair['total_delta_us']:+.3f} μs，其中保序改造 "

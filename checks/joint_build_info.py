@@ -194,6 +194,44 @@ def identity():
     for path, expected in manifest["file_sha256"].items():
         if hashlib.sha256((ROOT / path).read_bytes()).hexdigest() != expected:
             raise ValueError("Joint Plan source fingerprint changed: " + path)
+    ordered = manifest.get("ordered_bitmap_512", {})
+    ordered_expected = {
+        "source_commit": "ba4c5dd9bb6aaa432abf4822607ce224bec51862",
+        "hot_threads": 512,
+        "fallback_threads": 1024,
+        "topk": 2048,
+        "capacity": 8192,
+        "max_token": 358400,
+        "dynamic_ub_bytes": 181024,
+        "scratch_elements": 45184,
+        "tiling_abi_bytes": 80,
+        "kernel": "sparse_kv_plan_joint_kernel_ordered_bitmap_512",
+        "launch": "launch_joint_plan_ordered_bitmap_512",
+    }
+    for key, expected in ordered_expected.items():
+        if ordered.get(key) != expected:
+            raise ValueError("ordered_bitmap_512 provenance mismatch: " + key)
+    ordered_dir = ROOT / "csrc/ordered_bitmap_512"
+    ordered_cpp = (ordered_dir / "sparse_kv_plan.cpp").read_text()
+    ordered_config = (ordered_dir / "sparse_kv_plan_config.h").read_text()
+    ordered_plugin = (ordered_dir / "plugin.cpp").read_text()
+    ordered_markers = (
+        (ordered_cpp, 'Source: op_test_kvoffload_simt_echo@ba4c5dd9bb6aaa432abf4822607ce224bec51862'),
+        (ordered_cpp, 'sparse_kv_plan_joint_kernel_ordered_bitmap_512'),
+        (ordered_cpp, 'launch_joint_plan_ordered_bitmap_512'),
+        (ordered_config, 'constexpr uint32_t PLAN_THREADS = 1024U;'),
+        (ordered_config, 'static_assert(sizeof(JointDirectTilingData) == 80'),
+        (ordered_config, 'maxToken > 358400'),
+        (ordered_plugin, 'PreparedOrderedBitmap512'),
+        (ordered_plugin, 'ordered bitmap Plan dynamic UB differs from pinned 181024-byte layout'),
+    )
+    for text, marker in ordered_markers:
+        if marker not in text:
+            raise ValueError("ordered_bitmap_512 source contract missing: " + marker)
+    if 128 + 8192 // 2 + 8192 + 32768 != ordered["scratch_elements"]:
+        raise ValueError("ordered_bitmap_512 scratch formula mismatch")
+    if 288 + 4 * ordered["scratch_elements"] != ordered["dynamic_ub_bytes"]:
+        raise ValueError("ordered_bitmap_512 dynamic UB formula mismatch")
     peer = ROOT / "csrc/peer_qli_plan"
     standalone = (peer / "upstream/sparse_kv_plan_apt.cpp").read_text()
     if (peer / "standalone_body.h").read_text() != standalone[:standalone.index('extern "C" __global__')].rstrip() + '\n':

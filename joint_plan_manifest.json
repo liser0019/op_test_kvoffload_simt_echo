@@ -241,8 +241,8 @@
   "hardware_validation": "not_run_on_development_machine",
   "local_execution": "CPU model/static checks only; hardware build and NPU verification pending",
   "file_sha256": {
-    "build_joint_plan.sh": "0de9b74853201d25244dd6759ad2db974399d7ef22e06ddf230e3e18c9cf30cc",
-    "joint_plan/CMakeLists.txt": "909da6c19bce470bc1a5e10b6443be6f9768eb0b2a0663f158b34dbe04a2d3e7",
+    "build_joint_plan.sh": "e576cc0343ec1fd5eb7b32f3517cb576dc66d0df0c69db90f843fd17867f6338",
+    "joint_plan/CMakeLists.txt": "0332d5a6f221f28115e1b6d30d110d6e0f950e67523776ece672e0c9213a351a",
     "csrc/joint_plan/kernel.cpp": "8c220c8ddb9fa136f5fbd7a8f116f3d7035243192fecf9d8428cd40d5e0e3510",
     "csrc/joint_plan/plugin.cpp": "8d8393dec5c8577e90f728e3461dd6fcdf9f6e9a23c7d7ec1f3472a72968a98c",
     "csrc/joint_plan/launch.h": "dd57be162dfc20743f62379e8e9ad06dc084e549903129affd18308a0f14e136",
@@ -252,12 +252,12 @@
     "csrc/joint_plan/upstream/sparse_kv_joint_plan.h": "da059af1c5a3921e6deddab37a5a35f64a302d3aadde7e36dfc816f0b78eb030",
     "csrc/joint_plan/upstream/sparse_kv_plan_config.h": "6828d6d3a1c8d9a5e17adf5c3936088de091496679b93b08e5fac5e1776bd34f",
     "joint_plan_cases.py": "4a7526889f74863239b76f0f8ef6032a3269e13c87fe82f10a89d93312e0860e",
-    "joint_plan_common.py": "08908cee1caf96c4e69a23a58daff54b255fb8abe766bb09ad30b2e2649bbb7b",
+    "joint_plan_common.py": "d6b12bb02cdab84e9ca32a5b2383d679d8137e175eca4929117af4c7b0e5e3ab",
     "profile_joint_mtp.py": "ca788c04693a1c8e1f249029751f26502663f837a4f2c89602d7139e9f1b8799",
     "run_joint_msopprof.py": "eea7d00f4a4c275ade27a1799eba933195d0899279fdec1e8adb3d5de508525f",
     "checks/check_joint_plan.py": "90cafb835272b0efb7afe72a1e361655879243403da9c7d6fad2a5cbaffe5ea0",
     "checks/check_joint_models.py": "862e1df65a5d4f7821df1a601dc4b941b824dae4827d22fbbc9a8fb79b3588df",
-    "checks/joint_build_info.py": "2c60af1137a8fe17168d5aea132b94a4348f77669f1b5086b367fca3f4762bd7",
+    "checks/joint_build_info.py": "ac9b2c87d3869de70c9668fdfd462bba5017f2b751734b378bed33685a0ee2fe",
     "checks/__init__.py": "f09b9b4b7ed6849053ec0e445f6eb8d3c003c6aa8d3dacc01d916eacd9e83462",
     "compare.py": "b368b278d50c6982fd408ef2a80eb8f79e1faa7f8589922ee6f69caf66900c54",
     "mtp_cases.py": "72bc420b5751f2d17cd21c32b04079c36e36d94ca49c9f4e6f7f7454a0325195",
@@ -271,7 +271,7 @@
     "csrc/plan_variants/common/plan_kernel_impl.h": "5b58829a0137451c1f7c9c2a77c090eb59281dcf04c9854aedd6e62cf8719242",
     "csrc/plan_variants/common/plan_plugin_impl.h": "61be76e0845c3fbd0c95e1908d720c49529b038a2258e5802c9bfefd1a8805f1",
     "csrc/plan_variants/common/sparse_kv_plan_config.h": "f5d07992fe8ecab41f9fed49a8a8f7683b38b46d19cd678e5746b7f898398620",
-    "joint_variants.py": "9de9e4c65e8994216a5b321a054abb4dd1a3452e129e723b68f295f191f07a72",
+    "joint_variants.py": "39758ebcb145471850475119eaa6a29db74f85e48e4325c1eddfa316d4790d84",
     "checks/generate_joint_variants.py": "fb1dd83ef712f6b7499fbf06b18732c12306a82bdf8aa56054acf186d26da168",
     "checks/check_joint_variant_kernels.py": "d789ba41c4bc81afd1a15f5913014b476b6ba4f70ab916beaa07b39d04ac7661",
     "checks/joint_variant_cpu_driver.cpp": "44d202ca33e11c93b3b859118c2656c0a6c55776fe1729ca0d070a1185bada24",
@@ -508,7 +508,10 @@
     "scripts/test_ab8k_context.sh": "9edd9c879d1bc4d0e94622cbdc88d2faafe3d2df9d73d4a7d3674bb770ae7768",
     "checks/check_mtp3_candidates.py": "ec15d721da7414944d42d2589e38dc7ee7ee020b205beb18193d0880e4ad929b",
     "checks/check_mtp3_npu.py": "0d7c2347ab82dbeb5a9c72851b78698b4d8ef660251417c0becb866a92c6835f",
-    "scripts/test_mtp3_candidates.sh": "0340dd7288485b5fbb20bca257f34ef430fc9bd87dfc93daae67fb1ce97f4d3a"
+    "scripts/test_mtp3_candidates.sh": "0340dd7288485b5fbb20bca257f34ef430fc9bd87dfc93daae67fb1ce97f4d3a",
+    "csrc/ordered_bitmap_512/sparse_kv_plan.cpp": "673b007ff127334ea96024688744e5ba8c209d8d395a1b9f8dd68402f34b223d",
+    "csrc/ordered_bitmap_512/sparse_kv_plan_config.h": "05c7f8d5a9e0f38f08491535d799eab0bb64b7ad939a67fcc0e0de629cdedcd0",
+    "csrc/ordered_bitmap_512/plugin.cpp": "4710bfbe2d99122643e6717793e4780aa1fdfa479a628f4b25c1fdb81fb950c9"
   },
   "fix_base": "de09a0d20b25c7dc5b7c98b3c0f571dbdb97fefd",
   "workaround": {
@@ -781,7 +784,8 @@
     "joint_mtp3_full_512": 252,
     "joint_mtp3_map_512": 253,
     "joint_mtp3_load_512": 254,
-    "joint_mtp3_full_load_512": 255
+    "joint_mtp3_full_load_512": 255,
+    "joint_mtp3_bt_direct_odd_512": 264
   },
   "joint_optimizations": {
     "a": "non-joint VF compile-time isolation (protocol retained)",
@@ -3163,5 +3167,29 @@
     "build": "bash build_joint_plan.sh --soc=ascend950 --mtp3-only",
     "full_dynamic_ub_bytes": 181024,
     "map_load_dynamic_ub_bytes": 148256
+  },
+  "ordered_bitmap_512": {
+    "source_repository": "op_test_kvoffload_simt_echo",
+    "source_commit": "ba4c5dd9bb6aaa432abf4822607ce224bec51862",
+    "source_files": {
+      "sparse_kv_plan.cpp": "673b007ff127334ea96024688744e5ba8c209d8d395a1b9f8dd68402f34b223d",
+      "sparse_kv_plan_config.h": "05c7f8d5a9e0f38f08491535d799eab0bb64b7ad939a67fcc0e0de629cdedcd0"
+    },
+    "adapter": "csrc/ordered_bitmap_512/plugin.cpp",
+    "adapter_sha256": "4710bfbe2d99122643e6717793e4780aa1fdfa479a628f4b25c1fdb81fb950c9",
+    "kernel": "sparse_kv_plan_joint_kernel_ordered_bitmap_512",
+    "private_kernel": "sparse_kv_plan_private_kernel_ordered_bitmap_512",
+    "launch": "launch_joint_plan_ordered_bitmap_512",
+    "hot_threads": 512,
+    "fallback_threads": 1024,
+    "topk": 2048,
+    "capacity": 8192,
+    "max_token": 358400,
+    "scratch_elements": 45184,
+    "dynamic_ub_bytes": 181024,
+    "workspace_expression": "rows*topk/2",
+    "tiling_abi_bytes": 80,
+    "interface": "ordered Indexer TopK + standalone Plan, 17 tensors + 4 attrs; one AIV per request",
+    "fallback_policy": "resident cache tiling rejects shapes outside MTP3/TopK2048/capacity8192/maxToken358400"
   }
 }
