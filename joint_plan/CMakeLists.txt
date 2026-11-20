@@ -241,7 +241,7 @@ foreach(_name IN LISTS JOINT_VARIANT_NAMES)
     if(JOINT_RANKPIPE_ONLY AND NOT _name MATCHES "^(stage_exec_abcd_512|rankpipe_(base|a|b|c|ab|ac|bc|abc)_512)$")
         continue()
     endif()
-    if(JOINT_MTP3_ONLY AND NOT _name MATCHES "^(rankpipe_ac_512|mtp3_(full|map|load|full_load)_512)$")
+    if(JOINT_MTP3_ONLY AND NOT _name MATCHES "^(rankpipe_ac_512|mtp3_(full|map|load|full_load|bt_direct_odd)_512)$")
         continue()
     endif()
     if(JOINT_STAGE_EXEC_ONLY AND NOT _name MATCHES "^(layout_stage_abcd_512|stage_exec_(base|a|b|c|d|ab|ac|ad|bc|bd|cd|abc|abd|acd|bcd|abcd)_512)$")
@@ -314,7 +314,7 @@ foreach(_name IN LISTS JOINT_VARIANT_NAMES)
     add_custom_command(OUTPUT "${_object}"
         COMMAND "${BISHENG_CXX}" --npu-arch=dav-3510 -xasc -std=c++17 -fPIC
             ${JOINT_FLAGS} ${JOINT_INCLUDES} -c "${JOINT_GENERATED}/variant_${_name}.cpp" -o "${_object}"
-        DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp"
+        DEPENDS "${JOINT_GENERATED}/variant_${_name}.cpp" "${JOINT_VARIANT_DIR}/kernel.cpp" "${JOINT_VARIANT_DIR}/mtp3_bitmap_team.h"
             "${JOINT_VARIANT_DIR}/sparse_kv_joint_plan.h" "${JOINT_VARIANT_DIR}/options.h" "${JOINT_VARIANT_DIR}/bitmap_plan.h"
             "${JOINT_VARIANT_DIR}/turbo_plan.h" "${JOINT_VARIANT_DIR}/turbo_union_experiments.h" "${JOINT_VARIANT_DIR}/merge_plan.h" "${JOINT_VARIANT_DIR}/merge_experiments.h" "${JOINT_VARIANT_DIR}/sorted_stage.h" "${JOINT_VARIANT_DIR}/sorted_controller.h" "${JOINT_VARIANT_DIR}/sorted_sweep_stage.h" "${JOINT_VARIANT_DIR}/sorted_sweep_controller.h" "${JOINT_VARIANT_DIR}/union_next_stage.h" "${JOINT_VARIANT_DIR}/union_next_controller.h" "${JOINT_VARIANT_DIR}/union_next_simd.h" "${JOINT_VARIANT_DIR}/cold_finish.h" "${JOINT_VARIANT_DIR}/cold_ac_stage.h" "${JOINT_VARIANT_DIR}/cold_union_stage.h" "${JOINT_VARIANT_DIR}/integrated_stage.h" "${JOINT_VARIANT_DIR}/phase0_bounds_stage.h" "${JOINT_VARIANT_DIR}/refine_options.h" "${JOINT_VARIANT_DIR}/refine_stage.h" "${JOINT_VARIANT_DIR}/refine_controller.h" "${JOINT_VARIANT_DIR}/refine_simd.h" "${JOINT_VARIANT_DIR}/exec_options.h" "${JOINT_VARIANT_DIR}/exec_stage.h" "${JOINT_VARIANT_DIR}/exec_simd.h" "${JOINT_VARIANT_DIR}/exec_controller.h" "${JOINT_VARIANT_DIR}/hot_plan_impl.h" "${JOINT_VARIANT_DIR}/mtp8_plan_impl.h" "${JOINT_VARIANT_DIR}/mtp7_merge_unique.h" "${JOINT_VARIANT_DIR}/mtp7_fused_refine.h"
             "${JOINT_DIR}/launch.h" "${JOINT_DIR}/sparse_kv_plan_config.h"

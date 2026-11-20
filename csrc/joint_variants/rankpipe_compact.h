@@ -5,7 +5,7 @@
 // support reduced-thread CPU semantic models, without changing the production tile.
 __simt_vf__ __aicore__ LAUNCH_BOUND(SORTED_THREADS) inline void RankPipeCompactVf(
     __ubuf__ int32_t* data,__ubuf__ int32_t* ctx,__ubuf__ int32_t* scan,
-#if JOINT_MTP3_MAP
+#if JOINT_MTP3_MAP || JOINT_MTP3_BITMAP_UBMAP
     uint32_t c,uint32_t u,bool hotUbMap){
   const uint32_t t=threadIdx.x;
   auto* owner=data+c/2U+c;

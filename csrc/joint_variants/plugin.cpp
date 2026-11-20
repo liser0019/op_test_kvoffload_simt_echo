@@ -1,3 +1,4 @@
+#include "mtp3_lookup_config.h"
 #include "layout_hot_tiling.h"
 // SPDX-License-Identifier: Apache-2.0
 // Prepared direct launch: no allocation/upload or device-value read inside Run.
@@ -73,7 +74,7 @@ void Shape(const at::Tensor& t, std::initializer_list<int64_t> shape) {
 class Prepared : public torch::CustomClassHolder {
  public:
   Prepared(Tensors p, Attrs attrs, bool jointEntry, int64_t variantMask) {
-    TORCH_CHECK(variantMask > 0 && variantMask <= 255, "joint variant mask must be 1..255");
+    TORCH_CHECK(variantMask > 0 && variantMask <= 264, "joint variant mask must be 1..264");
     TORCH_CHECK(JointVariantLaunch(variantMask) != nullptr, "joint variant not compiled in this build");
     // topk,capacity,maxToken,blockSize,effectiveJoint.
     TORCH_CHECK(p.size() == 17 && attrs.size() == 5, "joint expects 17 tensors / 5 attrs");
@@ -96,8 +97,15 @@ class Prepared : public torch::CustomClassHolder {
     const int64_t rows = p[1].size(0), requests = p[0].numel();
     if (variantMask >= 252) {
       TORCH_CHECK(requests > 0 && rows % 4 == 0 && rows / 4 == requests &&
-                  t == 2048 && c == 8192 && attrs[2] == 262144 && attrs[4] == 1,
-                  "MTP3 candidates require 4 rows per request, topk=2048, capacity=8192, maxToken=262144");
+                  t == 2048 && c == 8192 && attrs[4] == 1,
+                  "MTP3 candidates require 4 rows per request, topk=2048, capacity=8192, joint=1");
+      if (variantMask >= 256) {
+        TORCH_CHECK(attrs[2] <= 475 * 1024,
+                    "MTP3 475K candidates require maxToken<=486400");
+      } else {
+        TORCH_CHECK(attrs[2] == 262144,
+                    "frozen MTP3 candidates require maxToken=262144");
+      }
     }
     TORCH_CHECK(rows <= std::numeric_limits<int32_t>::max() / (c / block), "resident page index exceeds int32");
     Shape(p[1], {rows, t});
@@ -134,7 +142,7 @@ class Prepared : public torch::CustomClassHolder {
     const bool capacity8kAdapter = variantMask==212 || variantMask==213;
     const bool layout16=variantMask>=214;
     const uint64_t eightUbLimit = layout16 ? 204U*1024U : capacity8kAdapter && t==2048 && c==8192 ? 196U*1024U : 192U*1024U;
-    if((variantMask>=193 && variantMask<=255)){
+    if((variantMask>=193 && variantMask<=264)){
       // 8T map + C unique + max(3C owner/flags/partition, 3 merge buffers).
       d.scratchElements=std::max(d.workspaceRowElements,uint64_t{128}+((8U*t+c+7U)&~uint64_t{7U})+std::max(uint64_t{3}*c,uint64_t{24576}));
       if(layout16){
@@ -142,15 +150,25 @@ class Prepared : public torch::CustomClassHolder {
         d.scratchElements=128U+49152U+(variantMask==215?1536U:0U);
         if(variantMask>=228){
           d.scratchElements=LayoutHotScratch(c,d.workspaceRowElements,1,15);
-          if(variantMask==252 || variantMask==255)d.scratchElements+=8192U;
+          if(variantMask==252 || variantMask==255 || variantMask>=256)d.scratchElements+=8192U;
+          if(variantMask>=256)d.scratchElements+=1728U;
         }else if(variantMask>=216){const int bits[6]={1,3,5,7,13,15};
           d.scratchElements=LayoutHotScratch(c,d.workspaceRowElements,1+(variantMask-216)/6,bits[(variantMask-216)%6]);}
       }
       TORCH_CHECK(d.scratchElements*4U<=eightUbLimit,
           "MTP8 UB layout exceeds budget (",eightUbLimit," bytes); only capacity8k adapters permit TopK2048/capacity8192 above192KiB; no silent GM fallback");
+      if(variantMask>=256){
+        const uint64_t words=(static_cast<uint64_t>(attrs[2])+31U)/32U;
+        const uint64_t wordSpan=(words+7U)&~uint64_t{7U};
+        const uint64_t slotFloor = static_cast<uint64_t>(c) * (variantMask >= 261 ? 2U : 1U);
+        const uint64_t slotLookupSpan = std::max(2U*wordSpan, slotFloor);
+        const uint64_t indexWords=128U+c/2U+c+slotLookupSpan+(c+1U)/2U;
+        TORCH_CHECK(indexWords<=d.scratchElements,
+            "MTP3 475K resident index exceeds the fixed UB workspace");
+      }
     }
     const uint64_t alignedBytes = (d.scratchElements * 4U + 31U) & ~uint64_t{31U};
-    const bool ub = alignedBytes <= ((variantMask>=193 && variantMask<=255)?eightUbLimit:sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_BYTES);
+    const bool ub = alignedBytes <= ((variantMask>=193 && variantMask<=264)?eightUbLimit:sparse_kv_plan_config::PLAN_ROW_UB_LIMIT_BYTES);
     uint64_t stageBytes=0;
     if(algorithmMask>=37) {
       const uint64_t chunk=(std::min(uint64_t{768}, std::max(uint64_t{64},uint64_t{3}*c)/16U)/4U)*4U;
@@ -159,9 +177,16 @@ class Prepared : public torch::CustomClassHolder {
     d.localMemoryBytes = sparse_kv_plan_config::PLAN_SCAN_BYTES + (ub ? alignedBytes : stageBytes);
     TORCH_CHECK(d.scratchElements <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / rows),
                 "joint workspace size overflow");
-    const uint64_t requiredWorkspace = (variantMask==214 || (variantMask>=216 && variantMask<222) || variantMask>=228) ? static_cast<uint64_t>(rows)*t/2U : algorithmMask == 16 ?
+    uint64_t requiredWorkspace = (variantMask==214 || (variantMask>=216 && variantMask<222) || variantMask>=228) ? static_cast<uint64_t>(rows)*t/2U : algorithmMask == 16 ?
         static_cast<uint64_t>(rows) * (d.scratchElements + static_cast<uint64_t>(attrs[2])) :
         (ub ? 1U : static_cast<uint64_t>(rows) * d.scratchElements);
+    if (variantMask >= 258 && variantMask <= 260) {
+      requiredWorkspace += static_cast<uint64_t>(requests) * mtp3_lookup::kRequestWords;
+    }
+    if (variantMask >= 262 && variantMask <= 264) {
+      const uint64_t exchangeWords = 2048U + (variantMask == 262 ? 8200U : 0U);
+      requiredWorkspace += static_cast<uint64_t>(requests) * exchangeWords;
+    }
     TORCH_CHECK(requiredWorkspace <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()), "bitmap workspace overflow");
     TORCH_CHECK(p[13].dim() == 1 && p[13].numel() >= static_cast<int64_t>(requiredWorkspace),
                 "joint workspace too small");

@@ -13,21 +13,50 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   auto* owner=unique+c;
   auto* part=reinterpret_cast<__ubuf__ uint16_t*>(owner+c);
   auto* bits=reinterpret_cast<__ubuf__ uint32_t*>(part+c);
-#if JOINT_MTP3_MAP
+#if JOINT_MTP3_BITMAP_UBMAP
+  const bool hotUbMap = c == 8192U && topk == 2048U && end-first == 4;
+  // The packet region is no longer live. Keep the original packed map and
+  // keep flags disjoint from owner and partition throughout hot completion.
+  auto* flags = hotUbMap ? reinterpret_cast<__ubuf__ uint16_t*>(owner + 3U*c/2U) : map;
+#elif JOINT_MTP3_MAP
   const bool hotUbMap=c==8192U && topk==2048U && end-first==4;
   // This region of firstUid is dead once slotLookup has been built.
   auto* flags=hotUbMap?reinterpret_cast<__ubuf__ uint16_t*>(owner+12288U):map;
 #else
   auto* flags=map;
 #endif
+#if JOINT_MTP3_DIR475 || JOINT_MTP3_BITMAP475
+  const bool directRank = JOINT_MTP3_BITMAP475 && a.maxToken > 0 &&
+      a.maxToken <= static_cast<int32_t>(MTP3_475_MAX_TOKEN);
+  // Reuse the dead merge workspace. Pad both uint32 tables to 32B.
+  const uint32_t bitmapWords = (static_cast<uint32_t>(a.maxToken) + 31U) / 32U;
+  const uint32_t bitmapWordSpan = (bitmapWords + 7U) & ~7U;
+#if JOINT_MTP3_BITMAP_UBMAP
+  const uint32_t slotLookupFloor = hotUbMap ? 2U*c : c;
+#else
+  const uint32_t slotLookupFloor = c;
+#endif
+  const uint32_t slotLookupWordSpan = 2U * bitmapWordSpan > slotLookupFloor
+      ? 2U * bitmapWordSpan : slotLookupFloor;
+  auto* slotLookup = directRank ? reinterpret_cast<__ubuf__ uint16_t*>(owner + slotLookupWordSpan) : part;
+#else
   // A's index and slot UID table use the dead merge packet region, at most96KiB.
   const bool directRank=(JOINT_RANKPIPE_BITS&1U) && a.maxToken<=262144;
   auto* slotLookup=directRank?reinterpret_cast<__ubuf__ uint16_t*>(owner+16384U):part;
+#endif
   const int64_t qb=first*topk,cb=first*c;
   const uint32_t rows=end-first;
   const int32_t req=a.tokenToReq[first];const int64_t reqid=a.reqIds[req];
   uint32_t evicts=Phase==9?ctx[43]:0,hits=Phase==9?ctx[44]:0,misses=Phase==9?ctx[45]:0,parity=0;
   if constexpr(Phase!=9){
+#if JOINT_MTP3_BITMAP475
+  const uint64_t indexWords = static_cast<uint64_t>(c) / 2U + c + slotLookupWordSpan + (c + 1U) / 2U;
+  if (!directRank || indexWords + EIGHT_CTX > a.scratchElements) {
+    if (t == 0U) ctx[0] = 0;
+    asc_syncthreads();
+    return;
+  }
+#endif
   const bool reset=a.rowModes[first]!=(rows==1?ROW_PRIVATE:ROW_JOINT)||a.lastReqIds[first]!=reqid;
   if(reset){asc_syncthreads();
 #if (JOINT_RANKPIPE_BITS & 4)
@@ -41,16 +70,43 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   for(int64_t r=first+1;r<end;++r)if(a.stablePrefixLens[r]<stable)stable=a.stablePrefixLens[r];
   if(stable<0)stable=0;if(stable>a.maxToken)stable=a.maxToken;
 #if JOINT_LAYOUT16 == 1
+#if JOINT_MTP3_LOOKUP_SHARDS
+  if constexpr (Phase != 10)
+#endif
+#if JOINT_MTP3_BITMAP_UBMAP
+  if(!hotUbMap) {
+    for(uint32_t i=t;i<q/2;i+=SORTED_THREADS)workspace[qb/2+i]=data[i];
+    asc_syncthreads();
+  }
+#else
 #if JOINT_MTP3_MAP
   if(!hotUbMap)
 #endif
   for(uint32_t i=t;i<q/2;i+=SORTED_THREADS)workspace[qb/2+i]=data[i];
   asc_syncthreads();
 #endif
+#endif
+#if JOINT_MTP3_BITMAP_TEAM
+  if constexpr (Phase != 12) {
+#endif
+#if JOINT_MTP3_LOOKUP_SHARDS
+  if constexpr (Phase == 10) {
+    const auto* slots = reinterpret_cast<const __gm__ uint32_t*>(
+        Mtp3LookupScratch(workspace, a.maxRequests, first) + mtp3_lookup::kSlotsOffset);
+    auto* packed = reinterpret_cast<__ubuf__ uint32_t*>(part);
+    for (uint32_t i = t; i < c / 2; i += SORTED_THREADS) packed[i] = slots[i];
+    asc_syncthreads();
+  } else
+#endif
   if(directRank){
     auto* masks=reinterpret_cast<__ubuf__ uint32_t*>(owner);
+#if JOINT_MTP3_DIR475 || JOINT_MTP3_BITMAP475
+    auto* firstUid = reinterpret_cast<__ubuf__ uint32_t*>(owner + bitmapWordSpan);
+    const uint32_t words = bitmapWords;
+#else
     auto* firstUid=reinterpret_cast<__ubuf__ uint32_t*>(owner+8192U);
     const uint32_t words=(static_cast<uint32_t>(a.maxToken)+31U)/32U;
+#endif
     for(uint32_t w=t;w<words;w+=SORTED_THREADS)masks[w]=0U;
     asc_syncthreads(); // zero bitmap before the single-writer heads publish words
     for(uint32_t uid=t;uid<u;uid+=SORTED_THREADS){
@@ -65,7 +121,12 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
       }
     }
     asc_syncthreads();
+#if JOINT_MTP3_BITMAP_TEAM
+    const uint32_t lookupEnd = Phase == 11 ? c / 2U : c;
+    for(uint32_t slot=t;slot<lookupEnd;slot+=SORTED_THREADS){
+#else
     for(uint32_t slot=t;slot<c;slot+=SORTED_THREADS){
+#endif
       const int32_t token=a.slotToToken[cb+slot];uint32_t encoded=token>=stable?0x8000U:0U;
       if(token>=0 && token<stable){
         const uint32_t word=static_cast<uint32_t>(token)>>5U,bit=uint32_t{1}<<(static_cast<uint32_t>(token)&31U);
@@ -104,6 +165,10 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   asc_syncthreads(); // finish ALL directory reads before owner init
 #endif
   }
+#if JOINT_MTP3_BITMAP_TEAM
+  }
+  if constexpr (Phase == 11) return;
+#endif
   for(uint32_t i=t;i<u;i+=SORTED_THREADS)owner[i]=-1;
   asc_syncthreads();
   for(uint32_t tile=0;tile<c;tile+=SORTED_THREADS){
@@ -134,6 +199,12 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
 #endif
   }
   asc_syncthreads();
+#if JOINT_MTP3_LOOKUP_SHARDS
+  if constexpr(Phase==10)return;
+#endif
+#if JOINT_MTP3_BITMAP_TEAM
+  if constexpr(Phase==12)return;
+#endif
   if constexpr(Phase==6)return;
 #if JOINT_LAYOUT16 == 2 && (JOINT_LAYOUT_HOT_BITS & 2)
   // B: scan512 word counts rather than32 serial512-slot block scans.
@@ -223,7 +294,7 @@ __simt_callee__ __aicore__ inline void LayoutHotFinish(const JointPlanArgs& a,
   // Same thread reads the exact32-bit word it stored. No cross-warp GM exchange,
   // no Scalar/DMA reader, and no packed16-bit store race or cache handoff.
   for(uint32_t pair=t;pair<q/2;pair+=SORTED_THREADS){
-#if JOINT_MTP3_MAP
+#if JOINT_MTP3_MAP || JOINT_MTP3_BITMAP_UBMAP
     const uint32_t packed=hotUbMap?reinterpret_cast<__ubuf__ uint32_t*>(data)[pair]
                                   :static_cast<uint32_t>(workspace[qb/2+pair]);
 #else

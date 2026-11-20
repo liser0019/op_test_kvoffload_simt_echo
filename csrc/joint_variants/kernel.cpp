@@ -802,7 +802,11 @@ extern "C" __global__ __aicore__ void sparse_kv_plan_joint_kernel(
     GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
     GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
+#if JOINT_MTP3_BITMAP_TEAM
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIV_1_0);
+#else
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+#endif
   AscendC::InitSocState();
 #if (JOINT_OPT_MASK & 1) || JOINT_OPT_MASK >= 16
   JointDirectBody<true>(
@@ -815,6 +819,40 @@ extern "C" __global__ __aicore__ void sparse_kv_plan_joint_kernel(
       missTokens, missSlots, compactWorkspace, rowModes,
       residentRows, residentBlockTable, tiling);
 }
+
+#if JOINT_MTP3_LOOKUP_SHARDS
+extern "C" __global__ __aicore__ void sparse_kv_plan_prepare(
+    GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
+    GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
+    GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
+    GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
+    GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+  AscendC::InitSocState();
+  SortedDirectBody<true>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens,
+      tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount,
+      missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling, mtp3_lookup::kPrepare);
+}
+extern "C" __global__ __aicore__ void sparse_kv_plan_commit(
+    GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
+    GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR lastReqIds,
+    GM_ADDR slotToToken, GM_ADDR lruSlots, GM_ADDR currentSlots, GM_ADDR missCount,
+    GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
+    GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+  AscendC::InitSocState();
+  SortedDirectBody<true>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens,
+      tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount,
+      missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling, mtp3_lookup::kCommit);
+}
+extern "C" __global__ __aicore__ void sparse_kv_plan_lookup(
+    GM_ADDR tokenToReq, GM_ADDR activeRows, GM_ADDR stablePrefixLens,
+    GM_ADDR slotToToken, GM_ADDR compactWorkspace, GM_ADDR tiling) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+  AscendC::InitSocState();
+  Mtp3LookupSlotBody(tokenToReq, activeRows, stablePrefixLens, slotToToken, compactWorkspace, tiling);
+}
+#endif
 
 extern "C" __global__ __aicore__ void sparse_kv_plan_private_kernel(
     GM_ADDR reqIds, GM_ADDR topkIndices, GM_ADDR stablePrefixLens, GM_ADDR visibleSeqLens,
@@ -848,6 +886,19 @@ extern "C" void launch_joint_plan(bool jointEntry, GM_ADDR reqIds, GM_ADDR topkI
     GM_ADDR missTokens, GM_ADDR missSlots, GM_ADDR compactWorkspace, GM_ADDR rowModes,
     GM_ADDR residentRows, GM_ADDR residentBlockTable, GM_ADDR tiling,
     uint32_t blockDim, uint32_t dynamicUb, void* stream) {
+#if JOINT_MTP3_LOOKUP_SHARDS
+  if (jointEntry) {
+    sparse_kv_plan_prepare<<<blockDim, dynamicUb, stream>>>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens,
+      tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount,
+      missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling);
+    sparse_kv_plan_lookup<<<blockDim, mtp3_lookup::kLookupUbBytes, stream>>>(
+        tokenToReq, activeRows, stablePrefixLens, slotToToken, compactWorkspace, tiling);
+    sparse_kv_plan_commit<<<blockDim, dynamicUb, stream>>>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens,
+      tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount,
+      missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling);
+    return;
+  }
+#endif
   if (jointEntry)
     sparse_kv_plan_joint_kernel<<<blockDim, dynamicUb, stream>>>(reqIds, topkIndices, stablePrefixLens, visibleSeqLens, tokenToReq, activeRows, lastReqIds, slotToToken, lruSlots, currentSlots, missCount, missTokens, missSlots, compactWorkspace, rowModes, residentRows, residentBlockTable, tiling);
   else

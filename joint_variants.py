@@ -109,12 +109,13 @@ RANKPIPE_REFS=("abcdf_pages","joint_stage_exec_abcd_512",RANKPIPE_NAMES[0])
 MTP3_MASKS={"mtp3_full_512":252,"mtp3_map_512":253,"mtp3_load_512":254,"mtp3_full_load_512":255}
 EXTERNAL_MTP3_MASKS={"mtp3_bt_direct_odd_512":264}
 MASKS.update(MTP3_MASKS)
+MASKS.update(EXTERNAL_MTP3_MASKS)
 MTP3_NAMES=tuple("joint_"+n for n in (*MTP3_MASKS,*EXTERNAL_MTP3_MASKS))
 def mtp3_config(mask):
     if 252<=mask<=255:
         return {"full":mask in (252,255),"map":mask==253,"load":mask in (254,255)}
     if mask==264:
-        return {"full":True,"map":False,"load":False,"bitmap_team":"direct",
+        return {"full":True,"map":False,"load":False,"bitmap_team":2,
                 "bitmap_odd_stride":True,"max_token":486400}
     return None
 def rankpipe_bits(mask):return 5 if 252<=mask<=264 else mask-244 if 244<=mask<=251 else 0
@@ -159,7 +160,7 @@ def union_config(name):
 HW_NAMES=tuple("joint_"+n for n in HW_SWEEP)
 SORTED_NAMES=("joint_sorted_stream", "joint_sorted_mrgsort", *HW_NAMES, *UNION_NAMES, *COLD_NAMES, *INTEGRATED_NAMES)
 MERGE_NAMES = ("joint_merge", *("joint_" + n for n in MERGE_VARIANTS), *SORTED_NAMES)
-TURBO_MASKS = tuple(range(17, 256))
+TURBO_MASKS = tuple(range(17, 265))
 VARIANTS = ({"private_a": 1, "private_turbo": 17}
             | {"joint_" + letters: mask for letters, mask in MASKS.items()}
             | {"joint_" + name: mask for name, mask in EXTERNAL_MTP3_MASKS.items()})

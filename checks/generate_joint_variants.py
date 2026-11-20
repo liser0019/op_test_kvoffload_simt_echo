@@ -5,7 +5,7 @@ import argparse
 import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,REFINE_SWEEP,EXEC_SWEEP,HOT_SWEEP,mtp7_config,mtp3_config,MTP3_MASKS,MTP7_PACK_MASKS,MTP7_PREFIX_MASKS,MTP7_MERGE_MASKS,MTP7_FUSED_TUNE_MASKS,CAPACITY8K_MASKS,fused_tune_bits,layout_hot_bits,stage_exec_bits,rankpipe_bits
+from joint_variants import MASKS, algorithm_mask, COLD_SWEEP,REFINE_SWEEP,EXEC_SWEEP,HOT_SWEEP,mtp7_config,mtp3_config,MTP3_MASKS,EXTERNAL_MTP3_MASKS,MTP7_PACK_MASKS,MTP7_PREFIX_MASKS,MTP7_MERGE_MASKS,MTP7_FUSED_TUNE_MASKS,CAPACITY8K_MASKS,fused_tune_bits,layout_hot_bits,stage_exec_bits,rankpipe_bits
 
 
 def generate(destination, merge_only=False, sorted_only=False, sweep_only=False, union_only=False, ac_threads_only=False, cold_compare_only=False, integrated_only=False,refine_only=False,exec_only=False,hot_only=False,mtp8_only=False,mtp7_fix_only=False,mtp7_pack_only=False,peer_only=False,prefix_only=False,merge_unique_only=False,fused_tune_only=False,capacity8k_only=False,capacity16k_only=False,layout_hot_only=False,stage_exec_only=False,rankpipe_only=False,ab8k_compare_only=False,mtp3_only=False):
@@ -17,7 +17,7 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
                "sparse_kv_plan_private_kernel")
     declarations, entries = [], ["nullptr"] * (max(MASKS.values()) + 1)
     for letters, mask in MASKS.items():
-        if mtp3_only and letters not in ("rankpipe_ac_512",*MTP3_MASKS):continue
+        if mtp3_only and letters not in ("rankpipe_ac_512",*MTP3_MASKS,*EXTERNAL_MTP3_MASKS):continue
         if ab8k_compare_only and mask not in (213,245,249):continue
         if rankpipe_only and mask not in (243,*range(244,252)):continue
         if stage_exec_only and mask not in (221,*range(228,244)):continue
@@ -52,8 +52,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
         if 127<=mask<=142:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS {mask-127}\n"
         if 143<=mask<=158:text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_EXEC 1\n#define JOINT_EXEC_BITS {mask-143}\n"
         if mask>=159:
-            bits=10 if 193<=mask<=255 else mask-159 if mask<=190 else 0
-            if 193<=mask<=255:
+            bits=10 if 193<=mask<=264 else mask-159 if mask<=190 else 0
+            if 193<=mask<=264:
                 c=mtp7_config(mask)
                 text += f"#define JOINT_MTP8 1\n#define JOINT_MTP7_OPT {c['opt']}\n"
                 if 200<=mask<=202:text+=f"#define JOINT_MTP7_PREFIX {int(mask in (200,202))}\n#define JOINT_MTP7_MAP16 {int(mask in (201,202))}\n"
@@ -63,10 +63,14 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
             text += f"#define JOINT_REFINE 1\n#define JOINT_REFINE_BITS 11\n#define JOINT_HOT 1\n#define JOINT_HOT_BITS {bits}\n#define JOINT_HOT_PART_ONLY {int(mask==191)}\n#define JOINT_HOT_MISS_ONLY {int(mask==192)}\n"
         if 216<=mask<=227:text+=f"#define JOINT_LAYOUT16 {1+(mask-216)//6}\n#define JOINT_MTP7_MAP16 1\n#define JOINT_LAYOUT_HOT_BITS {layout_hot_bits(mask)}\n"
         if 228<=mask<=243:text+=f"#define JOINT_LAYOUT16 1\n#define JOINT_MTP7_MAP16 1\n#define JOINT_LAYOUT_HOT_BITS 15\n#define JOINT_STAGE_EXEC 1\n#define JOINT_STAGE_EXEC_BITS {stage_exec_bits(mask)}\n"
-        if 244<=mask<=255:text+=f"#define JOINT_LAYOUT16 1\n#define JOINT_MTP7_MAP16 1\n#define JOINT_LAYOUT_HOT_BITS 15\n#define JOINT_STAGE_EXEC 1\n#define JOINT_STAGE_EXEC_BITS 15\n#define JOINT_RANKPIPE 1\n#define JOINT_RANKPIPE_BITS {rankpipe_bits(mask)}\n"
-        if 252<=mask<=255:
+        if 244<=mask<=264:text+=f"#define JOINT_LAYOUT16 1\n#define JOINT_MTP7_MAP16 1\n#define JOINT_LAYOUT_HOT_BITS 15\n#define JOINT_STAGE_EXEC 1\n#define JOINT_STAGE_EXEC_BITS 15\n#define JOINT_RANKPIPE 1\n#define JOINT_RANKPIPE_BITS {rankpipe_bits(mask)}\n"
+        if 252<=mask<=264:
             c=mtp3_config(mask)
             text+=f"#define JOINT_MTP3_FULL {int(c['full'])}\n#define JOINT_MTP3_MAP {int(c['map'])}\n#define JOINT_MTP3_LOAD {int(c['load'])}\n"
+            if c.get("bitmap_odd_stride"):
+                text += "#define JOINT_MTP3_BITMAP_ODD_STRIDE 1\n"
+            if c.get("bitmap_team"):
+                text += f"#define JOINT_MTP3_BITMAP_TEAM {int(c['bitmap_team'])}\n"
         if mask in (214,215):text+=f"#define JOINT_LAYOUT16 {mask-213}\n#define JOINT_MTP7_MAP16 1\n"
         if mask in (212,213):text+="#define JOINT_MTP7_CAPACITY8K 1\n"
         text += "".join(f"#define {name} {new}\n" for name, new in replacements.items())
@@ -80,8 +84,8 @@ def generate(destination, merge_only=False, sorted_only=False, sweep_only=False,
     text = '#pragma once\n#include <stdexcept>\n' + "\n".join(declarations) + "\n"
     text += "inline decltype(&launch_joint_plan) JointVariantLaunch(int64_t mask) {\n"
     text += "  static const decltype(&launch_joint_plan) launches[] = {" + ", ".join(entries) + "};\n"
-    text += "  return mask > 0 && mask <= 255 ? launches[mask] : nullptr;\n}\n"
-    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 255)) ? 72 : mask; }\n'
+    text += "  return mask > 0 && mask <= 264 ? launches[mask] : nullptr;\n}\n"
+    text += 'inline int64_t JointVariantAlgorithmMask(int64_t mask) { return mask == 122 ? 59 : mask == 123 ? 90 : (mask == 124 || mask == 125 || mask == 126 || (mask >= 127 && mask <= 264)) ? 72 : mask; }\n'
     text += signature + " {\n  auto launch = JointVariantLaunch(mask);\n"
     text += "  if (!launch) throw std::invalid_argument(\"joint mask not built\");\n"
     text += "  launch(" + args + ");\n}\n"
