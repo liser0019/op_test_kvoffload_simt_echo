@@ -117,6 +117,23 @@ MTP3 speedup range: **1.067×–1.206×**, geometric mean **1.168×**.
 - 350K uses the directory+binary fallback and remains faster than baseline for every batch.
 - P95 has several isolated host/system long-tail samples on the shared server. P50 regressions were not observed; P95 entries should be treated as preliminary for the affected cases.
 
+## batch1 与 batch4 的独立复测
+
+原 81 工况矩阵中 batch1/150K 的 56.601 μs 含共享服务器长尾。随后用同库、同设备、n=30、warmup=10 复测：
+
+| context | batch | MTP3 baseline P50/P95 | MTP3 final P50/P95 | final blocks |
+|---|---:|---:|---:|---:|
+| 100K | 1 | 57.727/58.739 | 51.597/52.098 | 1 |
+| 100K | 4 | 53.766/54.952 | 45.513/45.703 | 4 |
+| 150K | 1 | 57.152/57.853 | 51.397/51.962 | 1 |
+| 150K | 4 | 53.867/54.899 | 45.399/45.565 | 4 |
+
+- batch1/150K 的稳定结果约 51.4 μs，不是 56.6 μs；原值属于长尾干扰。
+- batch1 仍比 batch4 慢约 6.0 μs，下降比例约 13%。
+- batch1 的 MTP3 只有一个 request group，只启动一个 AIV block；该 AIV 需要顺序完成四路归并、去重、位图查询、resident 分类、miss/LRU 生成和输出。
+- batch4 同时启动四个独立 group block，因此可同时处理四个请求。每个 group 的 descriptor 约 2290–2307，输入工作量基本相同，所以 batch1 的额外耗时不是 token 数更多，而是只有一个 AIV 可利用。
+- batch1 仍快于同场 rankpipe baseline，只是收益从 batch4+ 的约 18% 降到约 11%–12%。
+
 ## Artifacts
 
 - Raw CSV: `/dev/shm/plan14_full_matrix_20261120_092327`
@@ -124,3 +141,4 @@ MTP3 speedup range: **1.067×–1.206×**, geometric mean **1.168×**.
 - Summary JSON: `/workspace/plan14_overnight_20261119/results/full_matrix_20261120_092327/matrix.json`
 - Runner log: `/workspace/plan14_overnight_20261119/results/full_matrix_20261120_092327/runner.log`
 - Raw index: `/workspace/plan14_overnight_20261119/results/full_matrix_20261120_092327/raw_index.md`
+
