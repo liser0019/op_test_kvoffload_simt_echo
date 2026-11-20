@@ -1,0 +1,6708 @@
+{
+  "status": "complete",
+  "implementations": {
+    "baseline": "quant_lightning_indexer",
+    "ordered_bitmap512": "quant_lightning_indexer_ordered + joint_ordered_bitmap_512",
+    "ordered_bt_direct_odd": "quant_lightning_indexer_ordered + joint_mtp3_bt_direct_odd_512"
+  },
+  "scenario": "full_cache_90pct",
+  "scenario_definition": {
+    "hits_per_row": 1843,
+    "misses_per_row": 205,
+    "topk": 2048
+  },
+  "harness_commit": "3ca80503dc79e2dcc2c11c7e1fdbb697491f14e2",
+  "environment": {
+    "device": 2,
+    "device_name": "Ascend950DT_9582",
+    "hostname": "localhost.localdomain",
+    "cann_package_home": "/usr/local/Ascend/cann-9.2.1",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post7",
+    "plan_library": "/workspace/official_vs_ordered_bitmap_run_20261120_1800/build_joint_plan/libmtp_joint_plan_ops.so",
+    "plan_library_sha256": "71df45dff86de479fc48e38d987a14ddc010c330ce7bd94d4d6baa7028e9e388",
+    "qli_s1_base_by_implementation": {}
+  },
+  "build_identity": {
+    "qli_source_id": "a0433ce6ad807dcbe2823fd915a7c590913ccd25a49eca9b51439ec30cd7a6e8",
+    "qli_upstream_commit": "a6b0a5ea498e070a5ee9e78a94d7b25200c5fe0c",
+    "packaged_operators": [
+      "quant_lightning_indexer",
+      "quant_lightning_indexer_ordered",
+      "quant_lightning_indexer_ordered_fused"
+    ],
+    "ordered_bitmap_plan_source_commit": "ba4c5dd9bb6aaa432abf4822607ce224bec51862",
+    "ordered_bitmap_plan_kernel": "sparse_kv_plan_joint_kernel_ordered_bitmap_512",
+    "ordered_bitmap_plan_dynamic_ub_bytes": 181024
+  },
+  "plan_library_sha256": "71df45dff86de479fc48e38d987a14ddc010c330ce7bd94d4d6baa7028e9e388",
+  "kernel_inventory": [
+    "QuantLightningIndexer",
+    "QuantLightningIndexerOrdered",
+    "aclnnAll_ReduceAll_ReduceAll",
+    "aclnnCat_ConcatD_ConcatD",
+    "aclnnEqScalar_EqualAiCore_Equal",
+    "aclnnEqual_SliceAiCore_Slice",
+    "aclnnEqual_TensorEqualAiCore_TensorEqual",
+    "aclnnInplaceCopy_TensorMoveAiCore_TensorMove",
+    "aclnnInplaceFillScalar_FillAiCore_Fill",
+    "aclnnInplaceZero_ZerosLikeAiCore_ZerosLike",
+    "sparse_kv_plan_joint_kernel_mtp3_bt_direct_odd_512",
+    "sparse_kv_plan_joint_kernel_ordered_bitmap_512"
+  ],
+  "artifact_sha256": {
+    "batch8/capture_metadata.json": "e3f80153d80723a100ab56b3ed5ca38293bc7d6840c42ef3c1af5a079f079924",
+    "batch8/context102400_mtp3_full_cache_90pct/samples.csv": "739557e222839235ecb4e501d62840c5e0d283b66737ccd6402cdd65518ffeb9",
+    "batch8/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2253124_20261120181800162_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "c6c7018892d6104e116a44ca09feea9962cae65821525873219221abf2ad6b9c",
+    "batch8/context358400_mtp3_full_cache_90pct/samples.csv": "790e7a2d6ba8fcb8c485944084b16ad530b2e6af7fa94c7615066f580cd8274f",
+    "batch8/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2253124_20261120181816321_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "b5254f81683f48c4a4190f61f49d544a3b12bb70b3a0099cebce85cf5904daed",
+    "batch9/capture_metadata.json": "076efd7073c122ea014523a5d2ff308268b51894d0140e2f7673fd38e32307f0",
+    "batch9/context102400_mtp3_full_cache_90pct/samples.csv": "ac6f41ea16615dc18c934757f2a4fbdfe36f6d03026001dc00d04c824b9d5ef0",
+    "batch9/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2256153_20261120181848499_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "7d825848407dce118fd3fcaea6e8ccea6253c6976baed0562391686bc0b74713",
+    "batch9/context358400_mtp3_full_cache_90pct/samples.csv": "db7d649159b472d8ace3ebbcd7e6066017b0175088d07a0c9fd3fe252339f4bd",
+    "batch9/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2256153_20261120181906216_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "b28e93ca70744d02bc29bf957f09487f3d25b45bb798f23bdaef4b72e75da120",
+    "batch10/capture_metadata.json": "2350041c6715d4386bc5b5983c8e98da61cf369ca38d98b19b6a8ec0ce75c502",
+    "batch10/context102400_mtp3_full_cache_90pct/samples.csv": "3ef7ceaf900b85ec4df92e5b89e96b87ec13034f1ef55508d2c6283de083a8f6",
+    "batch10/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2259036_20261120181935173_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "5a48d192e540548148635da9c69a4e1c201b89b605b6dcba578bc21fa796ab39",
+    "batch10/context358400_mtp3_full_cache_90pct/samples.csv": "c2a3106bf334ed9bdc5c116d8194810e43c1bef8097c2db2d859a00b4c33f553",
+    "batch10/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2259036_20261120181954464_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "5e47f8bb4da9ca6932eb1f55ba3f7f1a1cc631dc3c70a26ce66888327e795270",
+    "batch11/capture_metadata.json": "114ccf99b1a6c13c12849c3189101f1b922b06b3ad7db5edebdd1f68f40f8383",
+    "batch11/context102400_mtp3_full_cache_90pct/samples.csv": "daeb7b3b7f0448148341b86820ed149cef214145c8d41062b7ba1e6bf0d6dba8",
+    "batch11/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2262214_20261120182028389_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "c976d0e191fa10f6f6791d5369578bc4b8e7469f9fe60c0f6df467eccf665093",
+    "batch11/context358400_mtp3_full_cache_90pct/samples.csv": "68765af5aea762c95567b51b722052139b6966ae649304e0c4e331dfac77e4a0",
+    "batch11/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2262214_20261120182049403_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "464d9646729acfb6e7318c03c226127f11854ac51ec56c68c288006acb7a2884",
+    "batch12/capture_metadata.json": "69215db5f6c01898879ca9ab2e0224d1cfb88685ae4aa1250ca8cb7bd0e40564",
+    "batch12/context102400_mtp3_full_cache_90pct/samples.csv": "7ae1f17bccdf189671251576557f907493487211808338909267c5e0d25478dd",
+    "batch12/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2265305_20261120182124368_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "d2884c67c43ebc525106011a7d180c17e827b77672a822540111622df00f0257",
+    "batch12/context358400_mtp3_full_cache_90pct/samples.csv": "666e14319384e788c7ccfbdb1254aff0b9077724835b1e0087fc847b585efb29",
+    "batch12/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2265305_20261120182146955_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "227908d83ce05f133f258530f4d633576493fda05fdea4cab9a9df16ef311ef2",
+    "batch13/capture_metadata.json": "d8c25d5aed80bd6606120b8974f0f672a5ce96baf0c2566d5a170c10546cbbca",
+    "batch13/context102400_mtp3_full_cache_90pct/samples.csv": "11a563537e7126b5a313b359c2dd557d43185424537b5b27db10d37f7d15ffb3",
+    "batch13/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2268545_20261120182223162_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "6b98b7c998cfa5f1856d02fd3922f21f052eaad8d00402c09cd79c808f7c1a56",
+    "batch13/context358400_mtp3_full_cache_90pct/samples.csv": "b01c3d66df0f32f3b1ce2c0400e9930920ffa09a64a1f9e1701af8c9eb3d9102",
+    "batch13/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2268545_20261120182245607_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "12532e921aaca6df794e29c43fc5f66551ace364d4f7e632f2a14c3ae2692f36",
+    "batch14/capture_metadata.json": "feb3d1e7e3b9cbaaa48698911aa95fa1b453d2c3e27a01c6dbb6fb858dc193cb",
+    "batch14/context102400_mtp3_full_cache_90pct/samples.csv": "78a32850507555c9e99446520833ed80bd682c5a865e53047d6a90e1fbe4459e",
+    "batch14/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2271767_20261120182317818_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "273c0e264eef0d26189ccb0bd1341b9a82aa5550c5f2f09aba8777c4dd5faec0",
+    "batch14/context358400_mtp3_full_cache_90pct/samples.csv": "6778ea05fd2e160ff6c42f86c92814f9f1f5c8cffc1e69ea701055e7ce3b52a6",
+    "batch14/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2271767_20261120182341174_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "77eee88f17768d0078df928ced88b3a8c8312aef5ce19423e37eb6cf4df389a7",
+    "batch15/capture_metadata.json": "6d406a24bd75a2af1db1bfc6bb19e99f05e5646f0b5f41e4205ccdeb6977c54d",
+    "batch15/context102400_mtp3_full_cache_90pct/samples.csv": "467f9f1087a7decc060bbb1897e0ac2f9a4aa47ab545f64a3200346d3db52585",
+    "batch15/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2274965_20261120182415066_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "07a44bde5cd7a972d9fdd3f29ed53ce67c1928b3eb08673cf03ee5350607efe9",
+    "batch15/context358400_mtp3_full_cache_90pct/samples.csv": "802d18b667213baac3e5781a4237e7e30d9ce46d262c3b39cf3205921c5e1696",
+    "batch15/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2274965_20261120182442206_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "76129bf6002f2f92e74d15cc37d8fc9a8c58e7a5a53edb33a7ed76d4803fa3ef",
+    "batch16/capture_metadata.json": "b0973c8dd99c549760df6620375a84860cb083221d11abb9abe5c85f8780268c",
+    "batch16/context102400_mtp3_full_cache_90pct/samples.csv": "b5c72f3d9c61638706817b874d8936c5cd54275302fda3b6c30a564aa025d5f9",
+    "batch16/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2279013_20261120182519500_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "b93d108101cb5bbc06db3560675e5babf12fd607412b85535e34167e50ff5d40",
+    "batch16/context358400_mtp3_full_cache_90pct/samples.csv": "85984508c668a4a415d5427ae95788a95589cc82bfebac0e36577af6d439e070",
+    "batch16/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2279013_20261120182545326_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "02d66d13d3c87dcc6a506a45b658bb18bfdfd8348e53392cd6efdaa0fa4beb20"
+  },
+  "cases": [
+    {
+      "batch": 8,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 173.917,
+        "p95_us": 174.47755,
+        "min_us": 172.828,
+        "max_us": 174.868
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.78300000000002,
+          "p95_us": 175.88385,
+          "min_us": 174.106,
+          "max_us": 178.674
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 51.766999999999996,
+          "p95_us": 52.42435,
+          "min_us": 50.869,
+          "max_us": 52.431
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 293.9304500000002,
+          "min_us": 0.022,
+          "max_us": 483.635
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 226.596,
+          "p95_us": 227.6612,
+          "min_us": 225.391,
+          "max_us": 230.857
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 226.81099999999998,
+          "p95_us": 519.8664000000001,
+          "min_us": 225.413,
+          "max_us": 711.071
+        },
+        "delta_vs_official_p50": 52.89399999999998,
+        "delta_vs_official_p95": 345.3888500000001,
+        "ratio_vs_official_p50": 1.304133580961033,
+        "ratio_vs_official_p95": 2.9795604076283744,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2410,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2470,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2485,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2441,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2432,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2450,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2452,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 8,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 1640
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.3715,
+          "p95_us": 175.55715,
+          "min_us": 173.825,
+          "max_us": 176.415
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 52.092,
+          "p95_us": 52.48965,
+          "min_us": 51.368,
+          "max_us": 52.559
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 226.4935,
+          "p95_us": 227.9375,
+          "min_us": 225.685,
+          "max_us": 228.346
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 226.5155,
+          "p95_us": 227.9595,
+          "min_us": 225.707,
+          "max_us": 228.368
+        },
+        "delta_vs_official_p50": 52.5985,
+        "delta_vs_official_p95": 53.48194999999998,
+        "ratio_vs_official_p50": 1.3024344946152475,
+        "ratio_vs_official_p95": 1.3065262550970023,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2410,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2470,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2485,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2441,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2432,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2450,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2452,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 8,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 1640
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": 0.29549999999997567,
+        "span_delta_p95": 291.9069000000001,
+        "span_ratio_p50": 1.0013045464879886,
+        "span_ratio_p95": 2.280520881998777,
+        "plan_delta_p50": -0.32500000000000284,
+        "plan_delta_p95": -0.06530000000000058
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 8,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 594.4805,
+        "p95_us": 595.268,
+        "min_us": 593.708,
+        "max_us": 595.534
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 596.0550000000001,
+          "p95_us": 597.328,
+          "min_us": 594.896,
+          "max_us": 598.316
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 51.647000000000006,
+          "p95_us": 51.92205,
+          "min_us": 51.065,
+          "max_us": 51.942
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 647.665,
+          "p95_us": 648.8584500000001,
+          "min_us": 646.152,
+          "max_us": 650.197
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 647.687,
+          "p95_us": 648.88045,
+          "min_us": 646.174,
+          "max_us": 650.219
+        },
+        "delta_vs_official_p50": 53.206500000000005,
+        "delta_vs_official_p95": 53.61244999999997,
+        "ratio_vs_official_p50": 1.0895008330803113,
+        "ratio_vs_official_p95": 1.0900643911649879,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2499,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2536,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2528,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2562,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2500,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2513,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2529,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2527,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 8,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 1640
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 595.9449999999999,
+          "p95_us": 597.4752000000001,
+          "min_us": 594.798,
+          "max_us": 598.049
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 57.915,
+          "p95_us": 58.63635,
+          "min_us": 57.439,
+          "max_us": 58.662
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 653.963,
+          "p95_us": 655.4476000000001,
+          "min_us": 652.475,
+          "max_us": 655.763
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 653.985,
+          "p95_us": 655.4696,
+          "min_us": 652.497,
+          "max_us": 655.785
+        },
+        "delta_vs_official_p50": 59.50450000000001,
+        "delta_vs_official_p95": 60.201599999999985,
+        "ratio_vs_official_p50": 1.1000949568572898,
+        "ratio_vs_official_p95": 1.101133607047582,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2499,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2536,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2528,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2562,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2500,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2513,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2529,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2527,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 8,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 1640
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -6.298000000000002,
+        "span_delta_p95": -6.589150000000018,
+        "span_ratio_p50": 0.9903698097051156,
+        "span_ratio_p95": 0.9899474361587478,
+        "plan_delta_p50": -6.267999999999994,
+        "plan_delta_p95": -6.7143000000000015
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 9,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 173.731,
+        "p95_us": 175.11365,
+        "min_us": 173.135,
+        "max_us": 177.311
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.823,
+          "p95_us": 175.57525,
+          "min_us": 173.624,
+          "max_us": 175.618
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 51.801500000000004,
+          "p95_us": 52.525549999999996,
+          "min_us": 50.822,
+          "max_us": 52.593
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 226.529,
+          "p95_us": 227.7322,
+          "min_us": 224.513,
+          "max_us": 228.211
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 226.551,
+          "p95_us": 227.75420000000003,
+          "min_us": 224.535,
+          "max_us": 228.233
+        },
+        "delta_vs_official_p50": 52.81999999999999,
+        "delta_vs_official_p95": 52.64055000000002,
+        "ratio_vs_official_p50": 1.3040332468010891,
+        "ratio_vs_official_p95": 1.3006079194854314,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2422,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2522,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2442,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2507,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2418,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2449,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2470,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2456,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2460,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 9,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 1845
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.4425,
+          "p95_us": 175.04340000000002,
+          "min_us": 173.863,
+          "max_us": 175.165
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 52.229,
+          "p95_us": 52.6149,
+          "min_us": 51.49,
+          "max_us": 52.651
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 167.14575000000002,
+          "min_us": 0.022,
+          "max_us": 220.056
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 226.523,
+          "p95_us": 227.3701,
+          "min_us": 225.628,
+          "max_us": 227.41
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 226.66750000000002,
+          "p95_us": 393.8167,
+          "min_us": 225.65,
+          "max_us": 446.631
+        },
+        "delta_vs_official_p50": 52.936500000000024,
+        "delta_vs_official_p95": 218.70305000000002,
+        "ratio_vs_official_p50": 1.3047038237274868,
+        "ratio_vs_official_p95": 2.248920629545441,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2422,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2522,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2442,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2507,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2418,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2449,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2470,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2456,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2460,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 9,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 1845
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -0.11650000000003047,
+        "span_delta_p95": -166.0625,
+        "span_ratio_p50": 0.9994860313013554,
+        "span_ratio_p95": 0.5783253985927971,
+        "plan_delta_p50": -0.4274999999999949,
+        "plan_delta_p95": -0.08935000000000315
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 9,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 594.565,
+        "p95_us": 595.8134,
+        "min_us": 593.603,
+        "max_us": 596.448
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 596.296,
+          "p95_us": 598.0213,
+          "min_us": 595.197,
+          "max_us": 604.696
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 52.126999999999995,
+          "p95_us": 52.81525,
+          "min_us": 51.577,
+          "max_us": 53.086
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 648.4445000000001,
+          "p95_us": 650.46335,
+          "min_us": 647.484,
+          "max_us": 656.284
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 648.4665,
+          "p95_us": 650.4853499999999,
+          "min_us": 647.506,
+          "max_us": 656.306
+        },
+        "delta_vs_official_p50": 53.90149999999994,
+        "delta_vs_official_p95": 54.671949999999924,
+        "ratio_vs_official_p50": 1.0906570349751499,
+        "ratio_vs_official_p95": 1.0917601886765218,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2637,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2536,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2619,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2550,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2546,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2535,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2559,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 9,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 1846
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 596.2235000000001,
+          "p95_us": 597.2501,
+          "min_us": 595.075,
+          "max_us": 598.259
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 59.5305,
+          "p95_us": 60.57655,
+          "min_us": 58.112,
+          "max_us": 61.1
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 656.141,
+          "p95_us": 657.3638,
+          "min_us": 653.187,
+          "max_us": 657.512
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 656.163,
+          "p95_us": 657.3858,
+          "min_us": 653.209,
+          "max_us": 657.534
+        },
+        "delta_vs_official_p50": 61.597999999999956,
+        "delta_vs_official_p95": 61.572400000000016,
+        "ratio_vs_official_p50": 1.1036017929074196,
+        "ratio_vs_official_p95": 1.1033417509575985,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2637,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2536,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2619,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2550,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2546,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2535,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2559,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 9,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 1846
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -7.6965000000000146,
+        "span_delta_p95": -6.900450000000092,
+        "span_ratio_p50": 0.9882704449961366,
+        "span_ratio_p95": 0.9895031958402507,
+        "plan_delta_p50": -7.403500000000008,
+        "plan_delta_p95": -7.7612999999999985
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 10,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 173.73149999999998,
+        "p95_us": 174.72735,
+        "min_us": 173.116,
+        "max_us": 174.791
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.79399999999998,
+          "p95_us": 175.35575,
+          "min_us": 173.967,
+          "max_us": 175.655
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 51.676500000000004,
+          "p95_us": 52.4087,
+          "min_us": 51.107,
+          "max_us": 52.669
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 14.961300000000213,
+          "min_us": 0.022,
+          "max_us": 298.808
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 226.6095,
+          "p95_us": 227.20264999999998,
+          "min_us": 225.663,
+          "max_us": 227.367
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 226.63150000000002,
+          "p95_us": 242.29510000000022,
+          "min_us": 225.685,
+          "max_us": 525.511
+        },
+        "delta_vs_official_p50": 52.900000000000034,
+        "delta_vs_official_p95": 67.56775000000022,
+        "ratio_vs_official_p50": 1.304492852476379,
+        "ratio_vs_official_p95": 1.386703913268302,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2434,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2514,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2500,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2530,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2406,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2464,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2459,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2453,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2481,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2537,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 10,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            207,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2052
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.4885,
+          "p95_us": 175.27495,
+          "min_us": 174.143,
+          "max_us": 175.35
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 52.1755,
+          "p95_us": 52.62885,
+          "min_us": 51.792,
+          "max_us": 52.683
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 204.0838500000007,
+          "min_us": 0.022,
+          "max_us": 1120.926
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 226.695,
+          "p95_us": 227.585,
+          "min_us": 226.192,
+          "max_us": 227.737
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 226.899,
+          "p95_us": 430.4417500000007,
+          "min_us": 226.214,
+          "max_us": 1348.498
+        },
+        "delta_vs_official_p50": 53.16750000000002,
+        "delta_vs_official_p95": 255.7144000000007,
+        "ratio_vs_official_p50": 1.3060325847644212,
+        "ratio_vs_official_p95": 2.4635052840897584,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2434,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2514,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2500,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2530,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2406,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2464,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2459,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2453,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2481,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2537,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 10,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            207,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2052
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -0.2674999999999841,
+        "span_delta_p95": -188.14665000000048,
+        "span_ratio_p50": 0.9988210613532894,
+        "span_ratio_p95": 0.5628986965135232,
+        "plan_delta_p50": -0.4989999999999952,
+        "plan_delta_p95": -0.22014999999999674
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 10,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 594.9855,
+        "p95_us": 597.3856999999999,
+        "min_us": 594.131,
+        "max_us": 599.109
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 596.5225,
+          "p95_us": 597.1824,
+          "min_us": 595.457,
+          "max_us": 597.627
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 52.5565,
+          "p95_us": 53.072449999999996,
+          "min_us": 51.958,
+          "max_us": 53.157
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 649.2465,
+          "p95_us": 650.0858,
+          "min_us": 647.415,
+          "max_us": 650.519
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 649.2685,
+          "p95_us": 650.1078,
+          "min_us": 647.437,
+          "max_us": 650.541
+        },
+        "delta_vs_official_p50": 54.283000000000015,
+        "delta_vs_official_p95": 52.72210000000007,
+        "ratio_vs_official_p50": 1.0912341561264938,
+        "ratio_vs_official_p95": 1.0882547071347708,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2547,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2599,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2552,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2645,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2494,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2525,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2508,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2521,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2538,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2576,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 10,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2050
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 596.509,
+          "p95_us": 597.88185,
+          "min_us": 595.103,
+          "max_us": 600.463
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 60.8435,
+          "p95_us": 61.46005,
+          "min_us": 60.015,
+          "max_us": 61.48
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 657.5350000000001,
+          "p95_us": 659.05025,
+          "min_us": 655.929,
+          "max_us": 661.696
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 657.557,
+          "p95_us": 659.0722499999999,
+          "min_us": 655.951,
+          "max_us": 661.718
+        },
+        "delta_vs_official_p50": 62.571500000000015,
+        "delta_vs_official_p95": 61.68655000000001,
+        "ratio_vs_official_p50": 1.1051647477123392,
+        "ratio_vs_official_p95": 1.103260841362624,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2547,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2599,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2552,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2645,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2494,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2525,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2508,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2521,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2538,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2576,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 10,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2050
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -8.288499999999999,
+        "span_delta_p95": -8.964449999999943,
+        "span_ratio_p50": 0.9873950091018725,
+        "span_ratio_p95": 0.9863983804507018,
+        "plan_delta_p50": -8.286999999999999,
+        "plan_delta_p95": -8.387600000000006
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 11,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 174.47500000000002,
+        "p95_us": 174.99025,
+        "min_us": 173.667,
+        "max_us": 175.147
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 175.0435,
+          "p95_us": 176.26995,
+          "min_us": 174.174,
+          "max_us": 176.364
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 51.8485,
+          "p95_us": 52.311299999999996,
+          "min_us": 50.876,
+          "max_us": 52.526
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 98.54925000000013,
+          "min_us": 0.022,
+          "max_us": 263.132
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 226.85649999999998,
+          "p95_us": 227.9685,
+          "min_us": 225.778,
+          "max_us": 228.111
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 226.9135,
+          "p95_us": 326.46230000000014,
+          "min_us": 225.8,
+          "max_us": 490.913
+        },
+        "delta_vs_official_p50": 52.438499999999976,
+        "delta_vs_official_p95": 151.47205000000014,
+        "ratio_vs_official_p50": 1.3005502220948557,
+        "ratio_vs_official_p95": 1.865602797870168,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2411,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2501,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2466,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2536,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2422,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2442,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2455,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2475,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2460,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2500,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 11,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2256
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.902,
+          "p95_us": 175.82605,
+          "min_us": 174.074,
+          "max_us": 176.568
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 52.9585,
+          "p95_us": 53.3599,
+          "min_us": 52.649,
+          "max_us": 53.833
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 123.38520000000003,
+          "min_us": 0.022,
+          "max_us": 163.631
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 228.096,
+          "p95_us": 229.0884,
+          "min_us": 226.979,
+          "max_us": 229.59
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 228.3635,
+          "p95_us": 351.0657,
+          "min_us": 227.001,
+          "max_us": 393.221
+        },
+        "delta_vs_official_p50": 53.888499999999965,
+        "delta_vs_official_p95": 176.07545,
+        "ratio_vs_official_p50": 1.3088608683192433,
+        "ratio_vs_official_p95": 2.0062014883686374,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2411,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2501,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2466,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2536,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2422,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2442,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2455,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2475,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2460,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2500,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 11,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2256
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -1.4499999999999886,
+        "span_delta_p95": -24.60339999999985,
+        "span_ratio_p50": 0.99365047391549,
+        "span_ratio_p95": 0.9299179612249221,
+        "plan_delta_p50": -1.1099999999999994,
+        "plan_delta_p95": -1.0486000000000075
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 11,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 596.2405,
+        "p95_us": 596.8887,
+        "min_us": 594.94,
+        "max_us": 602.146
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 597.5455,
+          "p95_us": 598.40205,
+          "min_us": 596.4,
+          "max_us": 598.935
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 53.599000000000004,
+          "p95_us": 54.26935,
+          "min_us": 52.864,
+          "max_us": 54.58
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 651.149,
+          "p95_us": 652.1965,
+          "min_us": 649.853,
+          "max_us": 652.89
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 651.171,
+          "p95_us": 652.2185000000001,
+          "min_us": 649.875,
+          "max_us": 652.912
+        },
+        "delta_vs_official_p50": 54.93050000000005,
+        "delta_vs_official_p95": 55.32980000000009,
+        "ratio_vs_official_p50": 1.0921280926069263,
+        "ratio_vs_official_p95": 1.0926970136978638,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2504,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2594,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2535,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2617,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2478,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2508,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2532,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2551,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2525,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2578,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2569,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 11,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2256
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 597.452,
+          "p95_us": 598.61545,
+          "min_us": 596.407,
+          "max_us": 599.859
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 60.814499999999995,
+          "p95_us": 61.38525,
+          "min_us": 60.191,
+          "max_us": 61.618
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 658.202,
+          "p95_us": 659.3004500000001,
+          "min_us": 657.038,
+          "max_us": 660.753
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 658.2239999999999,
+          "p95_us": 659.32245,
+          "min_us": 657.06,
+          "max_us": 660.775
+        },
+        "delta_vs_official_p50": 61.983499999999935,
+        "delta_vs_official_p95": 62.43375000000003,
+        "ratio_vs_official_p50": 1.103957211896877,
+        "ratio_vs_official_p95": 1.1045986462802866,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2504,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2594,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2535,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2617,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2478,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2508,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2532,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2551,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2525,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2578,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2569,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 11,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2256
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -7.052999999999884,
+        "span_delta_p95": -7.103949999999941,
+        "span_ratio_p50": 0.9892848027419239,
+        "span_ratio_p95": 0.9892253782652176,
+        "plan_delta_p50": -7.215499999999992,
+        "plan_delta_p95": -7.115899999999996
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 12,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 174.4275,
+        "p95_us": 175.3777,
+        "min_us": 173.709,
+        "max_us": 176.455
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.88400000000001,
+          "p95_us": 175.9342,
+          "min_us": 174.221,
+          "max_us": 176.147
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 51.9445,
+          "p95_us": 52.390049999999995,
+          "min_us": 51.137,
+          "max_us": 52.657
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 6.755250000000097,
+          "min_us": 0.022,
+          "max_us": 134.687
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 226.925,
+          "p95_us": 228.09135,
+          "min_us": 225.877,
+          "max_us": 228.231
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 226.961,
+          "p95_us": 234.8797500000001,
+          "min_us": 225.899,
+          "max_us": 360.788
+        },
+        "delta_vs_official_p50": 52.533500000000004,
+        "delta_vs_official_p95": 59.50205000000008,
+        "ratio_vs_official_p50": 1.3011767066546274,
+        "ratio_vs_official_p95": 1.339279452290685,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2406,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2514,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2513,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2478,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2417,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2438,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2456,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2435,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2430,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2526,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2477,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2469,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 12,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2460
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 174.9765,
+          "p95_us": 176.31935000000001,
+          "min_us": 174.157,
+          "max_us": 176.687
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 53.296,
+          "p95_us": 53.704,
+          "min_us": 52.573,
+          "max_us": 53.951
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 14.672450000000005,
+          "min_us": 0.022,
+          "max_us": 20.571
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 228.24849999999998,
+          "p95_us": 229.22574999999998,
+          "min_us": 227.228,
+          "max_us": 230.057
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 228.2705,
+          "p95_us": 243.1522,
+          "min_us": 227.25,
+          "max_us": 249.597
+        },
+        "delta_vs_official_p50": 53.84299999999999,
+        "delta_vs_official_p95": 67.77449999999999,
+        "ratio_vs_official_p50": 1.308684123776354,
+        "ratio_vs_official_p95": 1.38644879023958,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2406,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2514,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2513,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2478,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2417,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2438,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2456,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2435,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2430,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2526,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2477,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2469,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 12,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2460
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -1.3094999999999857,
+        "span_delta_p95": -8.272449999999907,
+        "span_ratio_p50": 0.9942633848876662,
+        "span_ratio_p95": 0.9659783049464495,
+        "plan_delta_p50": -1.3515000000000015,
+        "plan_delta_p95": -1.3139500000000055
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 12,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 596.591,
+        "p95_us": 597.8651,
+        "min_us": 595.545,
+        "max_us": 598.513
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 598.039,
+          "p95_us": 599.4486,
+          "min_us": 596.545,
+          "max_us": 599.688
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 53.664500000000004,
+          "p95_us": 54.112199999999994,
+          "min_us": 52.967,
+          "max_us": 54.192
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 651.7215,
+          "p95_us": 652.98825,
+          "min_us": 650.092,
+          "max_us": 653.221
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 651.7435,
+          "p95_us": 653.01025,
+          "min_us": 650.114,
+          "max_us": 653.243
+        },
+        "delta_vs_official_p50": 55.15250000000003,
+        "delta_vs_official_p95": 55.14515000000006,
+        "ratio_vs_official_p50": 1.0924460811510734,
+        "ratio_vs_official_p95": 1.0922367771592623,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2462,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2598,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2581,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2545,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2465,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2487,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2537,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2498,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2598,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2551,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2544,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 12,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2460
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 597.9155000000001,
+          "p95_us": 599.2814999999999,
+          "min_us": 597.017,
+          "max_us": 599.671
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 61.2625,
+          "p95_us": 61.593900000000005,
+          "min_us": 60.48,
+          "max_us": 61.668
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 658.9794999999999,
+          "p95_us": 660.78905,
+          "min_us": 657.618,
+          "max_us": 660.98
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 659.0015000000001,
+          "p95_us": 660.81105,
+          "min_us": 657.64,
+          "max_us": 661.002
+        },
+        "delta_vs_official_p50": 62.41050000000007,
+        "delta_vs_official_p95": 62.94595000000004,
+        "ratio_vs_official_p50": 1.1046118697734295,
+        "ratio_vs_official_p95": 1.1052845365952955,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2462,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2598,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2581,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2545,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2465,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2487,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2537,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2498,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2598,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2551,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2544,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 12,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2460
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -7.258000000000038,
+        "span_delta_p95": -7.800799999999981,
+        "span_ratio_p50": 0.9889863680128194,
+        "span_ratio_p95": 0.9881951126573928,
+        "plan_delta_p50": -7.597999999999999,
+        "plan_delta_p95": -7.481700000000011
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 13,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 174.85500000000002,
+        "p95_us": 175.5205,
+        "min_us": 174.073,
+        "max_us": 175.815
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 175.614,
+          "p95_us": 176.65324999999999,
+          "min_us": 174.504,
+          "max_us": 177.095
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 52.053,
+          "p95_us": 52.5421,
+          "min_us": 51.331,
+          "max_us": 53.057
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 227.585,
+          "p95_us": 228.84179999999998,
+          "min_us": 226.623,
+          "max_us": 229.047
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 227.607,
+          "p95_us": 228.8638,
+          "min_us": 226.645,
+          "max_us": 229.069
+        },
+        "delta_vs_official_p50": 52.75199999999998,
+        "delta_vs_official_p95": 53.3433,
+        "ratio_vs_official_p50": 1.3016899716908295,
+        "ratio_vs_official_p95": 1.3039149273161825,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2409,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2483,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2491,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2457,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2412,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2445,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2443,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2442,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2469,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2512,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2455,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2502,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2429,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 13,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2666
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 175.09050000000002,
+          "p95_us": 175.99635,
+          "min_us": 174.372,
+          "max_us": 176.25
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 55.1815,
+          "p95_us": 55.60575,
+          "min_us": 54.24,
+          "max_us": 55.639
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 15.715000000000224,
+          "min_us": 0.022,
+          "max_us": 313.882
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 230.2615,
+          "p95_us": 231.24880000000002,
+          "min_us": 229.23,
+          "max_us": 231.283
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 230.305,
+          "p95_us": 246.91135000000023,
+          "min_us": 229.252,
+          "max_us": 543.432
+        },
+        "delta_vs_official_p50": 55.44999999999999,
+        "delta_vs_official_p95": 71.39085000000023,
+        "ratio_vs_official_p50": 1.3171198993451716,
+        "ratio_vs_official_p95": 1.406737959383663,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2409,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2483,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2491,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2457,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2412,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2445,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2443,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2442,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2469,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2512,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2455,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2502,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2429,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 13,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2666
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -2.6980000000000075,
+        "span_delta_p95": -18.04755000000023,
+        "span_ratio_p50": 0.988285100193222,
+        "span_ratio_p95": 0.9269067622853295,
+        "plan_delta_p50": -3.1285000000000025,
+        "plan_delta_p95": -3.0636500000000026
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 13,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 621.4785,
+        "p95_us": 641.2797,
+        "min_us": 616.71,
+        "max_us": 652.902
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 618.886,
+          "p95_us": 661.8503999999999,
+          "min_us": 598.559,
+          "max_us": 666.285
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 63.2265,
+          "p95_us": 97.36975,
+          "min_us": 53.981,
+          "max_us": 99.987
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 681.9975,
+          "p95_us": 730.55445,
+          "min_us": 652.884,
+          "max_us": 732.767
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 682.0195,
+          "p95_us": 730.57645,
+          "min_us": 652.906,
+          "max_us": 732.789
+        },
+        "delta_vs_official_p50": 60.54099999999994,
+        "delta_vs_official_p95": 89.29674999999997,
+        "ratio_vs_official_p50": 1.0974144721016093,
+        "ratio_vs_official_p95": 1.1392477416640507,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2508,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2558,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2553,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2556,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2511,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2505,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2503,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2547,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2647,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2521,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2567,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2465,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 13,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2665
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 629.9665,
+          "p95_us": 659.87735,
+          "min_us": 614.822,
+          "max_us": 661.746
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 68.4985,
+          "p95_us": 95.94825,
+          "min_us": 61.383,
+          "max_us": 96.694
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 706.4915000000001,
+          "p95_us": 729.6663,
+          "min_us": 676.301,
+          "max_us": 730.47
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 706.5135,
+          "p95_us": 729.6882999999999,
+          "min_us": 676.323,
+          "max_us": 730.492
+        },
+        "delta_vs_official_p50": 85.03499999999997,
+        "delta_vs_official_p95": 88.40859999999986,
+        "ratio_vs_official_p50": 1.1368269376977642,
+        "ratio_vs_official_p95": 1.1378627765700362,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2508,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2558,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2553,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2556,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2511,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2505,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2503,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2510,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2547,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2647,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2521,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2567,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2465,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 13,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2665
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -24.494000000000028,
+        "span_delta_p95": 0.8881500000001097,
+        "span_ratio_p50": 0.9653311649388157,
+        "span_ratio_p95": 1.001217163547778,
+        "plan_delta_p50": -5.272000000000006,
+        "plan_delta_p95": 1.4214999999999947
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 14,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 201.6825,
+        "p95_us": 235.80465,
+        "min_us": 194.42,
+        "max_us": 247.977
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 201.9735,
+          "p95_us": 238.11984999999999,
+          "min_us": 175.575,
+          "max_us": 249.84
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 87.321,
+          "p95_us": 99.42735,
+          "min_us": 52.304,
+          "max_us": 102.968
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 24.519800000000348,
+          "min_us": 0.022,
+          "max_us": 489.978
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 294.7815,
+          "p95_us": 325.0857,
+          "min_us": 233.189,
+          "max_us": 334.884
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 294.85249999999996,
+          "p95_us": 354.3190500000003,
+          "min_us": 248.009,
+          "max_us": 723.167
+        },
+        "delta_vs_official_p50": 93.16999999999996,
+        "delta_vs_official_p95": 118.51440000000028,
+        "ratio_vs_official_p50": 1.4619637301203623,
+        "ratio_vs_official_p95": 1.5025956867262806,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2425,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2509,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2478,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2471,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2439,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2426,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2449,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2423,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2523,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2538,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2428,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2480,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2434,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2527,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 14,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2873
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 203.877,
+          "p95_us": 251.4228,
+          "min_us": 193.719,
+          "max_us": 252.806
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 89.0775,
+          "p95_us": 96.2751,
+          "min_us": 54.926,
+          "max_us": 96.695
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 294.985,
+          "p95_us": 341.1532,
+          "min_us": 248.645,
+          "max_us": 344.254
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 295.007,
+          "p95_us": 341.1752,
+          "min_us": 248.667,
+          "max_us": 344.276
+        },
+        "delta_vs_official_p50": 93.3245,
+        "delta_vs_official_p95": 105.37055000000001,
+        "ratio_vs_official_p50": 1.462729785677984,
+        "ratio_vs_official_p95": 1.446855267697223,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2425,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2509,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2478,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2471,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2439,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2426,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2449,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2423,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2523,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2538,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2428,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2480,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2434,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2527,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 14,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2873
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -0.15450000000004138,
+        "span_delta_p95": 13.14385000000027,
+        "span_ratio_p50": 0.9994762836136091,
+        "span_ratio_p95": 1.0385252210594447,
+        "plan_delta_p50": -1.7565000000000026,
+        "plan_delta_p95": 3.1522500000000093
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 14,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 624.3969999999999,
+        "p95_us": 673.4662,
+        "min_us": 616.133,
+        "max_us": 675.636
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 631.6155,
+          "p95_us": 664.53125,
+          "min_us": 602.198,
+          "max_us": 667.519
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 73.22900000000001,
+          "p95_us": 88.4926,
+          "min_us": 56.443,
+          "max_us": 89.454
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 712.9805,
+          "p95_us": 741.3234000000001,
+          "min_us": 673.863,
+          "max_us": 741.483
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 713.0025,
+          "p95_us": 741.3454,
+          "min_us": 673.885,
+          "max_us": 741.505
+        },
+        "delta_vs_official_p50": 88.60550000000012,
+        "delta_vs_official_p95": 67.87920000000008,
+        "ratio_vs_official_p50": 1.1419057106296158,
+        "ratio_vs_official_p95": 1.1007908043492014,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2501,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2566,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2540,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2563,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2475,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2528,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2542,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2505,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2583,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2617,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2500,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2533,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2492,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2577,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 14,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2870
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 633.5630000000001,
+          "p95_us": 656.67715,
+          "min_us": 617.682,
+          "max_us": 663.862
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 91.54650000000001,
+          "p95_us": 95.32175000000001,
+          "min_us": 73.889,
+          "max_us": 96.001
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 725.668,
+          "p95_us": 749.8299499999999,
+          "min_us": 693.104,
+          "max_us": 752.888
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 725.69,
+          "p95_us": 749.85195,
+          "min_us": 693.126,
+          "max_us": 752.91
+        },
+        "delta_vs_official_p50": 101.29300000000012,
+        "delta_vs_official_p95": 76.38575000000003,
+        "ratio_vs_official_p50": 1.1622253149838966,
+        "ratio_vs_official_p95": 1.1134218020147113,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2501,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2566,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2540,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2563,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2475,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2528,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2542,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2505,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2583,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2617,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2500,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2533,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2492,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2577,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 14,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 2870
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -12.6875,
+        "span_delta_p95": -8.506549999999947,
+        "span_ratio_p50": 0.9825166393363557,
+        "span_ratio_p95": 0.9886556939673226,
+        "plan_delta_p50": -18.317499999999995,
+        "plan_delta_p95": -6.829150000000013
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 15,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 214.11599999999999,
+        "p95_us": 499.7357500000001,
+        "min_us": 175.506,
+        "max_us": 590.969
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 212.849,
+          "p95_us": 509.6104,
+          "min_us": 176.246,
+          "max_us": 531.335
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 85.561,
+          "p95_us": 140.48940000000022,
+          "min_us": 52.317,
+          "max_us": 452.952
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 306.706,
+          "p95_us": 628.7528000000001,
+          "min_us": 228.902,
+          "max_us": 827.375
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 306.72799999999995,
+          "p95_us": 628.7748000000001,
+          "min_us": 228.924,
+          "max_us": 827.397
+        },
+        "delta_vs_official_p50": 92.61199999999997,
+        "delta_vs_official_p95": 129.03905000000003,
+        "ratio_vs_official_p50": 1.4325318985970221,
+        "ratio_vs_official_p95": 1.2582145663983415,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2430,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2498,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2493,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2438,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2448,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2502,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2476,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2433,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2530,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2542,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2440,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2451,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2436,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2527,
+              "path": "joint"
+            },
+            {
+              "first": 56,
+              "end": 60,
+              "union": 2463,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 15,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 3076
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 231.802,
+          "p95_us": 100314.02375000142,
+          "min_us": 176.863,
+          "max_us": 1996137.192
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 89.5455,
+          "p95_us": 461.67285,
+          "min_us": 55.173,
+          "max_us": 467.997
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 378.71799999999996,
+          "p95_us": 100558.99575000141,
+          "min_us": 232.176,
+          "max_us": 1996301.775
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 378.74,
+          "p95_us": 100559.01775000141,
+          "min_us": 232.198,
+          "max_us": 1996301.797
+        },
+        "delta_vs_official_p50": 164.62400000000002,
+        "delta_vs_official_p95": 100059.2820000014,
+        "ratio_vs_official_p50": 1.7688542659119357,
+        "ratio_vs_official_p95": 201.2243825861996,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2430,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2498,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2493,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2438,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2448,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2502,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2476,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2433,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2530,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2542,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2440,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2451,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2436,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2527,
+              "path": "joint"
+            },
+            {
+              "first": 56,
+              "end": 60,
+              "union": 2463,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 15,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 3076
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -72.01200000000006,
+        "span_delta_p95": -99930.24295000141,
+        "span_ratio_p50": 0.8098642868458572,
+        "span_ratio_p95": 0.006252793772938294,
+        "plan_delta_p50": -3.984499999999997,
+        "plan_delta_p95": -321.18344999999977
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 15,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 601.3615,
+        "p95_us": 628.6049000000004,
+        "min_us": 600.21,
+        "max_us": 1114.927
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 603.4704999999999,
+          "p95_us": 943.54215,
+          "min_us": 601.583,
+          "max_us": 970.563
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 53.692499999999995,
+          "p95_us": 114.09925000000047,
+          "min_us": 52.714,
+          "max_us": 723.985
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 0.022,
+          "min_us": 0.022,
+          "max_us": 0.022
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 657.1245,
+          "p95_us": 1083.2401000000004,
+          "min_us": 654.947,
+          "max_us": 1666.105
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 657.1465000000001,
+          "p95_us": 1083.2621000000004,
+          "min_us": 654.969,
+          "max_us": 1666.127
+        },
+        "delta_vs_official_p50": 55.78500000000008,
+        "delta_vs_official_p95": 454.6572,
+        "ratio_vs_official_p50": 1.092764501884474,
+        "ratio_vs_official_p95": 1.7232797580801544,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2520,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2588,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2580,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2515,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2514,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2595,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2555,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2500,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2579,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2650,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2545,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2554,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2477,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2570,
+              "path": "joint"
+            },
+            {
+              "first": 56,
+              "end": 60,
+              "union": 2498,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 15,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 3076
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 603.0035,
+          "p95_us": 628.5890000000002,
+          "min_us": 601.716,
+          "max_us": 822.579
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 61.716,
+          "p95_us": 63.659700000000015,
+          "min_us": 61.177,
+          "max_us": 90.14
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 13.583750000000194,
+          "min_us": 0.022,
+          "max_us": 271.257
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 664.5509999999999,
+          "p95_us": 692.0064500000002,
+          "min_us": 663.191,
+          "max_us": 912.719
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 664.624,
+          "p95_us": 913.8691,
+          "min_us": 663.213,
+          "max_us": 935.303
+        },
+        "delta_vs_official_p50": 63.262500000000045,
+        "delta_vs_official_p95": 285.2641999999996,
+        "ratio_vs_official_p50": 1.1051987864204809,
+        "ratio_vs_official_p95": 1.4538052439616673,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2520,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2588,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2580,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2515,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2514,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2595,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2555,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2500,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2579,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2650,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2545,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2554,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2477,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2570,
+              "path": "joint"
+            },
+            {
+              "first": 56,
+              "end": 60,
+              "union": 2498,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 15,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 3076
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -7.477499999999964,
+        "span_delta_p95": 169.39300000000037,
+        "span_ratio_p50": 0.9887492777871398,
+        "span_ratio_p95": 1.1853580562030168,
+        "plan_delta_p50": -8.023500000000006,
+        "plan_delta_p95": 50.43955000000045
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 16,
+      "context": 102400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 504.52200000000005,
+        "p95_us": 659.3913000000001,
+        "min_us": 192.682,
+        "max_us": 729.507
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 347.339,
+          "p95_us": 684.6220000000001,
+          "min_us": 185.55,
+          "max_us": 753.611
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 111.8015,
+          "p95_us": 596.8500000000003,
+          "min_us": 53.473,
+          "max_us": 920.325
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 41.286450000000045,
+          "min_us": 0.022,
+          "max_us": 102.532
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 491.5865,
+          "p95_us": 835.1249500000006,
+          "min_us": 239.023,
+          "max_us": 1673.936
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 510.629,
+          "p95_us": 910.2587000000005,
+          "min_us": 239.045,
+          "max_us": 1673.958
+        },
+        "delta_vs_official_p50": 6.106999999999971,
+        "delta_vs_official_p95": 250.86740000000043,
+        "ratio_vs_official_p50": 1.012104526660879,
+        "ratio_vs_official_p95": 1.3804530026404662,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2425,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2516,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2484,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2433,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2444,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2444,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2506,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2426,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2462,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2490,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2437,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2450,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2424,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2468,
+              "path": "joint"
+            },
+            {
+              "first": 56,
+              "end": 60,
+              "union": 2475,
+              "path": "joint"
+            },
+            {
+              "first": 60,
+              "end": 64,
+              "union": 2528,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 16,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 3282
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 407.296,
+          "p95_us": 654.0644000000002,
+          "min_us": 180.18,
+          "max_us": 839.189
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 110.667,
+          "p95_us": 576.3332,
+          "min_us": 55.08,
+          "max_us": 587.243
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 4.119900000000058,
+          "min_us": 0.022,
+          "max_us": 81.98
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 519.855,
+          "p95_us": 961.4263500000002,
+          "min_us": 238.747,
+          "max_us": 1220.08
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 519.877,
+          "p95_us": 961.4483500000002,
+          "min_us": 290.38,
+          "max_us": 1220.102
+        },
+        "delta_vs_official_p50": 15.354999999999905,
+        "delta_vs_official_p95": 302.0570500000001,
+        "ratio_vs_official_p50": 1.030434748137841,
+        "ratio_vs_official_p95": 1.4580846759731287,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2425,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2516,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2484,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2433,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2444,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2444,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2506,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2426,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2462,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2490,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2437,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2450,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2424,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2468,
+              "path": "joint"
+            },
+            {
+              "first": 56,
+              "end": 60,
+              "union": 2475,
+              "path": "joint"
+            },
+            {
+              "first": 60,
+              "end": 64,
+              "union": 2528,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 16,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            206,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 3282
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -9.247999999999934,
+        "span_delta_p95": -51.18964999999969,
+        "span_ratio_p50": 0.9822111768745301,
+        "span_ratio_p95": 0.9467577743515815,
+        "plan_delta_p50": 1.1345000000000027,
+        "plan_delta_p95": 20.516800000000217
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    },
+    {
+      "batch": 16,
+      "context": 358400,
+      "official_indexer": {
+        "count": 20,
+        "p50_us": 604.336,
+        "p95_us": 606.0313,
+        "min_us": 602.53,
+        "max_us": 606.075
+      },
+      "ordered_bitmap_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 606.009,
+          "p95_us": 607.115,
+          "min_us": 604.219,
+          "max_us": 607.115
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 53.634,
+          "p95_us": 54.4074,
+          "min_us": 52.99,
+          "max_us": 54.529
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 7.360750000000105,
+          "min_us": 0.022,
+          "max_us": 146.797
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 659.5855,
+          "p95_us": 660.9783,
+          "min_us": 657.241,
+          "max_us": 661.516
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 659.6075,
+          "p95_us": 668.8187500000001,
+          "min_us": 657.263,
+          "max_us": 807.153
+        },
+        "delta_vs_official_p50": 55.271499999999946,
+        "delta_vs_official_p95": 62.78745000000015,
+        "ratio_vs_official_p50": 1.0914582285351195,
+        "ratio_vs_official_p95": 1.1036043022860373,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2506,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2597,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2529,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2531,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2516,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2523,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2546,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2480,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2542,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2581,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2532,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2537,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2465,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2579,
+              "path": "joint"
+            },
+            {
+              "first": 56,
+              "end": 60,
+              "union": 2518,
+              "path": "joint"
+            },
+            {
+              "first": 60,
+              "end": 64,
+              "union": 2599,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 16,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 3280
+        }
+      },
+      "ordered_legacy_bt_plan": {
+        "indexer": {
+          "count": 20,
+          "p50_us": 605.9475,
+          "p95_us": 607.3827,
+          "min_us": 604.633,
+          "max_us": 609.201
+        },
+        "plan": {
+          "count": 20,
+          "p50_us": 61.792500000000004,
+          "p95_us": 62.495400000000004,
+          "min_us": 61.357,
+          "max_us": 63.586
+        },
+        "gap": {
+          "count": 20,
+          "p50_us": 0.022,
+          "p95_us": 212.67515000000006,
+          "min_us": 0.022,
+          "max_us": 262.097
+        },
+        "busy": {
+          "count": 20,
+          "p50_us": 667.6985,
+          "p95_us": 670.8764500000001,
+          "min_us": 666.44,
+          "max_us": 670.942
+        },
+        "span": {
+          "count": 20,
+          "p50_us": 667.7204999999999,
+          "p95_us": 880.8911,
+          "min_us": 666.462,
+          "max_us": 930.445
+        },
+        "delta_vs_official_p50": 63.38449999999989,
+        "delta_vs_official_p95": 274.85980000000006,
+        "ratio_vs_official_p50": 1.1048828797225383,
+        "ratio_vs_official_p95": 1.4535406009557594,
+        "checks": {
+          "status": "passed",
+          "groups": [
+            {
+              "first": 0,
+              "end": 4,
+              "union": 2506,
+              "path": "joint"
+            },
+            {
+              "first": 4,
+              "end": 8,
+              "union": 2597,
+              "path": "joint"
+            },
+            {
+              "first": 8,
+              "end": 12,
+              "union": 2529,
+              "path": "joint"
+            },
+            {
+              "first": 12,
+              "end": 16,
+              "union": 2531,
+              "path": "joint"
+            },
+            {
+              "first": 16,
+              "end": 20,
+              "union": 2516,
+              "path": "joint"
+            },
+            {
+              "first": 20,
+              "end": 24,
+              "union": 2523,
+              "path": "joint"
+            },
+            {
+              "first": 24,
+              "end": 28,
+              "union": 2546,
+              "path": "joint"
+            },
+            {
+              "first": 28,
+              "end": 32,
+              "union": 2480,
+              "path": "joint"
+            },
+            {
+              "first": 32,
+              "end": 36,
+              "union": 2542,
+              "path": "joint"
+            },
+            {
+              "first": 36,
+              "end": 40,
+              "union": 2581,
+              "path": "joint"
+            },
+            {
+              "first": 40,
+              "end": 44,
+              "union": 2532,
+              "path": "joint"
+            },
+            {
+              "first": 44,
+              "end": 48,
+              "union": 2537,
+              "path": "joint"
+            },
+            {
+              "first": 48,
+              "end": 52,
+              "union": 2465,
+              "path": "joint"
+            },
+            {
+              "first": 52,
+              "end": 56,
+              "union": 2579,
+              "path": "joint"
+            },
+            {
+              "first": 56,
+              "end": 60,
+              "union": 2518,
+              "path": "joint"
+            },
+            {
+              "first": 60,
+              "end": 64,
+              "union": 2599,
+              "path": "joint"
+            }
+          ],
+          "joint_groups": 16,
+          "single_sorted_groups": 0,
+          "descriptor_tail_contract": "original contract",
+          "overflow_groups": 0,
+          "miss_count_per_row": [
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0,
+            205,
+            0,
+            0,
+            0
+          ],
+          "total_transfer_descriptors": 3280
+        }
+      },
+      "bitmap_vs_legacy": {
+        "span_delta_p50": -8.112999999999943,
+        "span_delta_p95": -212.07234999999991,
+        "span_ratio_p50": 0.9878497065763295,
+        "span_ratio_p95": 0.7592524774061176,
+        "plan_delta_p50": -8.158500000000004,
+        "plan_delta_p95": -8.088000000000001
+      },
+      "actual_hit_positions_per_row": 1843,
+      "actual_miss_positions_per_row": 205
+    }
+  ]
+}

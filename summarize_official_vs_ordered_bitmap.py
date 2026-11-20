@@ -101,8 +101,9 @@ for batch in BATCHES:
         plan_library_sha256 = environment["plan_library_sha256"]
     artifact_index[str(metadata_path.relative_to(ROOT))] = digest(metadata_path)
     environment["qli_s1_base_by_implementation"].update(metadata.get("qli_s1_base_by_implementation", {}))
-    kernel_inventory.update(metadata.get("kernel_inventory", []))
+    kernel_inventory.update(metadata.get("kernel_inventory") or [])
     for case in metadata["cases"]:
+        kernel_inventory.update(case.get("kernel_inventory") or [])
         if case["context"] not in CONTEXTS or case["scenario"] != "full_cache_90pct":
             continue
         stats = case["statistics"]

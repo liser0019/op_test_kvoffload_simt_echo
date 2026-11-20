@@ -1,0 +1,124 @@
+{
+  "status": "complete",
+  "cases": [
+    {
+      "tag": "batch8/context102400",
+      "metadata": "batch8/capture_metadata.json"
+    },
+    {
+      "tag": "batch8/context358400",
+      "metadata": "batch8/capture_metadata.json"
+    },
+    {
+      "tag": "batch9/context102400",
+      "metadata": "batch9/capture_metadata.json"
+    },
+    {
+      "tag": "batch9/context358400",
+      "metadata": "batch9/capture_metadata.json"
+    },
+    {
+      "tag": "batch10/context102400",
+      "metadata": "batch10/capture_metadata.json"
+    },
+    {
+      "tag": "batch10/context358400",
+      "metadata": "batch10/capture_metadata.json"
+    },
+    {
+      "tag": "batch11/context102400",
+      "metadata": "batch11/capture_metadata.json"
+    },
+    {
+      "tag": "batch11/context358400",
+      "metadata": "batch11/capture_metadata.json"
+    },
+    {
+      "tag": "batch12/context102400",
+      "metadata": "batch12/capture_metadata.json"
+    },
+    {
+      "tag": "batch12/context358400",
+      "metadata": "batch12/capture_metadata.json"
+    },
+    {
+      "tag": "batch13/context102400",
+      "metadata": "batch13/capture_metadata.json"
+    },
+    {
+      "tag": "batch13/context358400",
+      "metadata": "batch13/capture_metadata.json"
+    },
+    {
+      "tag": "batch14/context102400",
+      "metadata": "batch14/capture_metadata.json"
+    },
+    {
+      "tag": "batch14/context358400",
+      "metadata": "batch14/capture_metadata.json"
+    },
+    {
+      "tag": "batch15/context102400",
+      "metadata": "batch15/capture_metadata.json"
+    },
+    {
+      "tag": "batch15/context358400",
+      "metadata": "batch15/capture_metadata.json"
+    },
+    {
+      "tag": "batch16/context102400",
+      "metadata": "batch16/capture_metadata.json"
+    },
+    {
+      "tag": "batch16/context358400",
+      "metadata": "batch16/capture_metadata.json"
+    }
+  ],
+  "artifacts": {
+    "batch8/capture_metadata.json": "e3f80153d80723a100ab56b3ed5ca38293bc7d6840c42ef3c1af5a079f079924",
+    "batch8/context102400_mtp3_full_cache_90pct/samples.csv": "739557e222839235ecb4e501d62840c5e0d283b66737ccd6402cdd65518ffeb9",
+    "batch8/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2253124_20261120181800162_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "c6c7018892d6104e116a44ca09feea9962cae65821525873219221abf2ad6b9c",
+    "batch8/context358400_mtp3_full_cache_90pct/samples.csv": "790e7a2d6ba8fcb8c485944084b16ad530b2e6af7fa94c7615066f580cd8274f",
+    "batch8/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2253124_20261120181816321_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "b5254f81683f48c4a4190f61f49d544a3b12bb70b3a0099cebce85cf5904daed",
+    "batch9/capture_metadata.json": "076efd7073c122ea014523a5d2ff308268b51894d0140e2f7673fd38e32307f0",
+    "batch9/context102400_mtp3_full_cache_90pct/samples.csv": "ac6f41ea16615dc18c934757f2a4fbdfe36f6d03026001dc00d04c824b9d5ef0",
+    "batch9/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2256153_20261120181848499_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "7d825848407dce118fd3fcaea6e8ccea6253c6976baed0562391686bc0b74713",
+    "batch9/context358400_mtp3_full_cache_90pct/samples.csv": "db7d649159b472d8ace3ebbcd7e6066017b0175088d07a0c9fd3fe252339f4bd",
+    "batch9/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2256153_20261120181906216_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "b28e93ca70744d02bc29bf957f09487f3d25b45bb798f23bdaef4b72e75da120",
+    "batch10/capture_metadata.json": "2350041c6715d4386bc5b5983c8e98da61cf369ca38d98b19b6a8ec0ce75c502",
+    "batch10/context102400_mtp3_full_cache_90pct/samples.csv": "3ef7ceaf900b85ec4df92e5b89e96b87ec13034f1ef55508d2c6283de083a8f6",
+    "batch10/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2259036_20261120181935173_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "5a48d192e540548148635da9c69a4e1c201b89b605b6dcba578bc21fa796ab39",
+    "batch10/context358400_mtp3_full_cache_90pct/samples.csv": "c2a3106bf334ed9bdc5c116d8194810e43c1bef8097c2db2d859a00b4c33f553",
+    "batch10/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2259036_20261120181954464_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "5e47f8bb4da9ca6932eb1f55ba3f7f1a1cc631dc3c70a26ce66888327e795270",
+    "batch11/capture_metadata.json": "114ccf99b1a6c13c12849c3189101f1b922b06b3ad7db5edebdd1f68f40f8383",
+    "batch11/context102400_mtp3_full_cache_90pct/samples.csv": "daeb7b3b7f0448148341b86820ed149cef214145c8d41062b7ba1e6bf0d6dba8",
+    "batch11/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2262214_20261120182028389_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "c976d0e191fa10f6f6791d5369578bc4b8e7469f9fe60c0f6df467eccf665093",
+    "batch11/context358400_mtp3_full_cache_90pct/samples.csv": "68765af5aea762c95567b51b722052139b6966ae649304e0c4e331dfac77e4a0",
+    "batch11/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2262214_20261120182049403_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "464d9646729acfb6e7318c03c226127f11854ac51ec56c68c288006acb7a2884",
+    "batch12/capture_metadata.json": "69215db5f6c01898879ca9ab2e0224d1cfb88685ae4aa1250ca8cb7bd0e40564",
+    "batch12/context102400_mtp3_full_cache_90pct/samples.csv": "7ae1f17bccdf189671251576557f907493487211808338909267c5e0d25478dd",
+    "batch12/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2265305_20261120182124368_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "d2884c67c43ebc525106011a7d180c17e827b77672a822540111622df00f0257",
+    "batch12/context358400_mtp3_full_cache_90pct/samples.csv": "666e14319384e788c7ccfbdb1254aff0b9077724835b1e0087fc847b585efb29",
+    "batch12/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2265305_20261120182146955_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "227908d83ce05f133f258530f4d633576493fda05fdea4cab9a9df16ef311ef2",
+    "batch13/capture_metadata.json": "d8c25d5aed80bd6606120b8974f0f672a5ce96baf0c2566d5a170c10546cbbca",
+    "batch13/context102400_mtp3_full_cache_90pct/samples.csv": "11a563537e7126b5a313b359c2dd557d43185424537b5b27db10d37f7d15ffb3",
+    "batch13/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2268545_20261120182223162_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "6b98b7c998cfa5f1856d02fd3922f21f052eaad8d00402c09cd79c808f7c1a56",
+    "batch13/context358400_mtp3_full_cache_90pct/samples.csv": "b01c3d66df0f32f3b1ce2c0400e9930920ffa09a64a1f9e1701af8c9eb3d9102",
+    "batch13/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2268545_20261120182245607_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "12532e921aaca6df794e29c43fc5f66551ace364d4f7e632f2a14c3ae2692f36",
+    "batch14/capture_metadata.json": "feb3d1e7e3b9cbaaa48698911aa95fa1b453d2c3e27a01c6dbb6fb858dc193cb",
+    "batch14/context102400_mtp3_full_cache_90pct/samples.csv": "78a32850507555c9e99446520833ed80bd682c5a865e53047d6a90e1fbe4459e",
+    "batch14/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2271767_20261120182317818_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "273c0e264eef0d26189ccb0bd1341b9a82aa5550c5f2f09aba8777c4dd5faec0",
+    "batch14/context358400_mtp3_full_cache_90pct/samples.csv": "6778ea05fd2e160ff6c42f86c92814f9f1f5c8cffc1e69ea701055e7ce3b52a6",
+    "batch14/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2271767_20261120182341174_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "77eee88f17768d0078df928ced88b3a8c8312aef5ce19423e37eb6cf4df389a7",
+    "batch15/capture_metadata.json": "6d406a24bd75a2af1db1bfc6bb19e99f05e5646f0b5f41e4205ccdeb6977c54d",
+    "batch15/context102400_mtp3_full_cache_90pct/samples.csv": "467f9f1087a7decc060bbb1897e0ac2f9a4aa47ab545f64a3200346d3db52585",
+    "batch15/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2274965_20261120182415066_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "07a44bde5cd7a972d9fdd3f29ed53ce67c1928b3eb08673cf03ee5350607efe9",
+    "batch15/context358400_mtp3_full_cache_90pct/samples.csv": "802d18b667213baac3e5781a4237e7e30d9ce46d262c3b39cf3205921c5e1696",
+    "batch15/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2274965_20261120182442206_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "76129bf6002f2f92e74d15cc37d8fc9a8c58e7a5a53edb33a7ed76d4803fa3ef",
+    "batch16/capture_metadata.json": "b0973c8dd99c549760df6620375a84860cb083221d11abb9abe5c85f8780268c",
+    "batch16/context102400_mtp3_full_cache_90pct/samples.csv": "b5c72f3d9c61638706817b874d8936c5cd54275302fda3b6c30a564aa025d5f9",
+    "batch16/context102400_mtp3_full_cache_90pct/trace/localhost.localdomain_2279013_20261120182519500_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "b93d108101cb5bbc06db3560675e5babf12fd607412b85535e34167e50ff5d40",
+    "batch16/context358400_mtp3_full_cache_90pct/samples.csv": "85984508c668a4a415d5427ae95788a95589cc82bfebac0e36577af6d439e070",
+    "batch16/context358400_mtp3_full_cache_90pct/trace/localhost.localdomain_2279013_20261120182545326_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "02d66d13d3c87dcc6a506a45b658bb18bfdfd8348e53392cd6efdaa0fa4beb20"
+  }
+}
